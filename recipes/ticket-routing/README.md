@@ -1,26 +1,30 @@
-# StreamWave ticket routing — Phase 1
+# StreamWave ticket routing
 
-This recipe uses Cadence to route fictional customer-support tickets for StreamWave, a fictional streaming service. A mock Jev classifier assigns a department, priority, and complexity; the parent Workflow then starts the matching department Child Workflow, which assigns a fixed fictional employee.
+This recipe uses Cadence to route fictional customer-support tickets for StreamWave, a fictional streaming service. A classifier assigns a department, priority, and complexity; the parent Workflow then starts the matching department Child Workflow, which assigns a fixed fictional employee.
 
-Phase 1 demonstrates the smallest durable architecture: external classification work runs in an Activity, routing stays deterministic in Workflow code, department handling is isolated in Child Workflows, and typed results flow through the complete execution. The mock makes no network calls and needs no AI credentials.
+Phase 2 supports two classifier modes:
+
+- `mock` is the default. It uses repeatable keyword rules, makes no network calls, and needs no credentials. Its confidence values are illustrative—not model quality, accuracy, token usage, or cost measurements.
+- `jev` is an explicit opt-in. It sends one request containing three independent Choice questions to TypeSafe System One and records the returned choices, probability distributions, confidence values, model identifier, and token usage.
 
 ## Architecture
 
 ```text
 TicketIntakeWorkflow
-  → ClassifyTicket Activity (mock Jev)
+  → ClassifyTicket Activity (mock or real Jev)
   → Billing | Technical | Account | Content Child Workflow
   → fixed fictional employee assignment
   → TicketResult (ASSIGNED or UNROUTABLE)
 ```
 
-The mock uses documented keyword rules so its output is repeatable. Its confidence values are illustrative and are not model quality, accuracy, token usage, or cost measurements.
+External classification runs in a Cadence Activity. Workflow code uses only the recorded typed result, so replay does not call the provider again after a successful Activity result has been persisted.
 
 ## Requirements
 
 - Go 1.23 or newer.
-- A local Cadence server for the runnable demonstration.
+- A local Cadence server for the runnable demonstrations.
 - A registered Cadence domain named `cadence-ai-samples`.
+- A TypeSafe API key only for the optional live demonstration.
 
 The Cadence project's public Docker Compose configuration can run a local server and Cadence Web. From a separate clone of [cadence-workflow/cadence](https://github.com/cadence-workflow/cadence):
 
@@ -29,9 +33,9 @@ docker compose -f docker/docker-compose.yml up -d
 cadence --domain cadence-ai-samples domain register
 ```
 
-Cadence Web is normally available at <http://localhost:8088>. Unit tests use the SDK test environment and do not need a server.
+Cadence Web is normally available at <http://localhost:8088>. Unit tests use the SDK test environment and local HTTP test servers; they do not need a Cadence server, Jev credentials, or paid API calls.
 
-## Run the example
+## Run with the mock classifier
 
 From the repository root, change into the Go module directory in two PowerShell terminals:
 
@@ -39,37 +43,98 @@ From the repository root, change into the Go module directory in two PowerShell 
 Set-Location .\recipes\ticket-routing\go
 ```
 
-Start the worker in the first terminal:
+The mock is selected when `AI_PROVIDER` is unset or set to `mock`. Start the worker in the first terminal:
 
 ```powershell
+$env:AI_PROVIDER = "mock"
 go run . -mode worker
 ```
 
-Run four fictional example tickets in the second terminal:
+Run the four fictional Phase 1 tickets in the second terminal:
 
 ```powershell
 go run . -mode demo
 ```
 
-The demo prints each incoming request, its mock classification, selected department Child Workflow, assigned employee, and completed result. Use `-address`, `-domain`, or `-task-list` to override the local defaults.
+No API key is read or required in mock mode.
+
+## Run one ticket with real Jev
+
+Live inference consumes TypeSafe API usage. Start with the single synthetic ticket provided by `live-demo`; it never submits the four-ticket mock demonstration automatically.
+
+In the worker terminal, set temporary process environment variables and start the worker:
+
+```powershell
+Set-Location .\recipes\ticket-routing\go
+$env:AI_PROVIDER = "jev"
+$env:TYPESAFE_API_KEY = "paste-your-personal-key-here"
+go run . -mode worker
+```
+
+The worker fails during startup if `TYPESAFE_API_KEY` is missing. The key is read only by the worker and is not printed, written to files, or placed in workflow history.
+
+In a second terminal, explicitly opt into the one-ticket live starter. This terminal does not need the API key:
+
+```powershell
+Set-Location .\recipes\ticket-routing\go
+$env:AI_PROVIDER = "jev"
+go run . -mode live-demo
+```
+
+The output identifies the result as real Jev classification and displays department, priority, complexity, all three confidence values, the returned model, reported token usage, selected Child Workflow, fictional employee, and final result.
+
+Remove the temporary worker-terminal variables when finished:
+
+```powershell
+Remove-Item Env:AI_PROVIDER -ErrorAction SilentlyContinue
+Remove-Item Env:TYPESAFE_API_KEY -ErrorAction SilentlyContinue
+```
+
+## First Live Jev Test
+
+The first live integration test used one real Jev API call with a synthetic billing request. It produced these observed results:
+
+| Field | Observed value |
+|---|---:|
+| Model | `jev-1.13.0` |
+| Department | `billing` |
+| Department confidence | `1.00` |
+| Priority | `high` |
+| Priority confidence | `0.97` |
+| Complexity | `tier1` |
+| Complexity confidence | `0.55` |
+| Input tokens | `670` |
+| Output tokens | `128` |
+| Published Jev input price | `$0.042 / million tokens` |
+| Estimated input inference cost | `$0.00002814` |
+| Estimated output inference cost | `$0.00` |
+
+The Billing Child Workflow completed successfully, with an observed Child Workflow duration of 28 ms. That duration is neither Jev inference latency nor end-to-end workflow latency. This single-call observation is not a performance benchmark, and the estimated inference cost excludes infrastructure and any additional API calls.
+
+## Reliability and result interpretation
+
+The Jev HTTP call has a finite client timeout and runs inside an Activity with bounded exponential-backoff retries. Network failures, HTTP `429`, HTTP `529`, and retryable `5xx` responses can cause another Activity attempt. Authentication failures, request-schema failures, other client errors, and malformed successful responses are nonretryable.
+
+A failed or timed-out Activity attempt may have reached Jev and can consume additional API usage when Cadence retries it. Only a successfully completed Activity result recorded in workflow history is reused without another inference request during replay.
+
+`UNROUTABLE` is a successful business result: Jev returned a response, but the department label was unsupported or its confidence was below `0.65`, so no department Child Workflow started. A workflow execution failure means classification could not produce a valid result—for example because of authentication, HTTP, timeout, or malformed-response errors. Low-confidence priority or complexity values remain informational and are marked uncertain rather than converted into provider failures.
 
 ## Build and test
 
 From `recipes/ticket-routing/go`:
 
 ```powershell
+gofmt -w main.go workflow.go workflow_test.go
 go build ./...
 go test ./...
 ```
 
-The tests cover parent execution, all four routing branches, each department Child Workflow, completed assignment results, invalid classifications, and the mock classifier. They require no Jev or other paid-service credentials.
+Tests cover the existing parent and Child Workflows, all four routing branches, invalid classifications, mock behavior, the complete Jev request structure, response parsing, token usage, missing-key handling, transient and nonretryable HTTP errors, network failures, and malformed responses. Automated tests never contact TypeSafe.
 
-## Why this approach?
+## Copying the recipe
 
-The classification boundary is an Activity because model calls are external and nondeterministic. The parent Workflow uses only the recorded typed result and deterministic routing. Separate Child Workflows establish the durable department boundary needed by later phases while keeping Phase 1 deliberately small and easy to copy.
-
-To copy this foundation into another application, start with `go/workflow.go` and `go/main.go`, then replace the mock `ClassifyTicket` Activity implementation with the approved provider-specific implementation. No shared repository package is required.
+Start with `go/workflow.go` and `go/main.go`. `workflow.go` contains the Workflow, Activities, typed data, mock rules, and small Jev HTTP implementation; `main.go` selects and registers the Activity implementation. No shared repository package or third-party AI SDK is required.
 
 ## Deferred features
 
-Phase 1 intentionally does not include live Jev calls, acknowledgment Signals, SLA timers, Custom Workflow Controls, automatic signal simulation, synthetic dataset generation, batch execution, metrics, or benchmarks. Those remain specified for later phases in [SPEC.md](SPEC.md).
+This phase intentionally does not include acknowledgment Signals, SLA timers, Custom Workflow Controls, automatic employee simulation, synthetic dataset generation, batch execution, metrics, or benchmarks. Those remain specified for later phases in [SPEC.md](SPEC.md).

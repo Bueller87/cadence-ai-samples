@@ -21,7 +21,7 @@ Recipes may use Go, Python, or an occasional minimal combination of both. AI pro
 
 ## Finding recipes
 
-No recipes are available yet. As they are added, browse the recipe directories by problem or use case. Each recipe README will describe its requirements, setup, execution, expected results, architecture, and reliability choices.
+Browse recipe directories by problem or use case. The first recipe, [StreamWave ticket routing](recipes/ticket-routing/), demonstrates typed AI-assisted classification with durable Cadence routing. Each recipe README describes its requirements, setup, execution, expected results, architecture, and reliability choices.
 
 ## Contributing
 
