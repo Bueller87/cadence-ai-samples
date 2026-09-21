@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -8,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -18,6 +21,47 @@ import (
 	cadencemocks "go.uber.org/cadence/mocks"
 	"go.uber.org/cadence/testsuite"
 )
+
+func TestSyntheticTicketDataset(t *testing.T) {
+	file, err := os.Open(filepath.Join("..", "testdata", "tickets.jsonl"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, file.Close()) })
+
+	validDepartments := map[string]bool{"billing": true, "technical": true, "account": true, "content": true}
+	validPriorities := map[string]bool{"low": true, "normal": true, "high": true, "critical": true}
+	validComplexities := map[string]bool{"tier1": true, "tier2": true, "tier3": true}
+	seenIDs := make(map[string]bool)
+	departmentCounts := make(map[string]int)
+	recordCount := 0
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		recordCount++
+		var record struct {
+			TicketID           string `json:"ticket_id"`
+			Message            string `json:"message"`
+			ExpectedDepartment string `json:"expected_department"`
+			ExpectedPriority   string `json:"expected_priority"`
+			ExpectedComplexity string `json:"expected_complexity"`
+		}
+		require.NoErrorf(t, json.Unmarshal(scanner.Bytes(), &record), "invalid JSON on line %d", recordCount)
+		require.NotEmptyf(t, record.TicketID, "missing ticket_id on line %d", recordCount)
+		require.NotEmptyf(t, record.Message, "missing message on line %d", recordCount)
+		require.Falsef(t, seenIDs[record.TicketID], "duplicate ticket_id %q", record.TicketID)
+		require.Truef(t, validDepartments[record.ExpectedDepartment], "invalid department %q on line %d", record.ExpectedDepartment, recordCount)
+		require.Truef(t, validPriorities[record.ExpectedPriority], "invalid priority %q on line %d", record.ExpectedPriority, recordCount)
+		require.Truef(t, validComplexities[record.ExpectedComplexity], "invalid complexity %q on line %d", record.ExpectedComplexity, recordCount)
+
+		seenIDs[record.TicketID] = true
+		departmentCounts[record.ExpectedDepartment]++
+	}
+
+	require.NoError(t, scanner.Err())
+	require.Equal(t, 40, recordCount)
+	for department := range validDepartments {
+		require.Equalf(t, 10, departmentCounts[department], "unexpected %s record count", department)
+	}
+}
 
 func TestStartManualTicketDisplaysAcknowledgmentDetails(t *testing.T) {
 	cadenceClient := cadencemocks.NewClient(t)

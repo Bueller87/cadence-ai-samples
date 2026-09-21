@@ -213,6 +213,20 @@ A failed or timed-out Activity attempt may have reached Jev and can consume addi
 
 For a routed ticket, `ACKNOWLEDGED` means the Child Workflow received a valid matching Signal before its SLA timer fired and returns `sla_met: true`. `SLA_TIMEOUT` means the durable timer won and returns `sla_met: false`, after which the workflow completes without reassignment or escalation. Both are completed workflow executions. If a Signal and timer are both ready on the same Workflow task, timeout wins deterministically.
 
+## Synthetic ticket dataset
+
+[testdata/tickets.jsonl](testdata/tickets.jsonl) contains 40 fictional StreamWave requests, balanced across billing, technical, account, and content. Each JSONL record uses the runtime `ticket_id` and `message` fields plus test-only `expected_department`, `expected_priority`, and `expected_complexity` labels. The fixture includes varied lengths and writing styles, misspellings, incomplete requests, and ambiguous or multi-intent cases.
+
+The expected labels are provisional and should be reviewed—especially for ambiguous cases—before they are used as ground truth in classification-accuracy benchmarks or quality claims. [PROMPT.md](PROMPT.md) provides a reusable prompt for generating additional schema-compatible synthetic requests without adding a generation dependency to the application.
+
+Validate the included fixture from `recipes/ticket-routing/go`:
+
+```powershell
+go test ./... -run TestSyntheticTicketDataset
+```
+
+This checks JSONL parsing, the exact 40-record count, unique ticket IDs, valid labels, and the department distribution. Phase 4A does not execute the dataset as a batch.
+
 ## Build and test
 
 From `recipes/ticket-routing/go`:
