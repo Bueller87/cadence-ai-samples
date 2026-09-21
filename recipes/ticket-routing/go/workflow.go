@@ -18,8 +18,17 @@ import (
 const (
 	TaskList = "ticket-routing"
 
-	StatusAssigned   = "ASSIGNED"
-	StatusUnroutable = "UNROUTABLE"
+	AcknowledgmentSignalName = "acknowledge-assignment"
+	AssignmentQueryName      = "ticket-assignment"
+	BillingEmployeeID        = "SW-BILLING-101"
+	TechnicalEmployeeID      = "SW-TECH-202"
+	AccountEmployeeID        = "SW-ACCOUNT-303"
+	ContentEmployeeID        = "SW-CONTENT-404"
+
+	StatusAwaitingAcknowledgment = "AWAITING_ACKNOWLEDGMENT"
+	StatusAcknowledged           = "ACKNOWLEDGED"
+	StatusSLATimeout             = "SLA_TIMEOUT"
+	StatusUnroutable             = "UNROUTABLE"
 
 	minimumDepartmentConfidence    = 0.65
 	minimumInformationalConfidence = 0.65
@@ -62,8 +71,18 @@ const (
 
 // Ticket is the input to one TicketIntakeWorkflow execution.
 type Ticket struct {
-	TicketID string `json:"ticket_id"`
-	Message  string `json:"message"`
+	TicketID string    `json:"ticket_id"`
+	Message  string    `json:"message"`
+	SLA      SLAConfig `json:"acknowledgment_sla,omitempty"`
+}
+
+// SLAConfig contains demonstration acknowledgment deadlines by priority.
+// Zero values use the documented defaults.
+type SLAConfig struct {
+	Critical time.Duration `json:"critical,omitempty"`
+	High     time.Duration `json:"high,omitempty"`
+	Normal   time.Duration `json:"normal,omitempty"`
+	Low      time.Duration `json:"low,omitempty"`
 }
 
 // RoutingDecision is the typed result returned by the classification Activity.
@@ -92,19 +111,44 @@ type ClassifiedTicket struct {
 
 // AssignmentResult is returned by a department Child Workflow.
 type AssignmentResult struct {
-	TicketID   string     `json:"ticket_id"`
-	Department Department `json:"department"`
-	EmployeeID string     `json:"employee_id"`
-	Status     string     `json:"status"`
+	TicketID       string                `json:"ticket_id"`
+	Department     Department            `json:"department"`
+	EmployeeID     string                `json:"employee_id"`
+	AssignmentID   string                `json:"assignment_id"`
+	SLADuration    time.Duration         `json:"sla_duration"`
+	SLADeadline    time.Time             `json:"sla_deadline"`
+	SLAMet         bool                  `json:"sla_met"`
+	Status         string                `json:"status"`
+	Acknowledgment *AcknowledgmentSignal `json:"acknowledgment,omitempty"`
 }
 
-// TicketResult is the completed Phase 1 result returned by the parent Workflow.
+// AcknowledgmentSignal identifies the current ticket assignment. All fields
+// must match before a department Child Workflow can complete successfully.
+type AcknowledgmentSignal struct {
+	TicketID     string `json:"ticket_id"`
+	EmployeeID   string `json:"employee_id"`
+	AssignmentID string `json:"assignment_id"`
+}
+
+// MarkdownFormattedResponse is the response envelope Cadence Web expects for
+// Markdown-based Custom Workflow Controls.
+type MarkdownFormattedResponse struct {
+	CadenceResponseType string `json:"cadenceResponseType"`
+	Format              string `json:"format"`
+	Data                string `json:"data"`
+}
+
+// TicketResult is the completed result returned by the parent Workflow.
 type TicketResult struct {
 	TicketID        string          `json:"ticket_id"`
 	Classification  RoutingDecision `json:"classification"`
 	Department      Department      `json:"department,omitempty"`
 	EmployeeID      string          `json:"employee_id,omitempty"`
+	AssignmentID    string          `json:"assignment_id,omitempty"`
 	ChildWorkflowID string          `json:"child_workflow_id,omitempty"`
+	SLADuration     time.Duration   `json:"sla_duration,omitempty"`
+	SLADeadline     time.Time       `json:"sla_deadline,omitempty"`
+	SLAMet          bool            `json:"sla_met"`
 	Status          string          `json:"status"`
 	Reason          string          `json:"reason,omitempty"`
 }
@@ -177,7 +221,11 @@ func TicketIntakeWorkflow(ctx workflow.Context, ticket Ticket) (TicketResult, er
 		Classification:  decision,
 		Department:      assignment.Department,
 		EmployeeID:      assignment.EmployeeID,
+		AssignmentID:    assignment.AssignmentID,
 		ChildWorkflowID: childID,
+		SLADuration:     assignment.SLADuration,
+		SLADeadline:     assignment.SLADeadline,
+		SLAMet:          assignment.SLAMet,
 		Status:          assignment.Status,
 	}, nil
 }
@@ -524,30 +572,169 @@ func childWorkflowID(ticketID string, department Department) string {
 	return fmt.Sprintf("ticket-routing-child-%s-%s", ticketID, department)
 }
 
-func BillingWorkflow(_ workflow.Context, ticket ClassifiedTicket) (AssignmentResult, error) {
-	return assignTicket(ticket, DepartmentBilling, "SW-BILLING-101")
+func BillingWorkflow(ctx workflow.Context, ticket ClassifiedTicket) (AssignmentResult, error) {
+	return assignTicket(ctx, ticket, DepartmentBilling, BillingEmployeeID)
 }
 
-func TechnicalWorkflow(_ workflow.Context, ticket ClassifiedTicket) (AssignmentResult, error) {
-	return assignTicket(ticket, DepartmentTechnical, "SW-TECH-202")
+func TechnicalWorkflow(ctx workflow.Context, ticket ClassifiedTicket) (AssignmentResult, error) {
+	return assignTicket(ctx, ticket, DepartmentTechnical, TechnicalEmployeeID)
 }
 
-func AccountWorkflow(_ workflow.Context, ticket ClassifiedTicket) (AssignmentResult, error) {
-	return assignTicket(ticket, DepartmentAccount, "SW-ACCOUNT-303")
+func AccountWorkflow(ctx workflow.Context, ticket ClassifiedTicket) (AssignmentResult, error) {
+	return assignTicket(ctx, ticket, DepartmentAccount, AccountEmployeeID)
 }
 
-func ContentWorkflow(_ workflow.Context, ticket ClassifiedTicket) (AssignmentResult, error) {
-	return assignTicket(ticket, DepartmentContent, "SW-CONTENT-404")
+func ContentWorkflow(ctx workflow.Context, ticket ClassifiedTicket) (AssignmentResult, error) {
+	return assignTicket(ctx, ticket, DepartmentContent, ContentEmployeeID)
 }
 
-func assignTicket(ticket ClassifiedTicket, department Department, employeeID string) (AssignmentResult, error) {
+func assignTicket(ctx workflow.Context, ticket ClassifiedTicket, department Department, employeeID string) (AssignmentResult, error) {
 	if ticket.Classification.Department != department {
 		return AssignmentResult{}, fmt.Errorf("%s workflow received %s ticket", department, ticket.Classification.Department)
 	}
-	return AssignmentResult{
-		TicketID:   ticket.Ticket.TicketID,
-		Department: department,
-		EmployeeID: employeeID,
-		Status:     StatusAssigned,
-	}, nil
+
+	assignmentID := assignmentIdentifier(ticket.Ticket.TicketID, department, employeeID)
+	slaDuration := acknowledgmentSLA(ticket.Classification.Priority, ticket.Ticket.SLA)
+	slaDeadline := workflow.Now(ctx).Add(slaDuration)
+	result := AssignmentResult{
+		TicketID:     ticket.Ticket.TicketID,
+		Department:   department,
+		EmployeeID:   employeeID,
+		AssignmentID: assignmentID,
+		SLADuration:  slaDuration,
+		SLADeadline:  slaDeadline,
+		Status:       StatusAwaitingAcknowledgment,
+	}
+	if err := workflow.SetQueryHandler(ctx, AssignmentQueryName, func() (MarkdownFormattedResponse, error) {
+		return assignmentControlResponse(ctx, ticket.Classification.Priority, result), nil
+	}); err != nil {
+		return AssignmentResult{}, fmt.Errorf("register assignment query: %w", err)
+	}
+
+	signalChannel := workflow.GetSignalChannel(ctx, AcknowledgmentSignalName)
+	timerCtx, cancelTimer := workflow.WithCancel(ctx)
+	timer := workflow.NewTimer(timerCtx, slaDuration)
+
+	for {
+		if timer.IsReady() {
+			result.Status = StatusSLATimeout
+			return result, nil
+		}
+
+		var acknowledgment AcknowledgmentSignal
+		signalReceived := false
+		selector := workflow.NewSelector(ctx)
+		selector.AddReceive(signalChannel, func(channel workflow.Channel, _ bool) {
+			channel.Receive(ctx, &acknowledgment)
+			signalReceived = true
+		})
+		selector.AddFuture(timer, func(workflow.Future) {})
+		selector.Select(ctx)
+
+		// Timeout wins when both events are ready in the same workflow task. This
+		// makes the signal/deadline boundary deterministic and rejects late signals.
+		if timer.IsReady() {
+			result.Status = StatusSLATimeout
+			return result, nil
+		}
+		if signalReceived && validAcknowledgment(acknowledgment, result) {
+			result.Status = StatusAcknowledged
+			result.SLAMet = true
+			result.Acknowledgment = &acknowledgment
+			cancelTimer()
+			_ = timer.Get(ctx, nil)
+			return result, nil
+		}
+	}
+}
+
+func assignmentControlResponse(ctx workflow.Context, priority Priority, assignment AssignmentResult) MarkdownFormattedResponse {
+	markdown := fmt.Sprintf("## Ticket assignment\n\n- **Ticket ID:** `%s`\n- **Department:** `%s`\n- **Assigned employee:** `%s`\n- **Priority:** `%s`\n- **SLA duration:** `%s`\n- **SLA deadline:** `%s`\n- **Current acknowledgment status:** `%s`\n",
+		assignment.TicketID,
+		assignment.Department,
+		assignment.EmployeeID,
+		priority,
+		assignment.SLADuration,
+		assignment.SLADeadline.UTC().Format(time.RFC3339),
+		assignment.Status,
+	)
+
+	if assignment.Status == StatusAwaitingAcknowledgment {
+		payload, err := json.Marshal(AcknowledgmentSignal{
+			TicketID:     assignment.TicketID,
+			EmployeeID:   assignment.EmployeeID,
+			AssignmentID: assignment.AssignmentID,
+		})
+		if err == nil {
+			info := workflow.GetInfo(ctx)
+			markdown += fmt.Sprintf("\n{%% signal signalName=%q label=%q domain=%q cluster=%q workflowId=%q runId=%q input=%s /%%}\n",
+				AcknowledgmentSignalName, "Acknowledge Ticket", info.Domain, "cluster0", info.WorkflowExecution.ID, info.WorkflowExecution.RunID, payload)
+		}
+	} else {
+		markdown += fmt.Sprintf("\n- **SLA met:** %s\n\n*Assignment is complete; no actions are available.*\n", slaMetLabel(assignment.Status, assignment.SLAMet))
+	}
+
+	return MarkdownFormattedResponse{
+		CadenceResponseType: "formattedData",
+		Format:              "text/markdown",
+		Data:                markdown,
+	}
+}
+
+func slaMetLabel(status string, slaMet bool) string {
+	switch {
+	case status == StatusAcknowledged && slaMet:
+		return "YES"
+	case status == StatusSLATimeout && !slaMet:
+		return "NO"
+	default:
+		return "N/A"
+	}
+}
+
+func validAcknowledgment(acknowledgment AcknowledgmentSignal, assignment AssignmentResult) bool {
+	return acknowledgment.TicketID == assignment.TicketID &&
+		acknowledgment.EmployeeID == assignment.EmployeeID &&
+		acknowledgment.AssignmentID == assignment.AssignmentID
+}
+
+func assignmentIdentifier(ticketID string, department Department, employeeID string) string {
+	return fmt.Sprintf("%s:%s:%s", ticketID, department, employeeID)
+}
+
+func acknowledgmentSLA(priority Priority, config SLAConfig) time.Duration {
+	defaults := defaultSLAConfig()
+	switch priority {
+	case PriorityCritical:
+		if config.Critical > 0 {
+			return config.Critical
+		}
+		return defaults.Critical
+	case PriorityHigh:
+		if config.High > 0 {
+			return config.High
+		}
+		return defaults.High
+	case PriorityNormal:
+		if config.Normal > 0 {
+			return config.Normal
+		}
+		return defaults.Normal
+	case PriorityLow:
+		if config.Low > 0 {
+			return config.Low
+		}
+		return defaults.Low
+	default:
+		return defaults.Normal
+	}
+}
+
+func defaultSLAConfig() SLAConfig {
+	return SLAConfig{
+		Critical: 5 * time.Second,
+		High:     10 * time.Second,
+		Normal:   20 * time.Second,
+		Low:      30 * time.Second,
+	}
 }

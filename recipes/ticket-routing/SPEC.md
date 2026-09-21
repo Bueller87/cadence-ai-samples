@@ -20,7 +20,7 @@ The sample must be easy to **run, understand, and copy into another Go applicati
 - One Jev request per ticket containing **three independent typed questions**: Department, Priority, Complexity.
 - Four department-specific Child Workflow routes: Billing, Technical, Account, Content. Thin wrappers around common local logic are acceptable if clearer than duplicating code.
 - Assign one **fixed fictional employee ID per department** (no employee-selection algorithm).
-- Child Workflow waits for a matching acknowledgment Signal or a durable, configurable SLA deadline. Acknowledgment completes with `ACKNOWLEDGED`; timeout completes with `SLA_EXPIRED`.
+- Child Workflow waits for a matching acknowledgment Signal or a durable, configurable SLA deadline. Acknowledgment completes with `ACKNOWLEDGED`; timeout completes with `SLA_TIMEOUT`.
 - Both an automated signal sender for unattended runs and a simple CWC Markdown acknowledgment button for a live demo must drive the **same child-workflow Signal**.
 - Mock classifier by default; real Jev use must be explicitly opted into on the user's personal machine.
 - Bundled synthetic text tickets; optional `PROMPT.md` for generating more; a bounded batch runner and honest metrics.
@@ -73,7 +73,7 @@ Normalize to `RoutingDecision{Department, Priority, Complexity, DepartmentConfid
 
 **Low-confidence/error policy:** If the provider returns an invalid label, missing response field, or a classification with department confidence below a configurable, documented threshold (illustrative default `0.65`), mark `UNROUTABLE` with a reason and complete without a department Child Workflow. If priority/complexity are low-confidence, retain the chosen values but mark the result as uncertain; never silently treat these as verified facts. Nonretryable configuration/API failures should yield an explicit failed execution or structured error, not a fabricated classification.
 
-**Result:** `TicketResult` records ticket ID, classification (if available), department/employee/child execution identifier (if applicable), status (`ACKNOWLEDGED`, `SLA_EXPIRED`, `UNROUTABLE`), and relevant timings. Separate terminal business status from workflow-engine execution failure.
+**Result:** `TicketResult` records ticket ID, classification (if available), department/employee/child execution identifier (if applicable), status (`ACKNOWLEDGED`, `SLA_TIMEOUT`, `UNROUTABLE`), and relevant timings. Separate terminal business status from workflow-engine execution failure.
 
 ## 5. Cadence execution and activity boundaries
 
@@ -86,13 +86,13 @@ One ticket → TicketIntakeWorkflow
             → start durable acknowledgment deadline
             → wait for matching acknowledgment Signal OR deadline
                 ├─ Signal first → ACKNOWLEDGED
-                └─ deadline first → SLA_EXPIRED
+                └─ deadline first → SLA_TIMEOUT
             → return child result to parent; parent completes
 ```
 
 - `TicketIntakeWorkflow` starts and **waits for** its Child Workflow's terminal result. Use a deterministic, documented ID derivation so the CLI/simulator can locate the child without relying on random IDs or guessing. Ensure distinct ticket IDs cannot collide.
 - The department Child Workflow owns assignment state, the signal channel, and the SLA timer. Register a read-only query that exposes current status and, when awaiting acknowledgment, Markdown formatted for Cadence Web CWC.
-- The acknowledgment signal payload must contain at least `ticket_id` and `assignment_id` (or equivalent deterministic assignment token). Accept **only** the current ticket/assignment, ignoring duplicates, invalid payloads, and late signals. A signal received after SLA expiry must never turn `SLA_EXPIRED` into `ACKNOWLEDGED`. Define deterministic handling of the signal/deadline boundary and test it.
+- The acknowledgment signal payload must contain at least `ticket_id` and `assignment_id` (or equivalent deterministic assignment token). Accept **only** the current ticket/assignment, ignoring duplicates, invalid payloads, and late signals. A signal received after SLA expiry must never turn `SLA_TIMEOUT` into `ACKNOWLEDGED`. Define deterministic handling of the signal/deadline boundary and test it.
 - The CWC button **acknowledges assignment**, not ticket resolution; label it `Acknowledge Ticket`. Its `{% signal %}` action targets the **department Child Workflow**, not the parent, and sends the same payload as the automated simulator. Render a plain completed-state view without an action button after acknowledgment/expiry. Use Cadence's actual formatted query response shape and supported Markdoc tag syntax; do not return raw HTML or invent CWC APIs. Document the Cadence Web version needed for CWC and provide the CLI signal alternative when it is unavailable.
 - Use short, configurable demonstration SLA durations (illustrative: critical 5s, high 10s, normal 20s, low 30s). Label these as **demo policy**, not real customer SLAs. Do not create a timer by `time.Sleep` in workflow code.
 - **All external and nondeterministic operations belong in Activities or in the external starter/simulator, never in workflow logic.** In particular: Jev HTTP, clocks/wall time, random inputs, logs/metrics external side effects, file I/O. Use Cadence workflow APIs for time, timers, signals, Child Workflows, and query handlers. Completed Activity results must be reused on workflow replay; do not call the provider from a workflow or query handler.
@@ -125,7 +125,7 @@ Commit `testdata/tickets.jsonl` with at least 30 realistic fictional streaming-s
 
 ## 9. Metrics and benchmarks
 
-For mock and live runs separately, report: started/completed/failed/pending workflows; `ACKNOWLEDGED`/`SLA_EXPIRED`/`UNROUTABLE`; classification count; optional real provider input/output token totals; measured classification and end-to-end elapsed time; and Activity retry count if genuinely instrumented. Show p50/p95 only when enough measured samples exist; document clock/methodology. Cost calculation is **optional and opt-in**, using a clearly configurable published price and real provider usage, never hard-coded illustrative output as if measured.
+For mock and live runs separately, report: started/completed/failed/pending workflows; `ACKNOWLEDGED`/`SLA_TIMEOUT`/`UNROUTABLE`; classification count; optional real provider input/output token totals; measured classification and end-to-end elapsed time; and Activity retry count if genuinely instrumented. Show p50/p95 only when enough measured samples exist; document clock/methodology. Cost calculation is **optional and opt-in**, using a clearly configurable published price and real provider usage, never hard-coded illustrative output as if measured.
 
 Do not promise a fixed throughput, 10× cost advantage, or Uber/Netflix production-scale performance based on a laptop run. A laptop batch of 10–100 is a functional demonstration; larger runs are optional after verifying the local Cadence cluster, Jev rate limits, and costs.
 

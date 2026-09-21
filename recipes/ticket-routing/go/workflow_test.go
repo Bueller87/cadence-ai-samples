@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -12,8 +14,83 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/cadence"
+	"go.uber.org/cadence/client"
+	cadencemocks "go.uber.org/cadence/mocks"
 	"go.uber.org/cadence/testsuite"
 )
+
+func TestStartManualTicketDisplaysAcknowledgmentDetails(t *testing.T) {
+	cadenceClient := cadencemocks.NewClient(t)
+	run := cadencemocks.NewWorkflowRun(t)
+	run.On("GetRunID").Return("run-manual-001").Once()
+	run.On("Get", mock.Anything, mock.Anything).Run(func(arguments mock.Arguments) {
+		result := arguments.Get(1).(*TicketResult)
+		*result = TicketResult{
+			TicketID:   "manual-test-001",
+			Department: DepartmentBilling,
+			EmployeeID: BillingEmployeeID,
+			Status:     StatusAcknowledged,
+			SLAMet:     true,
+		}
+	}).Return(nil).Once()
+	cadenceClient.On(
+		"ExecuteWorkflow",
+		mock.Anything,
+		mock.MatchedBy(func(options client.StartWorkflowOptions) bool {
+			return options.ID == "ticket-routing-manual-test-001" &&
+				options.TaskList == TaskList &&
+				options.ExecutionStartToCloseTimeout == 3*time.Minute
+		}),
+		mock.Anything,
+		mock.MatchedBy(func(ticket Ticket) bool {
+			return ticket.TicketID == "manual-test-001" &&
+				ticket.Message == manualDemoTicketMessage &&
+				ticket.SLA.High == 2*time.Minute
+		}),
+	).Return(run, nil).Once()
+
+	var output bytes.Buffer
+	err := startManualTicket(context.Background(), cadenceClient, TaskList, "manual-test-001", 2*time.Minute, &output)
+
+	require.NoError(t, err)
+	require.Contains(t, output.String(), "parent workflow ID: ticket-routing-manual-test-001")
+	require.Contains(t, output.String(), "parent run ID: run-manual-001")
+	require.Contains(t, output.String(), "child workflow ID: ticket-routing-child-manual-test-001-billing")
+	require.Contains(t, output.String(), "employee ID: "+BillingEmployeeID)
+	require.Contains(t, output.String(), "assignment ID: manual-test-001:billing:"+BillingEmployeeID)
+	require.Contains(t, output.String(), "signal name: "+AcknowledgmentSignalName)
+	require.Contains(t, output.String(), "go run . -mode acknowledge")
+	require.Contains(t, output.String(), "Workflow status: Completed")
+	require.Contains(t, output.String(), "Ticket ID: manual-test-001")
+	require.Contains(t, output.String(), "Department: billing")
+	require.Contains(t, output.String(), "Assigned employee: "+BillingEmployeeID)
+	require.Contains(t, output.String(), "Business status: ACKNOWLEDGED")
+	require.Contains(t, output.String(), "SLA met: YES")
+}
+
+func TestAcknowledgeManualTicketSendsTypedSignal(t *testing.T) {
+	cadenceClient := cadencemocks.NewClient(t)
+	expected := AcknowledgmentSignal{
+		TicketID:     "manual-test-002",
+		EmployeeID:   BillingEmployeeID,
+		AssignmentID: "manual-test-002:billing:" + BillingEmployeeID,
+	}
+	cadenceClient.On(
+		"SignalWorkflow",
+		mock.Anything,
+		"ticket-routing-child-manual-test-002-billing",
+		"",
+		AcknowledgmentSignalName,
+		expected,
+	).Return(nil).Once()
+
+	var output bytes.Buffer
+	err := acknowledgeManualTicket(context.Background(), cadenceClient, expected.TicketID, DepartmentBilling, expected.EmployeeID, "", &output)
+
+	require.NoError(t, err)
+	require.Contains(t, output.String(), "acknowledgment sent")
+	require.Contains(t, output.String(), expected.AssignmentID)
+}
 
 func TestTicketIntakeWorkflowRoutesEveryDepartment(t *testing.T) {
 	tests := []struct {
@@ -30,9 +107,18 @@ func TestTicketIntakeWorkflowRoutesEveryDepartment(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			env := newWorkflowEnvironment(t)
-			ticket := Ticket{TicketID: "route-" + test.name, Message: "synthetic test ticket"}
+			ticket := Ticket{TicketID: "route-" + test.name, Message: "synthetic test ticket", SLA: testSLAConfig(10 * time.Second)}
 			decision := validDecision(test.department)
 			env.OnActivity(ClassifyTicket, mock.Anything, ticket).Return(decision, nil).Once()
+			childID := childWorkflowID(ticket.TicketID, test.department)
+			acknowledgment := AcknowledgmentSignal{
+				TicketID:     ticket.TicketID,
+				EmployeeID:   test.employeeID,
+				AssignmentID: assignmentIdentifier(ticket.TicketID, test.department, test.employeeID),
+			}
+			env.RegisterDelayedCallback(func() {
+				require.NoError(t, env.SignalWorkflowByID(childID, AcknowledgmentSignalName, acknowledgment))
+			}, time.Second)
 
 			env.ExecuteWorkflow(TicketIntakeWorkflow, ticket)
 
@@ -42,8 +128,10 @@ func TestTicketIntakeWorkflowRoutesEveryDepartment(t *testing.T) {
 			require.NoError(t, env.GetWorkflowResult(&result))
 			require.Equal(t, test.department, result.Department)
 			require.Equal(t, test.employeeID, result.EmployeeID)
-			require.Equal(t, StatusAssigned, result.Status)
-			require.Equal(t, childWorkflowID(ticket.TicketID, test.department), result.ChildWorkflowID)
+			require.Equal(t, acknowledgment.AssignmentID, result.AssignmentID)
+			require.Equal(t, StatusAcknowledged, result.Status)
+			require.True(t, result.SLAMet)
+			require.Equal(t, childID, result.ChildWorkflowID)
 			env.AssertExpectations(t)
 		})
 	}
@@ -67,9 +155,17 @@ func TestDepartmentChildWorkflows(t *testing.T) {
 			var suite testsuite.WorkflowTestSuite
 			env := suite.NewTestWorkflowEnvironment()
 			input := ClassifiedTicket{
-				Ticket:         Ticket{TicketID: "child-" + test.name, Message: "synthetic test ticket"},
+				Ticket:         Ticket{TicketID: "child-" + test.name, Message: "synthetic test ticket", SLA: testSLAConfig(10 * time.Second)},
 				Classification: validDecision(test.department),
 			}
+			acknowledgment := AcknowledgmentSignal{
+				TicketID:     input.Ticket.TicketID,
+				EmployeeID:   test.employeeID,
+				AssignmentID: assignmentIdentifier(input.Ticket.TicketID, test.department, test.employeeID),
+			}
+			env.RegisterDelayedCallback(func() {
+				env.SignalWorkflow(AcknowledgmentSignalName, acknowledgment)
+			}, time.Second)
 
 			env.ExecuteWorkflow(test.workflow, input)
 
@@ -80,9 +176,220 @@ func TestDepartmentChildWorkflows(t *testing.T) {
 			require.Equal(t, input.Ticket.TicketID, result.TicketID)
 			require.Equal(t, test.department, result.Department)
 			require.Equal(t, test.employeeID, result.EmployeeID)
-			require.Equal(t, StatusAssigned, result.Status)
+			require.Equal(t, acknowledgment.AssignmentID, result.AssignmentID)
+			require.Equal(t, StatusAcknowledged, result.Status)
+			require.True(t, result.SLAMet)
+			require.Equal(t, acknowledgment, *result.Acknowledgment)
 		})
 	}
+}
+
+func TestDepartmentChildWorkflowTimesOutWithoutAcknowledgment(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	input := classifiedTicketForTest("timeout-001", DepartmentBilling, time.Second)
+
+	env.ExecuteWorkflow(BillingWorkflow, input)
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+	var result AssignmentResult
+	require.NoError(t, env.GetWorkflowResult(&result))
+	require.Equal(t, StatusSLATimeout, result.Status)
+	require.False(t, result.SLAMet)
+	require.Equal(t, time.Second, result.SLADuration)
+	require.Nil(t, result.Acknowledgment)
+}
+
+func TestDepartmentChildWorkflowIgnoresInvalidAcknowledgments(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	input := classifiedTicketForTest("invalid-ack-001", DepartmentBilling, 10*time.Second)
+	valid := acknowledgmentForTest(input, "SW-BILLING-101")
+
+	env.RegisterDelayedCallback(func() {
+		invalid := valid
+		invalid.TicketID = "another-ticket"
+		env.SignalWorkflow(AcknowledgmentSignalName, invalid)
+	}, time.Second)
+	env.RegisterDelayedCallback(func() {
+		invalid := valid
+		invalid.EmployeeID = "SW-BILLING-999"
+		env.SignalWorkflow(AcknowledgmentSignalName, invalid)
+	}, 2*time.Second)
+	env.RegisterDelayedCallback(func() {
+		invalid := valid
+		invalid.AssignmentID = "stale-assignment"
+		env.SignalWorkflow(AcknowledgmentSignalName, invalid)
+	}, 3*time.Second)
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow(AcknowledgmentSignalName, valid)
+	}, 4*time.Second)
+
+	env.ExecuteWorkflow(BillingWorkflow, input)
+
+	require.NoError(t, env.GetWorkflowError())
+	var result AssignmentResult
+	require.NoError(t, env.GetWorkflowResult(&result))
+	require.Equal(t, StatusAcknowledged, result.Status)
+	require.True(t, result.SLAMet)
+	require.Equal(t, valid, *result.Acknowledgment)
+}
+
+func TestDepartmentChildWorkflowIgnoresDuplicateAcknowledgment(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	input := classifiedTicketForTest("duplicate-001", DepartmentTechnical, 10*time.Second)
+	acknowledgment := acknowledgmentForTest(input, "SW-TECH-202")
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflowSkippingDecision(AcknowledgmentSignalName, acknowledgment)
+		env.SignalWorkflow(AcknowledgmentSignalName, acknowledgment)
+	}, time.Second)
+
+	env.ExecuteWorkflow(TechnicalWorkflow, input)
+
+	require.NoError(t, env.GetWorkflowError())
+	var result AssignmentResult
+	require.NoError(t, env.GetWorkflowResult(&result))
+	require.Equal(t, StatusAcknowledged, result.Status)
+	require.True(t, result.SLAMet)
+	require.Equal(t, acknowledgment, *result.Acknowledgment)
+}
+
+func TestDepartmentChildWorkflowRejectsLateAcknowledgment(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	input := classifiedTicketForTest("late-001", DepartmentAccount, time.Second)
+	acknowledgment := acknowledgmentForTest(input, "SW-ACCOUNT-303")
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow(AcknowledgmentSignalName, acknowledgment)
+	}, 2*time.Second)
+
+	env.ExecuteWorkflow(AccountWorkflow, input)
+
+	require.NoError(t, env.GetWorkflowError())
+	var result AssignmentResult
+	require.NoError(t, env.GetWorkflowResult(&result))
+	require.Equal(t, StatusSLATimeout, result.Status)
+	require.False(t, result.SLAMet)
+	require.Nil(t, result.Acknowledgment)
+}
+
+func TestDepartmentChildWorkflowTimeoutWinsSignalDeadlineRace(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	input := classifiedTicketForTest("race-001", DepartmentContent, time.Second)
+	acknowledgment := acknowledgmentForTest(input, "SW-CONTENT-404")
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow(AcknowledgmentSignalName, acknowledgment)
+	}, time.Second)
+
+	env.ExecuteWorkflow(ContentWorkflow, input)
+
+	require.NoError(t, env.GetWorkflowError())
+	var result AssignmentResult
+	require.NoError(t, env.GetWorkflowResult(&result))
+	require.Equal(t, StatusSLATimeout, result.Status)
+	require.False(t, result.SLAMet)
+	require.Nil(t, result.Acknowledgment)
+}
+
+func TestCustomWorkflowControlAcknowledgesAndCancelsTimer(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	input := classifiedTicketForTest("cwc-001", DepartmentBilling, 10*time.Second)
+	acknowledgment := acknowledgmentForTest(input, BillingEmployeeID)
+	timerCancelled := false
+	env.SetOnTimerCancelledListener(func(string) {
+		timerCancelled = true
+	})
+
+	env.RegisterDelayedCallback(func() {
+		control := queryAssignmentControl(t, env)
+		require.Equal(t, "formattedData", control.CadenceResponseType)
+		require.Equal(t, "text/markdown", control.Format)
+		require.Contains(t, control.Data, "Ticket ID:** `cwc-001`")
+		require.Contains(t, control.Data, "Department:** `billing`")
+		require.Contains(t, control.Data, "Assigned employee:** `"+BillingEmployeeID+"`")
+		require.Contains(t, control.Data, "Priority:** `normal`")
+		require.Contains(t, control.Data, "SLA duration:** `10s`")
+		require.Contains(t, control.Data, "Current acknowledgment status:** `AWAITING_ACKNOWLEDGMENT`")
+		require.Contains(t, control.Data, `signalName="`+AcknowledgmentSignalName+`"`)
+		require.Contains(t, control.Data, `label="Acknowledge Ticket"`)
+		require.Contains(t, control.Data, `input={"ticket_id":"cwc-001","employee_id":"`+BillingEmployeeID+`","assignment_id":"cwc-001:billing:`+BillingEmployeeID+`"}`)
+
+		// This is the same typed payload sent by the CWC button.
+		env.SignalWorkflow(AcknowledgmentSignalName, acknowledgment)
+	}, time.Second)
+
+	env.ExecuteWorkflow(BillingWorkflow, input)
+
+	require.NoError(t, env.GetWorkflowError())
+	var result AssignmentResult
+	require.NoError(t, env.GetWorkflowResult(&result))
+	require.Equal(t, StatusAcknowledged, result.Status)
+	require.True(t, result.SLAMet)
+	require.True(t, timerCancelled)
+
+	terminalControl := queryAssignmentControl(t, env)
+	require.NotContains(t, terminalControl.Data, "{% signal")
+	require.Contains(t, terminalControl.Data, "Current acknowledgment status:** `ACKNOWLEDGED`")
+	require.Contains(t, terminalControl.Data, "SLA met:** YES")
+}
+
+func TestCustomWorkflowControlHasNoActionAfterTimeout(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	input := classifiedTicketForTest("cwc-timeout-001", DepartmentContent, time.Second)
+
+	env.ExecuteWorkflow(ContentWorkflow, input)
+
+	require.NoError(t, env.GetWorkflowError())
+	var result AssignmentResult
+	require.NoError(t, env.GetWorkflowResult(&result))
+	require.Equal(t, StatusSLATimeout, result.Status)
+	require.False(t, result.SLAMet)
+
+	terminalControl := queryAssignmentControl(t, env)
+	require.NotContains(t, terminalControl.Data, "{% signal")
+	require.Contains(t, terminalControl.Data, "Current acknowledgment status:** `SLA_TIMEOUT`")
+	require.Contains(t, terminalControl.Data, "SLA met:** NO")
+}
+
+func TestAcknowledgmentSLADurationsByPriority(t *testing.T) {
+	config := SLAConfig{
+		Critical: 2 * time.Second,
+		High:     4 * time.Second,
+		Normal:   6 * time.Second,
+		Low:      8 * time.Second,
+	}
+	require.Equal(t, 2*time.Second, acknowledgmentSLA(PriorityCritical, config))
+	require.Equal(t, 4*time.Second, acknowledgmentSLA(PriorityHigh, config))
+	require.Equal(t, 6*time.Second, acknowledgmentSLA(PriorityNormal, config))
+	require.Equal(t, 8*time.Second, acknowledgmentSLA(PriorityLow, config))
+}
+
+func TestTicketIntakeWorkflowReturnsSLATimeout(t *testing.T) {
+	env := newWorkflowEnvironment(t)
+	env.OnActivity(ClassifyTicket, mock.Anything, mock.Anything).Return(validDecision(DepartmentBilling), nil).Once()
+
+	env.ExecuteWorkflow(TicketIntakeWorkflow, Ticket{
+		TicketID: "parent-timeout-001",
+		Message:  "I was charged twice.",
+		SLA:      testSLAConfig(time.Second),
+	})
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+
+	var result TicketResult
+	require.NoError(t, env.GetWorkflowResult(&result))
+	require.Equal(t, StatusSLATimeout, result.Status)
+	require.False(t, result.SLAMet)
+	require.Equal(t, DepartmentBilling, result.Department)
+	require.Equal(t, "SW-BILLING-101", result.EmployeeID)
+	require.Equal(t, assignmentIdentifier("parent-timeout-001", DepartmentBilling, "SW-BILLING-101"), result.AssignmentID)
+	require.Equal(t, time.Second, result.SLADuration)
 }
 
 func TestTicketIntakeWorkflowReturnsUnroutableForUnsupportedClassification(t *testing.T) {
@@ -201,6 +508,13 @@ func TestLiveDemoRequiresExplicitJevOptIn(t *testing.T) {
 func TestFourTicketDemoRejectsJevProvider(t *testing.T) {
 	t.Setenv("AI_PROVIDER", "jev")
 	_, _, err := configuredClassifier("demo")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "mock-only")
+}
+
+func TestManualTicketStarterRejectsJevProvider(t *testing.T) {
+	t.Setenv("AI_PROVIDER", "jev")
+	_, _, err := configuredClassifier("start-ticket")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "mock-only")
 }
@@ -371,6 +685,43 @@ func newWorkflowEnvironment(t *testing.T) *testsuite.TestWorkflowEnvironment {
 	env.RegisterWorkflow(ContentWorkflow)
 	env.RegisterActivity(ClassifyTicket)
 	return env
+}
+
+func queryAssignmentControl(t *testing.T, env *testsuite.TestWorkflowEnvironment) MarkdownFormattedResponse {
+	t.Helper()
+	value, err := env.QueryWorkflow(AssignmentQueryName)
+	require.NoError(t, err)
+	var response MarkdownFormattedResponse
+	require.NoError(t, value.Get(&response))
+	return response
+}
+
+func classifiedTicketForTest(ticketID string, department Department, sla time.Duration) ClassifiedTicket {
+	return ClassifiedTicket{
+		Ticket: Ticket{
+			TicketID: ticketID,
+			Message:  "synthetic test ticket",
+			SLA:      testSLAConfig(sla),
+		},
+		Classification: validDecision(department),
+	}
+}
+
+func acknowledgmentForTest(ticket ClassifiedTicket, employeeID string) AcknowledgmentSignal {
+	return AcknowledgmentSignal{
+		TicketID:     ticket.Ticket.TicketID,
+		EmployeeID:   employeeID,
+		AssignmentID: assignmentIdentifier(ticket.Ticket.TicketID, ticket.Classification.Department, employeeID),
+	}
+}
+
+func testSLAConfig(duration time.Duration) SLAConfig {
+	return SLAConfig{
+		Critical: duration,
+		High:     duration,
+		Normal:   duration,
+		Low:      duration,
+	}
 }
 
 func validDecision(department Department) RoutingDecision {

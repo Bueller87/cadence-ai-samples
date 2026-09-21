@@ -2,7 +2,7 @@
 
 This recipe uses Cadence to route fictional customer-support tickets for StreamWave, a fictional streaming service. A classifier assigns a department, priority, and complexity; the parent Workflow then starts the matching department Child Workflow, which assigns a fixed fictional employee.
 
-Phase 2 supports two classifier modes:
+The recipe supports two classifier modes:
 
 - `mock` is the default. It uses repeatable keyword rules, makes no network calls, and needs no credentials. Its confidence values are illustrative—not model quality, accuracy, token usage, or cost measurements.
 - `jev` is an explicit opt-in. It sends one request containing three independent Choice questions to TypeSafe System One and records the returned choices, probability distributions, confidence values, model identifier, and token usage.
@@ -14,16 +14,21 @@ TicketIntakeWorkflow
   → ClassifyTicket Activity (mock or real Jev)
   → Billing | Technical | Account | Content Child Workflow
   → fixed fictional employee assignment
-  → TicketResult (ASSIGNED or UNROUTABLE)
+  → `ticket-assignment` CWC query in Cadence Web
+  → wait for matching acknowledgment Signal or durable SLA timer
+  → TicketResult (ACKNOWLEDGED, SLA_TIMEOUT, or UNROUTABLE)
 ```
 
 External classification runs in a Cadence Activity. Workflow code uses only the recorded typed result, so replay does not call the provider again after a successful Activity result has been persisted.
+
+Each assignment has a deterministic identifier. The Child Workflow accepts an acknowledgment only when its ticket ID, employee ID, and assignment ID all match the current assignment. The SLA defaults are 5 seconds for `critical`, 10 seconds for `high`, 20 seconds for `normal`, and 30 seconds for `low`; use `-sla-critical`, `-sla-high`, `-sla-normal`, and `-sla-low` to configure shorter or longer deadlines for the existing demos. The one-ticket manual demo uses `-manual-sla`, which defaults to two minutes.
 
 ## Requirements
 
 - Go 1.23 or newer.
 - A local Cadence server for the runnable demonstrations.
 - A registered Cadence domain named `cadence-ai-samples`.
+- Cadence Web v4.0.14 or newer for Custom Workflow Controls.
 - A TypeSafe API key only for the optional live demonstration.
 
 The Cadence project's public Docker Compose configuration can run a local server and Cadence Web. From a separate clone of [cadence-workflow/cadence](https://github.com/cadence-workflow/cadence):
@@ -56,7 +61,94 @@ Run the four fictional Phase 1 tickets in the second terminal:
 go run . -mode demo
 ```
 
-No API key is read or required in mock mode.
+No API key is read or required in mock mode. Without acknowledgment Signals, these four workflows complete with `SLA_TIMEOUT`.
+
+## Manual acknowledgment demonstration
+
+Use three PowerShell terminals. From the repository root, change into the Go module directory in each terminal:
+
+```powershell
+Set-Location .\recipes\ticket-routing\go
+```
+
+In terminal 1, start the worker with mock classification:
+
+```powershell
+$env:AI_PROVIDER = "mock"
+go run . -mode worker
+```
+
+In terminal 2, start one synthetic billing ticket with a two-minute acknowledgment SLA:
+
+```powershell
+$env:AI_PROVIDER = "mock"
+go run . -mode start-ticket -ticket-id manual-billing-001 -manual-sla 2m
+```
+
+The command prints the parent and Child Workflow IDs, employee ID, assignment ID, Signal name, SLA, and a ready-to-copy acknowledgment command. It then waits and prints the final workflow status. Wait until the Child Workflow appears in Cadence Web, then run this command in terminal 3 before the deadline:
+
+```powershell
+go run . -mode acknowledge -ticket-id "manual-billing-001" -department "billing" -employee-id "SW-BILLING-101" -assignment-id "manual-billing-001:billing:SW-BILLING-101"
+```
+
+Terminal 2 then reports `ACKNOWLEDGED`.
+
+To demonstrate timeout, start a different ticket with a short SLA and do not run the acknowledgment command:
+
+```powershell
+go run . -mode start-ticket -ticket-id manual-timeout-001 -manual-sla 15s
+```
+
+After the durable timer fires, the command reports `SLA_TIMEOUT`. Ticket IDs must be unique for separate demonstrations.
+
+## Cadence Web CWC demonstration
+
+The CWC query follows Cadence's [formatted Markdown response and Signal-button contract](https://cadenceworkflow.io/docs/concepts/workflow-queries-formatted-data) and requires Cadence Web v4.0.14 or newer. It assumes the default local Cadence Web cluster name, `cluster0`.
+
+Use two PowerShell terminals. In terminal 1, start the mock worker:
+
+```powershell
+Set-Location .\recipes\ticket-routing\go
+$env:AI_PROVIDER = "mock"
+go run . -mode worker
+```
+
+In terminal 2, start one ticket with enough time to use Cadence Web:
+
+```powershell
+Set-Location .\recipes\ticket-routing\go
+$env:AI_PROVIDER = "mock"
+go run . -mode start-ticket -ticket-id cwc-billing-001 -manual-sla 2m
+```
+
+The starter prints the department Child Workflow ID and waits for the final result. Open Cadence Web from PowerShell:
+
+```powershell
+Start-Process "http://localhost:8088"
+```
+
+In Cadence Web, select the `cadence-ai-samples` domain, open the Child Workflow ID printed by the starter (`ticket-routing-child-cwc-billing-001-billing`), open its **Queries** tab, select `ticket-assignment`, and run the query. Confirm the ticket, department, employee, priority, SLA duration/deadline, and `AWAITING_ACKNOWLEDGMENT` status, then click **Acknowledge Ticket**.
+
+The button sends `acknowledge-assignment` to that Child Workflow with the same ticket, employee, and assignment identifiers used by the CLI. It acknowledges the employee assignment; it does not resolve the customer's support request. Terminal 2 then displays:
+
+```text
+Workflow status: Completed
+Ticket ID: cwc-billing-001
+Department: billing
+Assigned employee: SW-BILLING-101
+Business status: ACKNOWLEDGED
+SLA met: YES
+```
+
+Cadence Web shows the Child and parent Workflows as completed. Running `ticket-assignment` against the completed Child Workflow returns terminal Markdown without an acknowledgment button.
+
+To demonstrate the missed-SLA outcome, start a new ticket and do not click the button:
+
+```powershell
+go run . -mode start-ticket -ticket-id cwc-timeout-001 -manual-sla 20s
+```
+
+Terminal 2 reports `Business status: SLA_TIMEOUT` and `SLA met: NO`. The timeout remains a successfully completed workflow execution, not a workflow failure. CWC rendering and clicking require live Cadence Web, so automated tests verify the response envelope, Markdown action, payload, shared Signal path, terminal no-action state, and workflow results—not browser rendering.
 
 ## Run one ticket with real Jev
 
@@ -81,7 +173,7 @@ $env:AI_PROVIDER = "jev"
 go run . -mode live-demo
 ```
 
-The output identifies the result as real Jev classification and displays department, priority, complexity, all three confidence values, the returned model, reported token usage, selected Child Workflow, fictional employee, and final result.
+The output identifies the result as real Jev classification and displays department, priority, complexity, all three confidence values, the returned model, reported token usage, selected Child Workflow, fictional employee, business status, and whether the SLA was met.
 
 Remove the temporary worker-terminal variables when finished:
 
@@ -109,7 +201,7 @@ The first live integration test used one real Jev API call with a synthetic bill
 | Estimated input inference cost | `$0.00002814` |
 | Estimated output inference cost | `$0.00` |
 
-The Billing Child Workflow completed successfully, with an observed Child Workflow duration of 28 ms. That duration is neither Jev inference latency nor end-to-end workflow latency. This single-call observation is not a performance benchmark, and the estimated inference cost excludes infrastructure and any additional API calls.
+The Billing Child Workflow completed successfully, with an observed Child Workflow duration of 28 ms before the Phase 3A acknowledgment wait was introduced. That duration is neither Jev inference latency nor end-to-end workflow latency. This single-call observation is not a performance benchmark, and the estimated inference cost excludes infrastructure and any additional API calls.
 
 ## Reliability and result interpretation
 
@@ -118,6 +210,8 @@ The Jev HTTP call has a finite client timeout and runs inside an Activity with b
 A failed or timed-out Activity attempt may have reached Jev and can consume additional API usage when Cadence retries it. Only a successfully completed Activity result recorded in workflow history is reused without another inference request during replay.
 
 `UNROUTABLE` is a successful business result: Jev returned a response, but the department label was unsupported or its confidence was below `0.65`, so no department Child Workflow started. A workflow execution failure means classification could not produce a valid result—for example because of authentication, HTTP, timeout, or malformed-response errors. Low-confidence priority or complexity values remain informational and are marked uncertain rather than converted into provider failures.
+
+For a routed ticket, `ACKNOWLEDGED` means the Child Workflow received a valid matching Signal before its SLA timer fired and returns `sla_met: true`. `SLA_TIMEOUT` means the durable timer won and returns `sla_met: false`, after which the workflow completes without reassignment or escalation. Both are completed workflow executions. If a Signal and timer are both ready on the same Workflow task, timeout wins deterministically.
 
 ## Build and test
 
@@ -129,7 +223,7 @@ go build ./...
 go test ./...
 ```
 
-Tests cover the existing parent and Child Workflows, all four routing branches, invalid classifications, mock behavior, the complete Jev request structure, response parsing, token usage, missing-key handling, transient and nonretryable HTTP errors, network failures, and malformed responses. Automated tests never contact TypeSafe.
+Tests cover the CWC response and payload, terminal no-action controls, timer cancellation, explicit SLA results, manual starter and typed acknowledgment command, parent and Child Workflows, all four routing branches, acknowledgment, timeout, invalid and duplicate Signals, the Signal/timer boundary, invalid classifications, mock behavior, the complete Jev request structure, response parsing, token usage, missing-key handling, transient and nonretryable HTTP errors, network failures, and malformed responses. Automated tests never contact Cadence or TypeSafe.
 
 ## Copying the recipe
 
@@ -137,4 +231,4 @@ Start with `go/workflow.go` and `go/main.go`. `workflow.go` contains the Workflo
 
 ## Deferred features
 
-This phase intentionally does not include acknowledgment Signals, SLA timers, Custom Workflow Controls, automatic employee simulation, synthetic dataset generation, batch execution, metrics, or benchmarks. Those remain specified for later phases in [SPEC.md](SPEC.md).
+Phase 3C intentionally does not include automatic employee simulation, reassignment, skill matching, workload balancing, multi-level escalation, synthetic dataset generation, batch execution, metrics, or benchmarks. Those remain deferred to later phases.
