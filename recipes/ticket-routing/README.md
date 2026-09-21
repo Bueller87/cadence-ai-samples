@@ -127,7 +127,7 @@ The starter prints the department Child Workflow ID and waits for the final resu
 Start-Process "http://localhost:8088"
 ```
 
-In Cadence Web, select the `cadence-ai-samples` domain, open the Child Workflow ID printed by the starter (`ticket-routing-child-cwc-billing-001-billing`), open its **Queries** tab, select `ticket-assignment`, and run the query. Confirm the ticket, department, employee, priority, SLA duration/deadline, and `AWAITING_ACKNOWLEDGMENT` status, then click **Acknowledge Ticket**.
+In Cadence Web, select the `cadence-ai-samples` domain, open the Child Workflow ID printed by the starter (`ticket-routing-cwc-billing-001-child-billing`), open its **Queries** tab, select `ticket-assignment`, and run the query. Confirm the ticket, department, employee, priority, SLA duration/deadline, and `AWAITING_ACKNOWLEDGMENT` status, then click **Acknowledge Ticket**.
 
 The button sends `acknowledge-assignment` to that Child Workflow with the same ticket, employee, and assignment identifiers used by the CLI. It acknowledges the employee assignment; it does not resolve the customer's support request. Terminal 2 then displays:
 
@@ -225,19 +225,47 @@ Validate the included fixture from `recipes/ticket-routing/go`:
 go test ./... -run TestSyntheticTicketDataset
 ```
 
-This checks JSONL parsing, the exact 40-record count, unique ticket IDs, valid labels, and the department distribution. Phase 4A does not execute the dataset as a batch.
+This checks JSONL parsing, the exact 40-record count, unique ticket IDs, valid labels, and the department distribution.
+
+## Bounded mock batch
+
+The `batch` mode starts one independent `TicketIntakeWorkflow` per fixture record. It validates the JSONL dataset before submission, repeats the unchanged 40-record fixture when `-count` is larger than 40, and gives every execution a unique ticket and workflow ID. The expected labels are only provisional fixture metadata: the runner does not use them to route tickets or calculate classification accuracy.
+
+Start the mock worker in one PowerShell terminal, from the repository root:
+
+```powershell
+Set-Location .\recipes\ticket-routing\go
+$env:AI_PROVIDER = "mock"
+go run . -mode worker
+```
+
+In another terminal, change to the same `go` directory and run 40 tickets with the default one-second SLA and at most 10 workflows in flight:
+
+```powershell
+Set-Location .\recipes\ticket-routing\go
+go run . -mode batch -count 40 -concurrency 10 -batch-sla 1s
+```
+
+To repeat the fixture and run 1,000 mock tickets with a bounded 25-workflow concurrency:
+
+```powershell
+Set-Location .\recipes\ticket-routing\go
+go run . -mode batch -count 1000 -concurrency 25 -batch-sla 1s
+```
+
+No acknowledgment Signals are sent in batch mode. Routed tickets therefore complete with `SLA_TIMEOUT`; workflow-engine failures are counted separately. The terminal summary reports submitted, completed, failed, `UNROUTABLE`, `ACKNOWLEDGED`, and `SLA_TIMEOUT` totals, department totals, peak in-flight executions, wall-clock duration, per-execution client wait times, and completed workflows per second. Every failed execution includes its workflow ID, ticket ID, start time, elapsed time, and Cadence error. The one-second business SLA does not impose a one-second workflow execution timeout: bounded parent and Child Workflow timeouts include scheduling and execution overhead so delayed workflow tasks can still process the durable SLA timer. This is a functional demonstration, not a performance, classification-accuracy, provider-cost, or latency benchmark.
 
 ## Build and test
 
 From `recipes/ticket-routing/go`:
 
 ```powershell
-gofmt -w main.go workflow.go workflow_test.go
+gofmt -w main.go workflow.go workflow_test.go batch.go batch_test.go
 go build ./...
 go test ./...
 ```
 
-Tests cover the CWC response and payload, terminal no-action controls, timer cancellation, explicit SLA results, manual starter and typed acknowledgment command, parent and Child Workflows, all four routing branches, acknowledgment, timeout, invalid and duplicate Signals, the Signal/timer boundary, invalid classifications, mock behavior, the complete Jev request structure, response parsing, token usage, missing-key handling, transient and nonretryable HTTP errors, network failures, and malformed responses. Automated tests never contact Cadence or TypeSafe.
+Tests cover the CWC response and payload, terminal no-action controls, timer cancellation, explicit SLA results, manual starter and typed acknowledgment command, parent and Child Workflows, all four routing branches, acknowledgment, timeout, invalid and duplicate Signals, the Signal/timer boundary, invalid classifications, mock behavior, dataset loading and validation, repeated fixture use, bounded batch concurrency, batch aggregation and failures, invalid batch configuration, the complete Jev request structure, response parsing, token usage, missing-key handling, transient and nonretryable HTTP errors, network failures, and malformed responses. Automated tests never contact Cadence or TypeSafe.
 
 ## Copying the recipe
 
@@ -245,4 +273,4 @@ Start with `go/workflow.go` and `go/main.go`. `workflow.go` contains the Workflo
 
 ## Deferred features
 
-Phase 3C intentionally does not include automatic employee simulation, reassignment, skill matching, workload balancing, multi-level escalation, synthetic dataset generation, batch execution, metrics, or benchmarks. Those remain deferred to later phases.
+The recipe still intentionally does not include automatic employee acknowledgment simulation, reassignment, skill matching, workload balancing, multi-level escalation, classification-accuracy scoring, provider cost or latency benchmarking, or production performance claims. Those remain deferred to later phases.

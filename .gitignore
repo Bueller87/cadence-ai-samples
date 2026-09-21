@@ -11,6 +11,7 @@ bin/
 *.test
 *.out
 coverage.out
+*.exe
 
 # Credential-bearing environment files (keep examples)
 .env

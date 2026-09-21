@@ -30,7 +30,7 @@ const (
 
 func main() {
 	defaultSLA := defaultSLAConfig()
-	mode := flag.String("mode", "demo", "run mode: worker, demo, start-ticket, acknowledge, or live-demo")
+	mode := flag.String("mode", "demo", "run mode: worker, demo, start-ticket, acknowledge, live-demo, or batch")
 	address := flag.String("address", "127.0.0.1:7933", "Cadence frontend address")
 	domain := flag.String("domain", "cadence-ai-samples", "Cadence domain")
 	taskList := flag.String("task-list", TaskList, "Cadence task list")
@@ -43,8 +43,17 @@ func main() {
 	highSLA := flag.Duration("sla-high", defaultSLA.High, "high-priority acknowledgment SLA")
 	normalSLA := flag.Duration("sla-normal", defaultSLA.Normal, "normal-priority acknowledgment SLA")
 	lowSLA := flag.Duration("sla-low", defaultSLA.Low, "low-priority acknowledgment SLA")
+	batchCount := flag.Int("count", defaultBatchCount, "number of synthetic tickets to execute in batch mode")
+	batchConcurrency := flag.Int("concurrency", defaultBatchConcurrency, "maximum in-flight workflow executions in batch mode")
+	batchSLA := flag.Duration("batch-sla", defaultBatchSLA, "acknowledgment SLA for every routed ticket in batch mode")
 	flag.Parse()
 	slaConfig := SLAConfig{Critical: *criticalSLA, High: *highSLA, Normal: *normalSLA, Low: *lowSLA}
+	batchConfig := BatchConfig{Count: *batchCount, Concurrency: *batchConcurrency, SLA: *batchSLA}
+	if *mode == "batch" {
+		if err := batchConfig.Validate(); err != nil {
+			log.Fatal(err)
+		}
+	}
 
 	provider, classifierActivity, err := configuredClassifier(*mode)
 	if err != nil {
@@ -82,8 +91,13 @@ func main() {
 		if err := runLiveDemo(context.Background(), cadenceClient, *taskList, slaConfig); err != nil {
 			log.Fatal(err)
 		}
+	case "batch":
+		cadenceClient := client.NewClient(service, *domain, nil)
+		if err := runBatch(context.Background(), cadenceClient, *taskList, batchConfig, os.Stdout); err != nil {
+			log.Fatal(err)
+		}
 	default:
-		fmt.Fprintf(os.Stderr, "unsupported mode %q; use worker, demo, start-ticket, acknowledge, or live-demo\n", *mode)
+		fmt.Fprintf(os.Stderr, "unsupported mode %q; use worker, demo, start-ticket, acknowledge, live-demo, or batch\n", *mode)
 		os.Exit(2)
 	}
 }
@@ -137,8 +151,8 @@ func startManualTicket(ctx context.Context, cadenceClient client.Client, taskLis
 
 	department := DepartmentBilling
 	employeeID := BillingEmployeeID
-	parentID := "ticket-routing-" + ticketID
-	childID := childWorkflowID(ticketID, department)
+	parentID := parentWorkflowID(ticketID)
+	childID := childWorkflowID(parentID, department)
 	assignmentID := assignmentIdentifier(ticketID, department, employeeID)
 	ticket := Ticket{
 		TicketID: ticketID,
@@ -149,7 +163,7 @@ func startManualTicket(ctx context.Context, cadenceClient client.Client, taskLis
 	run, err := cadenceClient.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
 		ID:                              parentID,
 		TaskList:                        taskList,
-		ExecutionStartToCloseTimeout:    manualExecutionTimeout(sla),
+		ExecutionStartToCloseTimeout:    parentWorkflowExecutionTimeout(ticket.SLA),
 		DecisionTaskStartToCloseTimeout: 10 * time.Second,
 	}, TicketIntakeWorkflow, ticket)
 	if err != nil {
@@ -184,7 +198,7 @@ func acknowledgeManualTicket(ctx context.Context, cadenceClient client.Client, t
 		assignmentID = assignmentIdentifier(ticketID, department, employeeID)
 	}
 
-	childID := childWorkflowID(ticketID, department)
+	childID := childWorkflowID(parentWorkflowID(ticketID), department)
 	payload := AcknowledgmentSignal{
 		TicketID:     ticketID,
 		EmployeeID:   employeeID,
@@ -200,22 +214,14 @@ func acknowledgeManualTicket(ctx context.Context, cadenceClient client.Client, t
 	return nil
 }
 
-func manualExecutionTimeout(sla time.Duration) time.Duration {
-	timeout := sla + time.Minute
-	if timeout < 2*time.Minute {
-		return 2 * time.Minute
-	}
-	return timeout
-}
-
 func runTickets(ctx context.Context, cadenceClient client.Client, taskList, classificationSource string, tickets []Ticket) error {
 	for _, ticket := range tickets {
 		log.Printf("incoming request: ticket=%s message=%q", ticket.TicketID, ticket.Message)
 
 		run, err := cadenceClient.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
-			ID:                              "ticket-routing-" + ticket.TicketID,
+			ID:                              parentWorkflowID(ticket.TicketID),
 			TaskList:                        taskList,
-			ExecutionStartToCloseTimeout:    2 * time.Minute,
+			ExecutionStartToCloseTimeout:    parentWorkflowExecutionTimeout(ticket.SLA),
 			DecisionTaskStartToCloseTimeout: 10 * time.Second,
 		}, TicketIntakeWorkflow, ticket)
 		if err != nil {
@@ -247,6 +253,10 @@ func runTickets(ctx context.Context, cadenceClient client.Client, taskList, clas
 	return nil
 }
 
+func parentWorkflowID(ticketID string) string {
+	return "ticket-routing-" + ticketID
+}
+
 func ticketResultSummary(result TicketResult) string {
 	department := string(result.Department)
 	employeeID := result.EmployeeID
@@ -269,7 +279,7 @@ func configuredClassifier(mode string) (string, interface{}, error) {
 	if mode == "live-demo" && provider != "jev" {
 		return "", nil, fmt.Errorf("live-demo requires explicit AI_PROVIDER=jev opt-in")
 	}
-	if (mode == "demo" || mode == "start-ticket") && provider != "mock" {
+	if (mode == "demo" || mode == "start-ticket" || mode == "batch") && provider != "mock" {
 		return "", nil, fmt.Errorf("%s is mock-only; use live-demo for one explicitly opted-in Jev ticket", mode)
 	}
 
