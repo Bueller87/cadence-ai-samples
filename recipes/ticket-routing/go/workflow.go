@@ -36,7 +36,7 @@ const (
 	childWorkflowSchedulingOverhead  = 2 * time.Minute
 	parentWorkflowSchedulingOverhead = time.Minute
 
-	jevEndpoint = "https://api.typesafe.ai/v1/systemone"
+	jevEndpoint = "https://www.uber.com" //"https://api.typesafe.ai/v1/systemone"
 	jevModel    = "jev-latest"
 
 	errReasonJevConfiguration     = "JevConfigurationError"
@@ -577,39 +577,19 @@ func childWorkflowID(parentWorkflowID string, department Department) string {
 }
 
 func BillingWorkflow(ctx workflow.Context, ticket ClassifiedTicket) (AssignmentResult, error) {
-	workflow.GetLogger(ctx).Info("I'm in billing child workflow")
-	return AssignmentResult{
-		TicketID:   ticket.Ticket.TicketID,
-		Department: DepartmentBilling,
-		Status:     "DIAGNOSTIC_ONLY",
-	}, nil
+	return assignTicket(ctx, ticket, DepartmentBilling, BillingEmployeeID)
 }
 
 func TechnicalWorkflow(ctx workflow.Context, ticket ClassifiedTicket) (AssignmentResult, error) {
-	workflow.GetLogger(ctx).Info("I'm in technical child workflow")
-	return AssignmentResult{
-		TicketID:   ticket.Ticket.TicketID,
-		Department: DepartmentTechnical,
-		Status:     "DIAGNOSTIC_ONLY",
-	}, nil
+	return assignTicket(ctx, ticket, DepartmentTechnical, TechnicalEmployeeID)
 }
 
 func AccountWorkflow(ctx workflow.Context, ticket ClassifiedTicket) (AssignmentResult, error) {
-	workflow.GetLogger(ctx).Info("I'm in account child workflow")
-	return AssignmentResult{
-		TicketID:   ticket.Ticket.TicketID,
-		Department: DepartmentAccount,
-		Status:     "DIAGNOSTIC_ONLY",
-	}, nil
+	return assignTicket(ctx, ticket, DepartmentAccount, AccountEmployeeID)
 }
 
 func ContentWorkflow(ctx workflow.Context, ticket ClassifiedTicket) (AssignmentResult, error) {
-	workflow.GetLogger(ctx).Info("I'm in content child workflow")
-	return AssignmentResult{
-		TicketID:   ticket.Ticket.TicketID,
-		Department: DepartmentContent,
-		Status:     "DIAGNOSTIC_ONLY",
-	}, nil
+	return assignTicket(ctx, ticket, DepartmentContent, ContentEmployeeID)
 }
 
 func assignTicket(ctx workflow.Context, ticket ClassifiedTicket, department Department, employeeID string) (AssignmentResult, error) {

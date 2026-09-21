@@ -12,6 +12,7 @@ bin/
 *.out
 coverage.out
 *.exe
+recipes/ticket-routing/go/ticket-router
 
 # Credential-bearing environment files (keep examples)
 .env
