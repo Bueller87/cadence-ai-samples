@@ -1,6 +1,6 @@
 # Contributing
 
-Contributions should begin with a real-world problem or use case rather than an SDK feature.
+Start a contribution with a specific problem or use case, not a library feature.
 
 Before implementation:
 
@@ -12,7 +12,7 @@ When implementing a recipe:
 
 - Keep it independently runnable and free of dependencies on other recipes.
 - Keep workflow and Activity code easy to copy into another project.
-- Include a README with setup, execution instructions, architectural decisions, and expected behavior.
+- Include a README that explains how to run the recipe, what it does, and what users should expect.
 - Include mock or synthetic test data that contains no real customer information or proprietary data.
 - Keep credentials, secrets, and environment-specific configuration out of the repository.
 - Do not use employer-owned code, internal documentation, proprietary configurations, credentials, or other non-public assets.

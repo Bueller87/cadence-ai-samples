@@ -30,11 +30,11 @@
 
 ## AI model or agent responsibilities
 
-[Describe which tasks, if any, require a specialized decision model, generative model, or agent. Explain why deterministic code is insufficient for those tasks. Do not assume a particular provider or framework.]
+[Describe which tasks, if any, require a specialized decision model, generative model, or agent. Say what ordinary code cannot decide reliably. Do not assume a particular provider or framework.]
 
 ## Activity boundaries
 
-[List Activities and their responsibilities. Identify external calls and side effects, along with any idempotency requirements. All nondeterministic operations, including AI model calls, must execute in Activities rather than Workflow code.]
+[List Activities and their responsibilities. Identify external calls and side effects, along with any idempotency requirements. All nondeterministic operations, including AI model calls, must run in Activities, never in Workflow code.]
 
 ## Input and output schemas
 

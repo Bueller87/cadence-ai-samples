@@ -1,4 +1,4 @@
-# MacBook Pro — Cadence Mock Batch Test
+# MacBook Pro: Cadence mock batch test
 
 ## Goal
 
@@ -6,9 +6,9 @@ Run the same 10-ticket, concurrency-10 mock test on macOS to compare it with the
 
 - Branch: `kevin/batch-wip`
 - AI provider: mock
-- Child Workflows: current diagnostic stubs
-- No Jev API key or live AI calls
-- Windows comparison: 32.9–128.6 seconds for 10 concurrent tickets
+- Child Workflows: assignment and service-level agreement (SLA) timer enabled
+- No TypeSafe Jev API key or live AI calls
+- Windows comparison: 32.9 to 128.6 seconds for 10 concurrent tickets
 
 **Only run this personal project on the work Mac if company policy permits it. Do not copy personal API keys or employer data between machines.**
 
@@ -81,7 +81,7 @@ go build -o ticket-router .
 
 The resulting `ticket-router` is a **macOS executable**. Do not copy or attempt to run the Windows `.exe` on the Mac.
 
-## 4. Terminal 1 — Start ONE mock worker
+## 4. Terminal 1: start one mock worker
 
 From `recipes/ticket-routing/go`:
 
@@ -91,7 +91,7 @@ AI_PROVIDER=mock ./ticket-router -mode worker
 
 Leave this terminal running.
 
-## 5. Terminal 2 — Run the benchmark
+## 5. Terminal 2: run the batch test
 
 Open another Terminal window and navigate to the same Go directory:
 
@@ -114,7 +114,7 @@ Record:
 - Batch wall-clock duration
 - Minimum, average, and maximum per-execution wait
 
-The current Child Workflow stubs return immediately without running an SLA timer, so **zero `SLA_TIMEOUT` results is expected**.
+The batch runner does not send acknowledgment Signals, so all routed tickets should complete with `SLA_TIMEOUT`.
 
 ## 6. Optional sequential comparison
 
