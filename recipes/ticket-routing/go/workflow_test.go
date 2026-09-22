@@ -566,6 +566,8 @@ func TestJevClassifierSendsAndParsesDocumentedContract(t *testing.T) {
 	require.Equal(t, "jev-1.13.0", decision.Model)
 	require.Equal(t, 412, decision.InputTokens)
 	require.Equal(t, 47, decision.OutputTokens)
+	require.True(t, decision.TokenUsageReported)
+	require.Greater(t, decision.InferenceLatency, time.Duration(0))
 	require.False(t, decision.PriorityUncertain)
 	require.False(t, decision.ComplexityUncertain)
 }
@@ -589,6 +591,28 @@ func TestLiveDemoRequiresExplicitJevOptIn(t *testing.T) {
 	require.Contains(t, err.Error(), "AI_PROVIDER=jev")
 }
 
+func TestLiveBatchRequiresExplicitJevOptInWithoutCallingProvider(t *testing.T) {
+	t.Setenv("AI_PROVIDER", "")
+	_, _, err := configuredClassifier("live-batch")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "AI_PROVIDER=jev")
+
+	t.Setenv("AI_PROVIDER", "jev")
+	provider, classifier, err := configuredClassifier("live-batch")
+	require.NoError(t, err)
+	require.Equal(t, "jev", provider)
+	require.Nil(t, classifier, "the starter must not construct or invoke a Jev HTTP client")
+}
+
+func TestJevModesRequireDedicatedExplicitTaskList(t *testing.T) {
+	require.Error(t, validateLiveTaskList("worker", "jev", TaskList, true))
+	require.Error(t, validateLiveTaskList("worker", "jev", "ticket-routing-jev", false))
+	require.NoError(t, validateLiveTaskList("worker", "jev", "ticket-routing-jev", true))
+	require.Error(t, validateLiveTaskList("live-demo", "jev", TaskList, true))
+	require.NoError(t, validateLiveTaskList("live-demo", "jev", "ticket-routing-jev", true))
+	require.NoError(t, validateLiveTaskList("worker", "mock", TaskList, false))
+}
+
 func TestFourTicketDemoRejectsJevProvider(t *testing.T) {
 	t.Setenv("AI_PROVIDER", "jev")
 	_, _, err := configuredClassifier("demo")
@@ -601,6 +625,44 @@ func TestManualTicketStarterRejectsJevProvider(t *testing.T) {
 	_, _, err := configuredClassifier("start-ticket")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "mock-only")
+}
+
+func TestMockBatchRemainsMockOnly(t *testing.T) {
+	t.Setenv("AI_PROVIDER", "mock")
+	provider, classifier, err := configuredClassifier("batch")
+	require.NoError(t, err)
+	require.Equal(t, "mock", provider)
+	require.NotNil(t, classifier)
+
+	t.Setenv("AI_PROVIDER", "jev")
+	_, _, err = configuredClassifier("batch")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "mock-only")
+}
+
+func TestJevClassifierRecordsTimingWhenUsageIsMissing(t *testing.T) {
+	var response jevResponse
+	require.NoError(t, json.Unmarshal([]byte(validJevResponse), &response))
+	response.Usage = nil
+	body, err := json.Marshal(response)
+	require.NoError(t, err)
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		time.Sleep(5 * time.Millisecond)
+		writer.Header().Set("Content-Type", "application/json")
+		_, writeErr := writer.Write(body)
+		require.NoError(t, writeErr)
+	}))
+	defer server.Close()
+
+	classifier, err := newJevClassifier("test-api-key", server.URL, jevModel, server.Client())
+	require.NoError(t, err)
+	decision, err := classifier.ClassifyTicket(t.Context(), Ticket{TicketID: "missing-usage-001", Message: "Synthetic request."})
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, decision.InferenceLatency, 5*time.Millisecond)
+	require.False(t, decision.TokenUsageReported)
+	require.Zero(t, decision.InputTokens)
+	require.Zero(t, decision.OutputTokens)
 }
 
 func TestJevClassifierMarksInformationalLowConfidenceAsUncertain(t *testing.T) {

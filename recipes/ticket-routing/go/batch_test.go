@@ -157,6 +157,60 @@ func TestRunBoundedBatchAggregatesFailuresAndResults(t *testing.T) {
 	require.Contains(t, summary.String(), "Peak in-flight executions:")
 }
 
+func TestRunBoundedBatchAggregatesJevMetricsAndMissingUsage(t *testing.T) {
+	jobs := []batchJob{
+		{WorkflowID: "workflow-1", Ticket: Ticket{TicketID: "ticket-1"}},
+		{WorkflowID: "workflow-2", Ticket: Ticket{TicketID: "ticket-2"}},
+		{WorkflowID: "workflow-3", Ticket: Ticket{TicketID: "ticket-3"}},
+	}
+	summary := runBoundedBatch(context.Background(), jobs, 2, func(_ context.Context, job batchJob) (TicketResult, error) {
+		switch job.Ticket.TicketID {
+		case "ticket-1":
+			return TicketResult{
+				Department: DepartmentBilling,
+				Status:     StatusSLATimeout,
+				Classification: RoutingDecision{
+					InferenceLatency:   100 * time.Millisecond,
+					InputTokens:        600,
+					OutputTokens:       120,
+					TokenUsageReported: true,
+				},
+			}, nil
+		case "ticket-2":
+			return TicketResult{
+				Status: StatusUnroutable,
+				Classification: RoutingDecision{
+					InferenceLatency: 200 * time.Millisecond,
+				},
+			}, nil
+		default:
+			return TicketResult{}, fmt.Errorf("synthetic Cadence failure")
+		}
+	})
+
+	require.Equal(t, 2, summary.Completed)
+	require.Equal(t, 1, summary.Failed)
+	require.Equal(t, 2, summary.JevResponses)
+	require.Equal(t, 300*time.Millisecond, summary.JevInferenceTotal)
+	require.Equal(t, 100*time.Millisecond, summary.JevInferenceMin)
+	require.Equal(t, 200*time.Millisecond, summary.JevInferenceMax)
+	require.Equal(t, 150*time.Millisecond, summary.averageJevInferenceLatency())
+	require.Equal(t, int64(600), summary.InputTokens)
+	require.Equal(t, int64(120), summary.OutputTokens)
+	require.Equal(t, 1, summary.MissingTokenUsage)
+	require.Len(t, summary.ExecutionTimings, 3)
+
+	price := 0.042
+	report := summary.LiveString(time.Second, &price)
+	require.Contains(t, report, "Technically failed executions: 1")
+	require.Contains(t, report, "Successful Jev HTTP inference latency")
+	require.Contains(t, report, "Provider-reported input tokens: 600")
+	require.Contains(t, report, "Successful responses missing complete token usage: 1")
+	require.Contains(t, report, "Illustrative successful-response input cost: $0.00002520")
+	require.Contains(t, report, "Per-ticket timing details:")
+	require.Contains(t, report, "Token and cost totals cover successful recorded responses only")
+}
+
 func TestBatchConfigValidation(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -183,4 +237,64 @@ func TestBatchConfigValidation(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestLiveBatchConfigRequiresExplicitBoundedOptIn(t *testing.T) {
+	price := 0.042
+	valid := LiveBatchConfig{
+		BatchConfig:               BatchConfig{Count: 3, Concurrency: 1, SLA: time.Second},
+		Provider:                  "jev",
+		CountExplicit:             true,
+		ConcurrencyExplicit:       true,
+		ConfirmLive:               true,
+		TaskList:                  "ticket-routing-jev",
+		TaskListExplicit:          true,
+		InputTokenPricePerMillion: &price,
+	}
+	require.NoError(t, valid.Validate())
+
+	tests := []struct {
+		name   string
+		mutate func(*LiveBatchConfig)
+	}{
+		{name: "mock provider", mutate: func(config *LiveBatchConfig) { config.Provider = "mock" }},
+		{name: "implicit count", mutate: func(config *LiveBatchConfig) { config.CountExplicit = false }},
+		{name: "implicit concurrency", mutate: func(config *LiveBatchConfig) { config.ConcurrencyExplicit = false }},
+		{name: "zero count", mutate: func(config *LiveBatchConfig) { config.Count = 0 }},
+		{name: "count above limit", mutate: func(config *LiveBatchConfig) { config.Count = maximumLiveBatchCount + 1 }},
+		{name: "zero concurrency", mutate: func(config *LiveBatchConfig) { config.Concurrency = 0 }},
+		{name: "concurrency above limit", mutate: func(config *LiveBatchConfig) { config.Concurrency = maximumLiveConcurrency + 1 }},
+		{name: "concurrency above count", mutate: func(config *LiveBatchConfig) {
+			config.Count = 1
+			config.Concurrency = 2
+		}},
+		{name: "confirmation missing", mutate: func(config *LiveBatchConfig) { config.ConfirmLive = false }},
+		{name: "implicit task list", mutate: func(config *LiveBatchConfig) { config.TaskListExplicit = false }},
+		{name: "shared task list", mutate: func(config *LiveBatchConfig) { config.TaskList = TaskList }},
+		{name: "negative price", mutate: func(config *LiveBatchConfig) { bad := -1.0; config.InputTokenPricePerMillion = &bad }},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			config := valid
+			test.mutate(&config)
+			require.Error(t, config.Validate())
+		})
+	}
+}
+
+func TestRunLiveBatchRejectsBeforeWorkflowSubmission(t *testing.T) {
+	config := LiveBatchConfig{
+		BatchConfig:         BatchConfig{Count: 3, Concurrency: 1, SLA: time.Second},
+		Provider:            "jev",
+		CountExplicit:       true,
+		ConcurrencyExplicit: true,
+		ConfirmLive:         false,
+		TaskList:            "ticket-routing-jev",
+		TaskListExplicit:    true,
+	}
+
+	err := runLiveBatch(context.Background(), nil, config, nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "-confirm-live")
 }
