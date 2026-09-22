@@ -30,10 +30,13 @@ const (
 	StatusSLATimeout             = "SLA_TIMEOUT"
 	StatusUnroutable             = "UNROUTABLE"
 
-	minimumDepartmentConfidence    = 0.65
-	minimumInformationalConfidence = 0.65
+	minimumDepartmentConfidence      = 0.65
+	minimumInformationalConfidence   = 0.65
+	classificationScheduleToClose    = 2 * time.Minute
+	childWorkflowSchedulingOverhead  = 2 * time.Minute
+	parentWorkflowSchedulingOverhead = time.Minute
 
-	jevEndpoint = "https://api.typesafe.ai/v1/systemone"
+	jevEndpoint = "https://www.uber.com" //"https://api.typesafe.ai/v1/systemone"
 	jevModel    = "jev-latest"
 
 	errReasonJevConfiguration     = "JevConfigurationError"
@@ -158,7 +161,7 @@ func TicketIntakeWorkflow(ctx workflow.Context, ticket Ticket) (TicketResult, er
 	activityOptions := workflow.ActivityOptions{
 		ScheduleToStartTimeout: time.Minute,
 		StartToCloseTimeout:    30 * time.Second,
-		ScheduleToCloseTimeout: 2 * time.Minute,
+		ScheduleToCloseTimeout: classificationScheduleToClose,
 		RetryPolicy: &cadence.RetryPolicy{
 			InitialInterval:    time.Second,
 			BackoffCoefficient: 2,
@@ -190,10 +193,11 @@ func TicketIntakeWorkflow(ctx workflow.Context, ticket Ticket) (TicketResult, er
 	}
 
 	classified := ClassifiedTicket{Ticket: ticket, Classification: decision}
-	childID := childWorkflowID(ticket.TicketID, decision.Department)
+	parentWorkflowID := workflow.GetInfo(ctx).WorkflowExecution.ID
+	childID := childWorkflowID(parentWorkflowID, decision.Department)
 	childContext := workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{
 		WorkflowID:                   childID,
-		ExecutionStartToCloseTimeout: time.Minute,
+		ExecutionStartToCloseTimeout: childWorkflowExecutionTimeout(acknowledgmentSLA(decision.Priority, ticket.SLA)),
 		TaskStartToCloseTimeout:      10 * time.Second,
 	})
 
@@ -568,8 +572,8 @@ func validComplexity(value Complexity) bool {
 	return value == ComplexityTier1 || value == ComplexityTier2 || value == ComplexityTier3
 }
 
-func childWorkflowID(ticketID string, department Department) string {
-	return fmt.Sprintf("ticket-routing-child-%s-%s", ticketID, department)
+func childWorkflowID(parentWorkflowID string, department Department) string {
+	return fmt.Sprintf("%s-child-%s", parentWorkflowID, department)
 }
 
 func BillingWorkflow(ctx workflow.Context, ticket ClassifiedTicket) (AssignmentResult, error) {
@@ -728,6 +732,20 @@ func acknowledgmentSLA(priority Priority, config SLAConfig) time.Duration {
 	default:
 		return defaults.Normal
 	}
+}
+
+func childWorkflowExecutionTimeout(sla time.Duration) time.Duration {
+	return sla + childWorkflowSchedulingOverhead
+}
+
+func parentWorkflowExecutionTimeout(config SLAConfig) time.Duration {
+	longestSLA := acknowledgmentSLA(PriorityCritical, config)
+	for _, priority := range []Priority{PriorityHigh, PriorityNormal, PriorityLow} {
+		if sla := acknowledgmentSLA(priority, config); sla > longestSLA {
+			longestSLA = sla
+		}
+	}
+	return classificationScheduleToClose + childWorkflowExecutionTimeout(longestSLA) + parentWorkflowSchedulingOverhead
 }
 
 func defaultSLAConfig() SLAConfig {

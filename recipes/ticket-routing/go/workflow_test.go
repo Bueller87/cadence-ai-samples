@@ -18,8 +18,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/cadence"
 	"go.uber.org/cadence/client"
+	"go.uber.org/cadence/encoded"
 	cadencemocks "go.uber.org/cadence/mocks"
 	"go.uber.org/cadence/testsuite"
+	"go.uber.org/cadence/workflow"
 )
 
 func TestSyntheticTicketDataset(t *testing.T) {
@@ -83,7 +85,7 @@ func TestStartManualTicketDisplaysAcknowledgmentDetails(t *testing.T) {
 		mock.MatchedBy(func(options client.StartWorkflowOptions) bool {
 			return options.ID == "ticket-routing-manual-test-001" &&
 				options.TaskList == TaskList &&
-				options.ExecutionStartToCloseTimeout == 3*time.Minute
+				options.ExecutionStartToCloseTimeout == 7*time.Minute
 		}),
 		mock.Anything,
 		mock.MatchedBy(func(ticket Ticket) bool {
@@ -99,7 +101,7 @@ func TestStartManualTicketDisplaysAcknowledgmentDetails(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, output.String(), "parent workflow ID: ticket-routing-manual-test-001")
 	require.Contains(t, output.String(), "parent run ID: run-manual-001")
-	require.Contains(t, output.String(), "child workflow ID: ticket-routing-child-manual-test-001-billing")
+	require.Contains(t, output.String(), "child workflow ID: ticket-routing-manual-test-001-child-billing")
 	require.Contains(t, output.String(), "employee ID: "+BillingEmployeeID)
 	require.Contains(t, output.String(), "assignment ID: manual-test-001:billing:"+BillingEmployeeID)
 	require.Contains(t, output.String(), "signal name: "+AcknowledgmentSignalName)
@@ -122,7 +124,7 @@ func TestAcknowledgeManualTicketSendsTypedSignal(t *testing.T) {
 	cadenceClient.On(
 		"SignalWorkflow",
 		mock.Anything,
-		"ticket-routing-child-manual-test-002-billing",
+		"ticket-routing-manual-test-002-child-billing",
 		"",
 		AcknowledgmentSignalName,
 		expected,
@@ -154,7 +156,10 @@ func TestTicketIntakeWorkflowRoutesEveryDepartment(t *testing.T) {
 			ticket := Ticket{TicketID: "route-" + test.name, Message: "synthetic test ticket", SLA: testSLAConfig(10 * time.Second)}
 			decision := validDecision(test.department)
 			env.OnActivity(ClassifyTicket, mock.Anything, ticket).Return(decision, nil).Once()
-			childID := childWorkflowID(ticket.TicketID, test.department)
+			var childID string
+			env.SetOnChildWorkflowStartedListener(func(info *workflow.Info, _ workflow.Context, _ encoded.Values) {
+				childID = info.WorkflowExecution.ID
+			})
 			acknowledgment := AcknowledgmentSignal{
 				TicketID:     ticket.TicketID,
 				EmployeeID:   test.employeeID,
@@ -175,6 +180,8 @@ func TestTicketIntakeWorkflowRoutesEveryDepartment(t *testing.T) {
 			require.Equal(t, acknowledgment.AssignmentID, result.AssignmentID)
 			require.Equal(t, StatusAcknowledged, result.Status)
 			require.True(t, result.SLAMet)
+			require.NotEmpty(t, childID)
+			require.Contains(t, childID, "-child-"+string(test.department))
 			require.Equal(t, childID, result.ChildWorkflowID)
 			env.AssertExpectations(t)
 		})
@@ -411,6 +418,39 @@ func TestAcknowledgmentSLADurationsByPriority(t *testing.T) {
 	require.Equal(t, 4*time.Second, acknowledgmentSLA(PriorityHigh, config))
 	require.Equal(t, 6*time.Second, acknowledgmentSLA(PriorityNormal, config))
 	require.Equal(t, 8*time.Second, acknowledgmentSLA(PriorityLow, config))
+}
+
+func TestWorkflowExecutionTimeoutsIncludeSLAAndSchedulingOverhead(t *testing.T) {
+	sla := 90 * time.Second
+	config := testSLAConfig(sla)
+
+	require.Equal(t, 3*time.Minute+30*time.Second, childWorkflowExecutionTimeout(sla))
+	require.Equal(t, 6*time.Minute+30*time.Second, parentWorkflowExecutionTimeout(config))
+	require.Greater(t, childWorkflowExecutionTimeout(sla), sla)
+	require.Greater(t, parentWorkflowExecutionTimeout(config), classificationScheduleToClose+childWorkflowExecutionTimeout(sla))
+}
+
+func TestTicketIntakeWorkflowAllowsSLAOverOneMinute(t *testing.T) {
+	env := newWorkflowEnvironment(t)
+	env.OnActivity(ClassifyTicket, mock.Anything, mock.Anything).Return(validDecision(DepartmentBilling), nil).Once()
+	var childExecutionTimeout time.Duration
+	env.SetOnChildWorkflowStartedListener(func(info *workflow.Info, _ workflow.Context, _ encoded.Values) {
+		childExecutionTimeout = time.Duration(info.ExecutionStartToCloseTimeoutSeconds) * time.Second
+	})
+
+	env.ExecuteWorkflow(TicketIntakeWorkflow, Ticket{
+		TicketID: "delayed-child-001",
+		Message:  "I was charged twice.",
+		SLA:      testSLAConfig(90 * time.Second),
+	})
+
+	require.True(t, env.IsWorkflowCompleted())
+	require.NoError(t, env.GetWorkflowError())
+	var result TicketResult
+	require.NoError(t, env.GetWorkflowResult(&result))
+	require.Equal(t, StatusSLATimeout, result.Status)
+	require.Equal(t, 90*time.Second, result.SLADuration)
+	require.Equal(t, 3*time.Minute+30*time.Second, childExecutionTimeout)
 }
 
 func TestTicketIntakeWorkflowReturnsSLATimeout(t *testing.T) {

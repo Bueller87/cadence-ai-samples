@@ -37,10 +37,10 @@ Choose exactly one value for each label:
 
 - Distribute records across all four departments. Unless another distribution is provided, keep the department counts approximately balanced.
 - Include billing questions, technical support requests, account-management requests, and content-related questions.
-- Make roughly 15–25% of requests ambiguous, incomplete, unusual, or multi-intent. Still assign the single department that should own the primary issue.
+- Make roughly 15 to 25% of requests ambiguous, incomplete, unusual, or multi-intent. Still assign the single department that should own the primary issue.
 - Vary priority and complexity while keeping the labels plausible. Include all priority and complexity values, but keep `critical` uncommon.
-- Mix writing styles and lengths: terse fragments, ordinary sentences, detailed descriptions, polite questions, frustrated messages, casual mobile text, and messages from less-technical users.
-- Include realistic misspellings, omitted punctuation, shorthand, and incomplete information in some—not all—messages.
+- Vary writing style and length. Use both polite and frustrated tones. Include fragments, detailed descriptions, casual mobile text, and messages from less-technical users.
+- Use realistic misspellings, omitted punctuation, shorthand, and incomplete information sparingly.
 - Avoid repetitive templates and obvious label words in every message. Make the classification depend on meaning, not only keywords.
 - Keep every `ticket_id` unique within the output and distinct from IDs already present in the target fixture.
 
@@ -48,6 +48,6 @@ Choose exactly one value for each label:
 
 Invent all requests and identifiers. Do not use or imitate real customer records, names, email addresses, account numbers, payment-card details, credentials, API keys, proprietary documentation, or non-public company information.
 
-The expected labels are **proposed ground truth**, not independently verified truth. A human familiar with the classification policy must review and approve them before the data is used for classification-accuracy benchmarks, model comparisons, or quality claims. Ambiguous and multi-intent examples deserve particular review.
+The expected labels are **proposed ground truth** and have not been verified independently. A human familiar with the classification policy must review and approve them before the data is used for classification-accuracy benchmarks, model comparisons, or quality claims. Ambiguous and multi-intent examples deserve particular review.
 
 Before returning the data, silently verify that every line is valid JSON, every ID is unique, every label is from the allowed sets, and the output contains exactly **[record count]** records.

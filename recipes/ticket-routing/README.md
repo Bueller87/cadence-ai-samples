@@ -4,10 +4,12 @@ This recipe uses Cadence to route fictional customer-support tickets for StreamW
 
 The recipe supports two classifier modes:
 
-- `mock` is the default. It uses repeatable keyword rules, makes no network calls, and needs no credentials. Its confidence values are illustrative—not model quality, accuracy, token usage, or cost measurements.
-- `jev` is an explicit opt-in. It sends one request containing three independent Choice questions to TypeSafe System One and records the returned choices, probability distributions, confidence values, model identifier, and token usage.
+- `mock` is the default. It uses repeatable keyword rules, makes no network calls, and needs no credentials. Its confidence values are examples. They do not measure model quality, accuracy, token usage, or cost.
+- `jev` is an explicit opt-in for TypeSafe System One. It sends one request containing three independent Choice questions and records the returned choices, probability distributions, confidence values, model identifier, and token usage.
 
 ## Architecture
+
+Cadence Web provides a Custom Workflow Control (CWC) for acknowledging an assignment. Each assignment also has a service-level agreement (SLA) timer.
 
 ```text
 TicketIntakeWorkflow
@@ -38,7 +40,7 @@ docker compose -f docker/docker-compose.yml up -d
 cadence --domain cadence-ai-samples domain register
 ```
 
-Cadence Web is normally available at <http://localhost:8088>. Unit tests use the SDK test environment and local HTTP test servers; they do not need a Cadence server, Jev credentials, or paid API calls.
+Cadence Web is normally available at <http://localhost:8088>. Unit tests use the Cadence test environment and local HTTP test servers; they do not need a Cadence server, Jev credentials, or paid API calls.
 
 ## Run with the mock classifier
 
@@ -55,7 +57,7 @@ $env:AI_PROVIDER = "mock"
 go run . -mode worker
 ```
 
-Run the four fictional Phase 1 tickets in the second terminal:
+Run the four fictional demo tickets in the second terminal:
 
 ```powershell
 go run . -mode demo
@@ -127,9 +129,9 @@ The starter prints the department Child Workflow ID and waits for the final resu
 Start-Process "http://localhost:8088"
 ```
 
-In Cadence Web, select the `cadence-ai-samples` domain, open the Child Workflow ID printed by the starter (`ticket-routing-child-cwc-billing-001-billing`), open its **Queries** tab, select `ticket-assignment`, and run the query. Confirm the ticket, department, employee, priority, SLA duration/deadline, and `AWAITING_ACKNOWLEDGMENT` status, then click **Acknowledge Ticket**.
+In Cadence Web, select the `cadence-ai-samples` domain, open the Child Workflow ID printed by the starter (`ticket-routing-cwc-billing-001-child-billing`), open its **Queries** tab, select `ticket-assignment`, and run the query. Confirm the ticket, department, employee, priority, SLA duration/deadline, and `AWAITING_ACKNOWLEDGMENT` status, then click **Acknowledge Ticket**.
 
-The button sends `acknowledge-assignment` to that Child Workflow with the same ticket, employee, and assignment identifiers used by the CLI. It acknowledges the employee assignment; it does not resolve the customer's support request. Terminal 2 then displays:
+The button sends `acknowledge-assignment` to that Child Workflow with the same ticket, employee, and assignment identifiers used by the command-line interface (CLI). It acknowledges the employee assignment; it does not resolve the customer's support request. Terminal 2 then displays:
 
 ```text
 Workflow status: Completed
@@ -148,7 +150,7 @@ To demonstrate the missed-SLA outcome, start a new ticket and do not click the b
 go run . -mode start-ticket -ticket-id cwc-timeout-001 -manual-sla 20s
 ```
 
-Terminal 2 reports `Business status: SLA_TIMEOUT` and `SLA met: NO`. The timeout remains a successfully completed workflow execution, not a workflow failure. CWC rendering and clicking require live Cadence Web, so automated tests verify the response envelope, Markdown action, payload, shared Signal path, terminal no-action state, and workflow results—not browser rendering.
+Terminal 2 reports `Business status: SLA_TIMEOUT` and `SLA met: NO`. A timeout still completes the workflow execution successfully. CWC rendering and clicking require live Cadence Web. Automated tests cover the response envelope, Markdown action, payload, shared Signal path, terminal no-action state, and workflow results. Browser rendering requires a manual check.
 
 ## Run one ticket with real Jev
 
@@ -201,7 +203,7 @@ The first live integration test used one real Jev API call with a synthetic bill
 | Estimated input inference cost | `$0.00002814` |
 | Estimated output inference cost | `$0.00` |
 
-The Billing Child Workflow completed successfully, with an observed Child Workflow duration of 28 ms before the Phase 3A acknowledgment wait was introduced. That duration is neither Jev inference latency nor end-to-end workflow latency. This single-call observation is not a performance benchmark, and the estimated inference cost excludes infrastructure and any additional API calls.
+The Billing Child Workflow completed successfully, with an observed duration of 28 ms before the acknowledgment wait was added. That duration does not measure Jev inference or the full workflow. This single call does not provide enough data for a performance benchmark. The estimated inference cost excludes infrastructure and any additional API calls.
 
 ## Reliability and result interpretation
 
@@ -209,15 +211,15 @@ The Jev HTTP call has a finite client timeout and runs inside an Activity with b
 
 A failed or timed-out Activity attempt may have reached Jev and can consume additional API usage when Cadence retries it. Only a successfully completed Activity result recorded in workflow history is reused without another inference request during replay.
 
-`UNROUTABLE` is a successful business result: Jev returned a response, but the department label was unsupported or its confidence was below `0.65`, so no department Child Workflow started. A workflow execution failure means classification could not produce a valid result—for example because of authentication, HTTP, timeout, or malformed-response errors. Low-confidence priority or complexity values remain informational and are marked uncertain rather than converted into provider failures.
+`UNROUTABLE` is a successful business result. Jev returned a response, but the department label was unsupported or its confidence was below `0.65`, so no department Child Workflow started. A workflow execution fails when classification cannot produce a valid result because of authentication, HTTP, timeout, or malformed-response errors. Low-confidence priority or complexity values remain informational and are marked uncertain instead of failing the Activity.
 
 For a routed ticket, `ACKNOWLEDGED` means the Child Workflow received a valid matching Signal before its SLA timer fired and returns `sla_met: true`. `SLA_TIMEOUT` means the durable timer won and returns `sla_met: false`, after which the workflow completes without reassignment or escalation. Both are completed workflow executions. If a Signal and timer are both ready on the same Workflow task, timeout wins deterministically.
 
 ## Synthetic ticket dataset
 
-[testdata/tickets.jsonl](testdata/tickets.jsonl) contains 40 fictional StreamWave requests, balanced across billing, technical, account, and content. Each JSONL record uses the runtime `ticket_id` and `message` fields plus test-only `expected_department`, `expected_priority`, and `expected_complexity` labels. The fixture includes varied lengths and writing styles, misspellings, incomplete requests, and ambiguous or multi-intent cases.
+[testdata/tickets.jsonl](testdata/tickets.jsonl) contains 40 fictional StreamWave requests, balanced across billing, technical, account, and content. Each JSON Lines (JSONL) record uses the runtime `ticket_id` and `message` fields plus test-only `expected_department`, `expected_priority`, and `expected_complexity` labels. The fixture includes varied lengths and writing styles, misspellings, incomplete requests, and ambiguous or multi-intent cases.
 
-The expected labels are provisional and should be reviewed—especially for ambiguous cases—before they are used as ground truth in classification-accuracy benchmarks or quality claims. [PROMPT.md](PROMPT.md) provides a reusable prompt for generating additional schema-compatible synthetic requests without adding a generation dependency to the application.
+The expected labels are provisional. Review them, especially the ambiguous cases, before using them as ground truth in classification-accuracy benchmarks or quality claims. [PROMPT.md](PROMPT.md) provides a reusable prompt for generating additional schema-compatible synthetic requests without adding a generation dependency to the application.
 
 Validate the included fixture from `recipes/ticket-routing/go`:
 
@@ -225,24 +227,59 @@ Validate the included fixture from `recipes/ticket-routing/go`:
 go test ./... -run TestSyntheticTicketDataset
 ```
 
-This checks JSONL parsing, the exact 40-record count, unique ticket IDs, valid labels, and the department distribution. Phase 4A does not execute the dataset as a batch.
+This checks JSONL parsing, the exact 40-record count, unique ticket IDs, valid labels, and the department distribution.
+
+## Bounded mock batch
+
+The `batch` mode starts one independent `TicketIntakeWorkflow` per fixture record. It validates the JSONL dataset before submission, repeats the unchanged 40-record fixture when `-count` is larger than 40, and gives every execution a unique ticket and workflow ID. The expected labels are only provisional fixture metadata: the runner does not use them to route tickets or calculate classification accuracy.
+
+Start the mock worker in one PowerShell terminal, from the repository root:
+
+```powershell
+Set-Location .\recipes\ticket-routing\go
+$env:AI_PROVIDER = "mock"
+go run . -mode worker
+```
+
+In another terminal, change to the same `go` directory and run 40 tickets with the default one-second SLA and at most 10 workflows in flight:
+
+```powershell
+Set-Location .\recipes\ticket-routing\go
+go run . -mode batch -count 40 -concurrency 10 -batch-sla 1s
+```
+
+To repeat the fixture and run 1,000 mock tickets with a bounded 25-workflow concurrency:
+
+```powershell
+Set-Location .\recipes\ticket-routing\go
+go run . -mode batch -count 1000 -concurrency 25 -batch-sla 1s
+```
+
+No acknowledgment Signals are sent in batch mode. Routed tickets therefore complete with `SLA_TIMEOUT`; workflow-engine failures are counted separately. The terminal summary reports submitted, completed, failed, `UNROUTABLE`, `ACKNOWLEDGED`, and `SLA_TIMEOUT` totals. It also reports department totals, peak in-flight executions, wall-clock duration, per-execution client wait times, and completed workflows per second. Every failed execution includes its workflow ID, ticket ID, start time, elapsed time, and Cadence error. The one-second business SLA does not impose a one-second workflow execution timeout. Bounded parent and Child Workflow timeouts include scheduling and execution overhead so delayed workflow tasks can still process the durable SLA timer. Use this batch to try the flow. It does not measure performance, classification accuracy, provider cost, or latency.
 
 ## Build and test
 
 From `recipes/ticket-routing/go`:
 
 ```powershell
-gofmt -w main.go workflow.go workflow_test.go
+gofmt -w main.go workflow.go workflow_test.go batch.go batch_test.go
 go build ./...
 go test ./...
 ```
 
-Tests cover the CWC response and payload, terminal no-action controls, timer cancellation, explicit SLA results, manual starter and typed acknowledgment command, parent and Child Workflows, all four routing branches, acknowledgment, timeout, invalid and duplicate Signals, the Signal/timer boundary, invalid classifications, mock behavior, the complete Jev request structure, response parsing, token usage, missing-key handling, transient and nonretryable HTTP errors, network failures, and malformed responses. Automated tests never contact Cadence or TypeSafe.
+Tests cover:
+
+- CWC responses, acknowledgment commands, timer cancellation, SLA results, and the signal/deadline race.
+- Parent and Child Workflows, all four routes, `UNROUTABLE` results, acknowledgment, timeout, and invalid or duplicate Signals.
+- Mock classification, dataset validation, repeated fixtures, bounded concurrency, invalid batch configuration, aggregation, and failures.
+- Jev requests, response parsing, token usage, missing keys, HTTP errors, network failures, and malformed responses.
+
+Automated tests never contact Cadence or TypeSafe.
 
 ## Copying the recipe
 
-Start with `go/workflow.go` and `go/main.go`. `workflow.go` contains the Workflow, Activities, typed data, mock rules, and small Jev HTTP implementation; `main.go` selects and registers the Activity implementation. No shared repository package or third-party AI SDK is required.
+Start with `go/workflow.go` and `go/main.go`. `workflow.go` contains the Workflow, Activities, typed data, mock rules, and small Jev HTTP implementation; `main.go` selects and registers the Activity implementation. No shared repository package or third-party AI client library is required.
 
 ## Deferred features
 
-Phase 3C intentionally does not include automatic employee simulation, reassignment, skill matching, workload balancing, multi-level escalation, synthetic dataset generation, batch execution, metrics, or benchmarks. Those remain deferred to later phases.
+The recipe still intentionally does not include automatic employee acknowledgment simulation, reassignment, skill matching, workload balancing, multi-level escalation, classification-accuracy scoring, provider cost or latency benchmarking, or production performance claims. Those remain deferred to later phases.
