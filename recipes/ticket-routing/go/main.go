@@ -47,6 +47,8 @@ func main() {
 	batchConcurrency := flag.Int("concurrency", defaultBatchConcurrency, "maximum in-flight workflow executions in batch mode")
 	batchSLA := flag.Duration("batch-sla", defaultBatchSLA, "acknowledgment SLA for every routed ticket in batch mode")
 	confirmLive := flag.Bool("confirm-live", false, "confirm that live-batch may consume real Jev API usage")
+	liveSample := flag.String("sample", liveSampleSequential, "live-batch dataset selection: sequential or balanced")
+	showClassifications := flag.Bool("show-classifications", false, "print ordered per-ticket classifications in live-batch mode")
 	inputTokenPrice := flag.Float64("input-token-price-per-million", 0, "optional input-token price per million tokens for illustrative live-batch cost")
 	flag.Parse()
 	explicitFlags := make(map[string]bool)
@@ -68,6 +70,8 @@ func main() {
 		ConfirmLive:               *confirmLive,
 		TaskList:                  *taskList,
 		TaskListExplicit:          explicitFlags["task-list"],
+		Sample:                    *liveSample,
+		ShowClassifications:       *showClassifications,
 		InputTokenPricePerMillion: inputTokenPricePointer,
 	}
 	if *mode == "batch" {
@@ -76,7 +80,7 @@ func main() {
 		}
 	}
 	if *mode == "live-batch" {
-		fmt.Printf("Requested live Jev batch: count=%d concurrency=%d task-list=%s\n", *batchCount, *batchConcurrency, *taskList)
+		fmt.Printf("Requested live Jev batch: count=%d concurrency=%d sample=%s task-list=%s\n", *batchCount, *batchConcurrency, *liveSample, *taskList)
 		if err := liveBatchConfig.Validate(); err != nil {
 			log.Fatal(err)
 		}

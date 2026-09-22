@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -27,6 +28,8 @@ const (
 	maximumDatasetLineSize  = 1 << 20
 	maximumLiveBatchCount   = 10
 	maximumLiveConcurrency  = 5
+	liveSampleSequential    = "sequential"
+	liveSampleBalanced      = "balanced"
 )
 
 // BatchConfig limits a local functional batch demonstration.
@@ -62,6 +65,8 @@ type LiveBatchConfig struct {
 	ConfirmLive               bool
 	TaskList                  string
 	TaskListExplicit          bool
+	Sample                    string
+	ShowClassifications       bool
 	InputTokenPricePerMillion *float64
 }
 
@@ -93,6 +98,9 @@ func (config LiveBatchConfig) Validate() error {
 	if !config.ConfirmLive {
 		return fmt.Errorf("live-batch requires -confirm-live")
 	}
+	if config.Sample != liveSampleSequential && config.Sample != liveSampleBalanced {
+		return fmt.Errorf("live-batch sample must be %q or %q", liveSampleSequential, liveSampleBalanced)
+	}
 	if config.InputTokenPricePerMillion != nil {
 		price := *config.InputTokenPricePerMillion
 		if math.IsNaN(price) || math.IsInf(price, 0) || price < 0 {
@@ -113,6 +121,10 @@ type datasetTicket struct {
 // loadBatchTickets validates the fixture labels but does not use them for
 // routing or accuracy claims. They remain provisional test-fixture metadata.
 func loadBatchTickets(path string, count int, sla time.Duration) ([]Ticket, error) {
+	return loadBatchTicketsWithSample(path, count, sla, liveSampleSequential)
+}
+
+func loadBatchTicketsWithSample(path string, count int, sla time.Duration, sample string) ([]Ticket, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open batch dataset: %w", err)
@@ -146,9 +158,12 @@ func loadBatchTickets(path string, count int, sla time.Duration) ([]Ticket, erro
 		return nil, fmt.Errorf("batch dataset has no records")
 	}
 
-	tickets := make([]Ticket, count)
-	for index := range tickets {
-		record := records[index%len(records)]
+	selected, err := selectDatasetRecords(records, count, sample)
+	if err != nil {
+		return nil, err
+	}
+	tickets := make([]Ticket, len(selected))
+	for index, record := range selected {
 		tickets[index] = Ticket{
 			TicketID: fmt.Sprintf("batch-%06d-%s", index+1, record.TicketID),
 			Message:  record.Message,
@@ -161,6 +176,46 @@ func loadBatchTickets(path string, count int, sla time.Duration) ([]Ticket, erro
 		}
 	}
 	return tickets, nil
+}
+
+func selectDatasetRecords(records []datasetTicket, count int, sample string) ([]datasetTicket, error) {
+	if sample == liveSampleSequential {
+		selected := make([]datasetTicket, count)
+		for index := range selected {
+			selected[index] = records[index%len(records)]
+		}
+		return selected, nil
+	}
+	if sample != liveSampleBalanced {
+		return nil, fmt.Errorf("unsupported dataset sample %q", sample)
+	}
+	if count > len(records) {
+		return nil, fmt.Errorf("balanced sample count %d exceeds %d unique dataset records", count, len(records))
+	}
+
+	departmentOrder := []Department{DepartmentBilling, DepartmentTechnical, DepartmentAccount, DepartmentContent}
+	buckets := make(map[Department][]datasetTicket, len(departmentOrder))
+	for _, record := range records {
+		buckets[record.ExpectedDepartment] = append(buckets[record.ExpectedDepartment], record)
+	}
+	selected := make([]datasetTicket, 0, count)
+	for round := 0; len(selected) < count; round++ {
+		added := false
+		for _, department := range departmentOrder {
+			if round >= len(buckets[department]) {
+				continue
+			}
+			selected = append(selected, buckets[department][round])
+			added = true
+			if len(selected) == count {
+				break
+			}
+		}
+		if !added {
+			return nil, fmt.Errorf("dataset cannot provide %d unique balanced records", count)
+		}
+	}
+	return selected, nil
 }
 
 func validateDatasetTicket(record datasetTicket, seenIDs map[string]struct{}) error {
@@ -182,16 +237,18 @@ func validateDatasetTicket(record datasetTicket, seenIDs map[string]struct{}) er
 }
 
 type batchJob struct {
-	Ticket     Ticket
-	WorkflowID string
+	SubmissionIndex int
+	Ticket          Ticket
+	WorkflowID      string
 }
 
 func newBatchJobs(tickets []Ticket, runToken string) []batchJob {
 	jobs := make([]batchJob, len(tickets))
 	for index, ticket := range tickets {
 		jobs[index] = batchJob{
-			Ticket:     ticket,
-			WorkflowID: fmt.Sprintf("ticket-routing-batch-%s-%s", runToken, ticket.TicketID),
+			SubmissionIndex: index,
+			Ticket:          ticket,
+			WorkflowID:      fmt.Sprintf("ticket-routing-batch-%s-%s", runToken, ticket.TicketID),
 		}
 	}
 	return jobs
@@ -232,11 +289,13 @@ type batchFailure struct {
 }
 
 type batchExecutionTiming struct {
+	SubmissionIndex  int
 	WorkflowID       string
 	TicketID         string
 	Elapsed          time.Duration
 	Outcome          string
 	InferenceLatency time.Duration
+	Classification   RoutingDecision
 }
 
 func runBoundedBatch(ctx context.Context, jobs []batchJob, concurrency int, execute batchExecutor) batchSummary {
@@ -279,9 +338,10 @@ func runBoundedBatch(ctx context.Context, jobs []batchJob, concurrency int, exec
 		outcome := <-resultChannel
 		summary.addExecutionDuration(outcome.elapsed)
 		timing := batchExecutionTiming{
-			WorkflowID: outcome.job.WorkflowID,
-			TicketID:   outcome.job.Ticket.TicketID,
-			Elapsed:    outcome.elapsed,
+			SubmissionIndex: outcome.job.SubmissionIndex,
+			WorkflowID:      outcome.job.WorkflowID,
+			TicketID:        outcome.job.Ticket.TicketID,
+			Elapsed:         outcome.elapsed,
 		}
 		if outcome.err != nil {
 			summary.Failed++
@@ -299,6 +359,7 @@ func runBoundedBatch(ctx context.Context, jobs []batchJob, concurrency int, exec
 		summary.Completed++
 		timing.Outcome = outcome.result.Status
 		timing.InferenceLatency = outcome.result.Classification.InferenceLatency
+		timing.Classification = outcome.result.Classification
 		summary.ExecutionTimings = append(summary.ExecutionTimings, timing)
 		summary.addResult(outcome.result)
 	}
@@ -377,18 +438,18 @@ func (summary batchSummary) averageJevInferenceLatency() time.Duration {
 }
 
 func runBatch(ctx context.Context, cadenceClient client.Client, taskList string, config BatchConfig, output io.Writer) error {
-	return runConfiguredBatch(ctx, cadenceClient, taskList, config, output, false, nil)
+	return runConfiguredBatch(ctx, cadenceClient, taskList, config, output, false, liveSampleSequential, false, nil)
 }
 
 func runLiveBatch(ctx context.Context, cadenceClient client.Client, config LiveBatchConfig, output io.Writer) error {
 	if err := config.Validate(); err != nil {
 		return err
 	}
-	return runConfiguredBatch(ctx, cadenceClient, config.TaskList, config.BatchConfig, output, true, config.InputTokenPricePerMillion)
+	return runConfiguredBatch(ctx, cadenceClient, config.TaskList, config.BatchConfig, output, true, config.Sample, config.ShowClassifications, config.InputTokenPricePerMillion)
 }
 
-func runConfiguredBatch(ctx context.Context, cadenceClient client.Client, taskList string, config BatchConfig, output io.Writer, live bool, inputTokenPricePerMillion *float64) error {
-	tickets, err := loadBatchTickets(batchDatasetPath, config.Count, config.SLA)
+func runConfiguredBatch(ctx context.Context, cadenceClient client.Client, taskList string, config BatchConfig, output io.Writer, live bool, sample string, showClassifications bool, inputTokenPricePerMillion *float64) error {
+	tickets, err := loadBatchTicketsWithSample(batchDatasetPath, config.Count, config.SLA, sample)
 	if err != nil {
 		return err
 	}
@@ -421,11 +482,49 @@ func runConfiguredBatch(ctx context.Context, cadenceClient client.Client, taskLi
 	report := summary.String()
 	if live {
 		report = summary.LiveString(config.SLA, inputTokenPricePerMillion)
+		if showClassifications {
+			report += classificationDetails(summary.ExecutionTimings)
+		}
 	}
 	if _, err := fmt.Fprint(output, report); err != nil {
 		return fmt.Errorf("write batch summary: %w", err)
 	}
 	return nil
+}
+
+func classificationDetails(timings []batchExecutionTiming) string {
+	if len(timings) == 0 {
+		return ""
+	}
+	ordered := append([]batchExecutionTiming(nil), timings...)
+	slices.SortStableFunc(ordered, func(left, right batchExecutionTiming) int {
+		return left.SubmissionIndex - right.SubmissionIndex
+	})
+	lines := make([]string, 0, len(ordered))
+	for _, timing := range ordered {
+		if timing.Outcome == "TECHNICAL_FAILURE" {
+			lines = append(lines, fmt.Sprintf("ticket=%s outcome=TECHNICAL_FAILURE", timing.TicketID))
+			continue
+		}
+		decision := timing.Classification
+		latency := "N/A"
+		if timing.InferenceLatency > 0 {
+			latency = timing.InferenceLatency.Round(time.Millisecond).String()
+		}
+		lines = append(lines, fmt.Sprintf("ticket=%s department=%s department-confidence=%.2f priority=%s priority-confidence=%.2f complexity=%s complexity-confidence=%.2f model=%s outcome=%s jev-request-response-latency=%s",
+			timing.TicketID,
+			decision.Department,
+			decision.DepartmentConfidence,
+			decision.Priority,
+			decision.PriorityConfidence,
+			decision.Complexity,
+			decision.ComplexityConfidence,
+			decision.Model,
+			timing.Outcome,
+			latency,
+		))
+	}
+	return "Classification details (dataset submission order):\n- " + strings.Join(lines, "\n- ") + "\n"
 }
 
 func (summary batchSummary) String() string {

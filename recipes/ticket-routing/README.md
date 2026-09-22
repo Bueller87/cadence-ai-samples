@@ -261,22 +261,36 @@ No acknowledgment Signals are sent in batch mode. Routed tickets therefore compl
 
 `live-batch` reuses the same bounded worker pool and synthetic dataset, but classification runs through the real Jev Activity. It requires `AI_PROVIDER=jev`, explicit `-count` and `-concurrency` flags, a dedicated non-default task list, and `-confirm-live`. One invocation is limited in code to 10 tickets and five concurrent workflows. The mock `batch` mode remains mock-only and retains its existing defaults.
 
-Start the live worker in terminal 1. The API key stays in this worker process and is sent only in the authorized Jev HTTP request:
+Start the live worker in terminal 1. The API key stays in this worker process and is sent only in the authorized Jev HTTP request. Public command examples use Bash:
 
-```powershell
-Set-Location .\recipes\ticket-routing\go
-$env:AI_PROVIDER = "jev"
-$env:TYPESAFE_API_KEY = "paste-your-personal-key-here"
+```bash
+cd recipes/ticket-routing/go
+export AI_PROVIDER=jev
+export TYPESAFE_API_KEY='paste-your-personal-key-here'
 go run . -mode worker -task-list ticket-routing-jev
 ```
 
 For the first controlled live test, start three tickets at concurrency one in terminal 2:
 
-```powershell
-Set-Location .\recipes\ticket-routing\go
-$env:AI_PROVIDER = "jev"
+```bash
+cd recipes/ticket-routing/go
+export AI_PROVIDER=jev
 go run . -mode live-batch -count 3 -concurrency 1 -batch-sla 1s -task-list ticket-routing-jev -confirm-live
 ```
+
+PowerShell users can replace `cd` with `Set-Location`, `export AI_PROVIDER=jev` with `$env:AI_PROVIDER = "jev"`, and the API-key export with `$env:TYPESAFE_API_KEY = "paste-your-personal-key-here"`.
+
+Dataset selection is sequential by default, preserving file order. Because the fixture is grouped by provisional department label, use `-sample balanced` for a small representative live run. Balanced selection deterministically takes the first unused fixture for billing, technical, account, and content, in that order, then repeats that department order if more tickets are requested. The provisional labels are used only to choose fixture records; they are not included in the workflow input, sent to Jev, used as routing instructions, or treated as validated ground truth.
+
+For one fixture from each provisional department group and an ordered classification report:
+
+```bash
+cd recipes/ticket-routing/go
+export AI_PROVIDER=jev
+go run . -mode live-batch -count 4 -concurrency 1 -batch-sla 1s -task-list ticket-routing-jev -sample balanced -show-classifications -confirm-live
+```
+
+`-show-classifications` prints completed tickets in dataset submission order with the classified department, priority, complexity, their confidences, model, business outcome, and Jev request/response latency. Technical failures show only the ticket ID and failure status. It never prints API keys or full ticket messages. Without the flag, the existing live summary is unchanged.
 
 The optional `-input-token-price-per-million` flag accepts a user-supplied input-token price for an illustrative successful-response estimate. For example, append `-input-token-price-per-million 0.042` only after checking the price you intend to use. No price is built into the sample.
 

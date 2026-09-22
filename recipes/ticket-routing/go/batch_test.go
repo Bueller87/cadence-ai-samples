@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -27,6 +28,31 @@ func TestLoadBatchTicketsValidatesAndRepeatsDataset(t *testing.T) {
 		require.Equal(t, time.Second, ticket.SLA.Low)
 	}
 	require.Equal(t, tickets[0].Message, tickets[40].Message)
+	require.Contains(t, tickets[0].TicketID, "synthetic-0001")
+	require.Contains(t, tickets[1].TicketID, "synthetic-0002")
+}
+
+func TestBalancedLiveSampleCoversAllDepartmentsDeterministically(t *testing.T) {
+	tickets, err := loadBatchTicketsWithSample(filepath.Join("..", "testdata", "tickets.jsonl"), 4, time.Second, liveSampleBalanced)
+	require.NoError(t, err)
+	require.Len(t, tickets, 4)
+
+	expectedFixtureIDs := []string{"synthetic-0001", "synthetic-0011", "synthetic-0021", "synthetic-0031"}
+	seenTicketIDs := make(map[string]struct{})
+	for index, ticket := range tickets {
+		require.Contains(t, ticket.TicketID, expectedFixtureIDs[index])
+		_, duplicate := seenTicketIDs[ticket.TicketID]
+		require.False(t, duplicate)
+		seenTicketIDs[ticket.TicketID] = struct{}{}
+	}
+
+	jobs := newBatchJobs(tickets, "balanced-run")
+	seenWorkflowIDs := make(map[string]struct{})
+	for _, job := range jobs {
+		_, duplicate := seenWorkflowIDs[job.WorkflowID]
+		require.False(t, duplicate)
+		seenWorkflowIDs[job.WorkflowID] = struct{}{}
+	}
 }
 
 func TestValidateDatasetTicketRejectsInvalidValues(t *testing.T) {
@@ -211,6 +237,55 @@ func TestRunBoundedBatchAggregatesJevMetricsAndMissingUsage(t *testing.T) {
 	require.Contains(t, report, "Token and cost totals cover successful recorded responses only")
 }
 
+func TestClassificationDetailsIncludesFieldsInSubmissionOrder(t *testing.T) {
+	timings := []batchExecutionTiming{
+		{
+			SubmissionIndex:  2,
+			TicketID:         "ticket-3",
+			Outcome:          StatusUnroutable,
+			InferenceLatency: 30 * time.Millisecond,
+			Classification: RoutingDecision{
+				Department:           "unknown",
+				DepartmentConfidence: 0.40,
+				Priority:             PriorityLow,
+				PriorityConfidence:   0.70,
+				Complexity:           ComplexityTier1,
+				ComplexityConfidence: 0.80,
+				Model:                "jev-test",
+			},
+		},
+		{SubmissionIndex: 1, TicketID: "ticket-2", Outcome: "TECHNICAL_FAILURE"},
+		{
+			SubmissionIndex:  0,
+			TicketID:         "ticket-1",
+			Outcome:          StatusSLATimeout,
+			InferenceLatency: 20 * time.Millisecond,
+			Classification: RoutingDecision{
+				Department:           DepartmentBilling,
+				DepartmentConfidence: 0.99,
+				Priority:             PriorityHigh,
+				PriorityConfidence:   0.97,
+				Complexity:           ComplexityTier2,
+				ComplexityConfidence: 0.88,
+				Model:                "jev-test",
+			},
+		},
+	}
+
+	report := classificationDetails(timings)
+	require.Less(t, strings.Index(report, "ticket=ticket-1"), strings.Index(report, "ticket=ticket-2"))
+	require.Less(t, strings.Index(report, "ticket=ticket-2"), strings.Index(report, "ticket=ticket-3"))
+	require.Contains(t, report, "department=billing department-confidence=0.99")
+	require.Contains(t, report, "priority=high priority-confidence=0.97")
+	require.Contains(t, report, "complexity=tier2 complexity-confidence=0.88")
+	require.Contains(t, report, "model=jev-test outcome=SLA_TIMEOUT jev-request-response-latency=20ms")
+	require.Contains(t, report, "ticket=ticket-3 department=unknown")
+
+	failureLine := "ticket=ticket-2 outcome=TECHNICAL_FAILURE"
+	require.Contains(t, report, failureLine)
+	require.NotContains(t, report[strings.Index(report, failureLine):strings.Index(report, "ticket=ticket-3")], "department=")
+}
+
 func TestBatchConfigValidation(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -249,6 +324,7 @@ func TestLiveBatchConfigRequiresExplicitBoundedOptIn(t *testing.T) {
 		ConfirmLive:               true,
 		TaskList:                  "ticket-routing-jev",
 		TaskListExplicit:          true,
+		Sample:                    liveSampleSequential,
 		InputTokenPricePerMillion: &price,
 	}
 	require.NoError(t, valid.Validate())
@@ -271,6 +347,7 @@ func TestLiveBatchConfigRequiresExplicitBoundedOptIn(t *testing.T) {
 		{name: "confirmation missing", mutate: func(config *LiveBatchConfig) { config.ConfirmLive = false }},
 		{name: "implicit task list", mutate: func(config *LiveBatchConfig) { config.TaskListExplicit = false }},
 		{name: "shared task list", mutate: func(config *LiveBatchConfig) { config.TaskList = TaskList }},
+		{name: "unsupported sample", mutate: func(config *LiveBatchConfig) { config.Sample = "random" }},
 		{name: "negative price", mutate: func(config *LiveBatchConfig) { bad := -1.0; config.InputTokenPricePerMillion = &bad }},
 	}
 
@@ -292,6 +369,7 @@ func TestRunLiveBatchRejectsBeforeWorkflowSubmission(t *testing.T) {
 		ConfirmLive:         false,
 		TaskList:            "ticket-routing-jev",
 		TaskListExplicit:    true,
+		Sample:              liveSampleSequential,
 	}
 
 	err := runLiveBatch(context.Background(), nil, config, nil)
