@@ -162,7 +162,7 @@ In the worker terminal, set temporary process environment variables and start th
 Set-Location .\recipes\ticket-routing\go
 $env:AI_PROVIDER = "jev"
 $env:TYPESAFE_API_KEY = "paste-your-personal-key-here"
-go run . -mode worker
+go run . -mode worker -task-list ticket-routing-jev
 ```
 
 The worker fails during startup if `TYPESAFE_API_KEY` is missing. The key is read only by the worker and is not printed, written to files, or placed in workflow history.
@@ -172,7 +172,7 @@ In a second terminal, explicitly opt into the one-ticket live starter. This term
 ```powershell
 Set-Location .\recipes\ticket-routing\go
 $env:AI_PROVIDER = "jev"
-go run . -mode live-demo
+go run . -mode live-demo -task-list ticket-routing-jev
 ```
 
 The output identifies the result as real Jev classification and displays department, priority, complexity, all three confidence values, the returned model, reported token usage, selected Child Workflow, fictional employee, business status, and whether the SLA was met.
@@ -257,6 +257,37 @@ go run . -mode batch -count 1000 -concurrency 25 -batch-sla 1s
 
 No acknowledgment Signals are sent in batch mode. Routed tickets therefore complete with `SLA_TIMEOUT`; workflow-engine failures are counted separately. The terminal summary reports submitted, completed, failed, `UNROUTABLE`, `ACKNOWLEDGED`, and `SLA_TIMEOUT` totals. It also reports department totals, peak in-flight executions, wall-clock duration, per-execution client wait times, and completed workflows per second. Every failed execution includes its workflow ID, ticket ID, start time, elapsed time, and Cadence error. The one-second business SLA does not impose a one-second workflow execution timeout. Bounded parent and Child Workflow timeouts include scheduling and execution overhead so delayed workflow tasks can still process the durable SLA timer. Use this batch to try the flow. It does not measure performance, classification accuracy, provider cost, or latency.
 
+## Explicit live Jev batch
+
+`live-batch` reuses the same bounded worker pool and synthetic dataset, but classification runs through the real Jev Activity. It requires `AI_PROVIDER=jev`, explicit `-count` and `-concurrency` flags, a dedicated non-default task list, and `-confirm-live`. One invocation is limited in code to 10 tickets and five concurrent workflows. The mock `batch` mode remains mock-only and retains its existing defaults.
+
+Start the live worker in terminal 1. The API key stays in this worker process and is sent only in the authorized Jev HTTP request:
+
+```powershell
+Set-Location .\recipes\ticket-routing\go
+$env:AI_PROVIDER = "jev"
+$env:TYPESAFE_API_KEY = "paste-your-personal-key-here"
+go run . -mode worker -task-list ticket-routing-jev
+```
+
+For the first controlled live test, start three tickets at concurrency one in terminal 2:
+
+```powershell
+Set-Location .\recipes\ticket-routing\go
+$env:AI_PROVIDER = "jev"
+go run . -mode live-batch -count 3 -concurrency 1 -batch-sla 1s -task-list ticket-routing-jev -confirm-live
+```
+
+The optional `-input-token-price-per-million` flag accepts a user-supplied input-token price for an illustrative successful-response estimate. For example, append `-input-token-price-per-million 0.042` only after checking the price you intend to use. No price is built into the sample.
+
+The live report keeps three measurements distinct:
+
+- **Jev HTTP inference latency** measures the successful HTTP attempt inside the classification Activity, including response receipt and parsing.
+- **Per-ticket end-to-end client wait** runs from client submission through terminal parent Workflow completion.
+- **Business SLA duration** is the Child Workflow acknowledgment timer.
+
+The report aggregates provider-reported input and output tokens and counts successful responses whose complete usage information is missing. Cost calculations cover reported input tokens from successful recorded responses only and exclude Cadence infrastructure. A failed or retried Activity may have consumed additional API usage, so completed workflows do not establish the number of billed attempts and the estimate may be lower than actual billed usage. The provisional expected labels in the synthetic fixture are not used to claim classification accuracy.
+
 ## Build and test
 
 From `recipes/ticket-routing/go`:
@@ -282,4 +313,4 @@ Start with `go/workflow.go` and `go/main.go`. `workflow.go` contains the Workflo
 
 ## Deferred features
 
-The recipe still intentionally does not include automatic employee acknowledgment simulation, reassignment, skill matching, workload balancing, multi-level escalation, classification-accuracy scoring, provider cost or latency benchmarking, or production performance claims. Those remain deferred to later phases.
+The recipe still intentionally does not include automatic employee acknowledgment simulation, reassignment, skill matching, workload balancing, multi-level escalation, classification-accuracy scoring, or production performance claims. Those remain deferred to later phases.
