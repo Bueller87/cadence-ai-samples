@@ -2,7 +2,7 @@
 
 **Repository:** `Bueller87/cadence-ai-samples`  
 **Recipe path:** `recipes/ticket-routing/`  
-**Status:** Implemented; owner review pending
+**Status:** Implemented through Phase 4C; owner review pending. Automatic acknowledgment simulation and classification-accuracy benchmarking remain deferred.
 **Language:** Go  
 **Scenario:** StreamWave, a fictional streaming service
 
@@ -21,7 +21,7 @@ The sample must be easy to **run and copy into another Go application**. Keep it
 - Four department-specific Child Workflow routes: Billing, Technical, Account, Content. Thin wrappers around common local logic are acceptable if clearer than duplicating code.
 - Assign one **fixed fictional employee ID per department** (no employee-selection algorithm).
 - Child Workflow waits for a matching acknowledgment Signal or a durable, configurable SLA deadline. Acknowledgment completes with `ACKNOWLEDGED`; timeout completes with `SLA_TIMEOUT`.
-- Both an automated signal sender for unattended runs and a simple CWC Markdown acknowledgment button for a live demo must drive the **same child-workflow Signal**.
+- A simple CWC Markdown acknowledgment button and the CLI acknowledgment command drive the **same child-workflow Signal**. An automated signal sender for unattended runs remains deferred.
 - Mock classifier by default; real Jev use must be explicitly opted into on the user's personal machine.
 - Bundled synthetic text tickets; optional `PROMPT.md` for generating more; a bounded batch runner with clearly labeled metrics.
 - Reliable Activity retry policy and deterministic workflow replay; unit tests including the signal/timeout race.
@@ -47,11 +47,13 @@ recipes/ticket-routing/
     ├── go.sum
     ├── .env.example
     ├── main.go
+    ├── batch.go
     ├── workflow.go
-    └── workflow_test.go
+    ├── workflow_test.go
+    └── batch_test.go
 ```
 
-Put workflow functions, Activities, small business structs, and small provider implementations in `workflow.go`; register workflows and Activities and implement the command-line interface (CLI) starter and simulator in `main.go`. A small additional file is permitted **only if needed** for readability; explain why. No cross-recipe imports, `integrations/`, or shared framework. `go build ./...` and `go test ./...` must work from `go/`. A developer should be able to copy the two Go source files (and their normal module dependencies) into an existing Cadence project, without importing this recipe's dataset or benchmark tooling.
+Put workflow functions, Activities, small business structs, and small provider implementations in `workflow.go`; register workflows and Activities and implement the command-line interface (CLI) starter in `main.go`. `batch.go` contains the bounded batch runner and its reporting so `main.go` and `workflow.go` remain copyable. No cross-recipe imports, `integrations/`, or shared framework. `go build ./...` and `go test ./...` must work from `go/`. A developer should be able to copy the two Go source files (and their normal module dependencies) into an existing Cadence project, without importing this recipe's dataset or benchmark tooling.
 
 Do not replace the scaffold or alter unrelated files. The spec lives at the recipe root, not in `go/`.
 
@@ -90,10 +92,10 @@ One ticket → TicketIntakeWorkflow
             → return child result to parent; parent completes
 ```
 
-- `TicketIntakeWorkflow` starts and **waits for** its Child Workflow's terminal result. Use a deterministic, documented ID derivation so the CLI/simulator can locate the child without relying on random IDs or guessing. Define ID rules that prevent collisions between tickets.
+- `TicketIntakeWorkflow` starts and **waits for** its Child Workflow's terminal result. Use a deterministic, documented ID derivation so the CLI and any future simulator can locate the child without relying on random IDs or guessing. Define ID rules that prevent collisions between tickets.
 - The department Child Workflow owns assignment state, the signal channel, and the SLA timer. Register a read-only query that exposes current status and, when awaiting acknowledgment, Markdown formatted for Cadence Web CWC.
 - The acknowledgment signal payload must contain at least `ticket_id` and `assignment_id` (or equivalent deterministic assignment token). Accept **only** the current ticket/assignment, ignoring duplicates, invalid payloads, and late signals. A signal received after SLA expiry must never turn `SLA_TIMEOUT` into `ACKNOWLEDGED`. Define deterministic handling of the signal/deadline boundary and test it.
-- The CWC button acknowledges an assignment and does not resolve the ticket; label it `Acknowledge Ticket`. Its `{% signal %}` action targets the **department Child Workflow** and sends the same payload as the automated simulator. Render a plain completed-state view without an action button after acknowledgment or expiry. Use Cadence's formatted query response and the Markdown tag syntax documented for Custom Workflow Controls; do not return raw HTML or invent CWC APIs. Document the Cadence Web version needed for CWC and provide the CLI signal alternative when it is unavailable.
+- The CWC button acknowledges an assignment and does not resolve the ticket; label it `Acknowledge Ticket`. Its `{% signal %}` action targets the **department Child Workflow** and sends the same payload as the CLI acknowledgment command and any future automated simulator. Render a plain completed-state view without an action button after acknowledgment or expiry. Use Cadence's formatted query response and the Markdown tag syntax documented for Custom Workflow Controls; do not return raw HTML or invent CWC APIs. Document the Cadence Web version needed for CWC and provide the CLI signal alternative when it is unavailable.
 - Use short, configurable demonstration SLA durations (illustrative: critical 5s, high 10s, normal 20s, low 30s). Label these as **demo policy**, not real customer SLAs. Do not create a timer by `time.Sleep` in workflow code.
 - **All external and nondeterministic operations belong in Activities or in the external starter/simulator, never in workflow logic.** In particular: Jev HTTP, clocks/wall time, random inputs, logs/metrics external side effects, file I/O. Use Cadence workflow APIs for time, timers, signals, Child Workflows, and query handlers. Completed Activity results must be reused on workflow replay; do not call the provider from a workflow or query handler.
 
@@ -105,10 +107,10 @@ Prefer a **single Go executable** (`main.go`) with small documented modes and fl
 2. Starting one synthetic ticket and viewing its parent and Child Workflow in Cadence Web.
 3. Manually acknowledging the child via CLI Signal **or** the CWC button.
 4. Demonstrating SLA expiry by deliberately sending no acknowledgment.
-5. Running a bounded batch of synthetic tickets with **an external automatic simulator** sending acknowledgment Signals at varied delays; leave a known small fraction unacknowledged to exercise timeout.
+5. Running a bounded batch of synthetic tickets. The currently implemented batch sends no acknowledgment Signals, so routed tickets exercise `SLA_TIMEOUT`.
 6. Opting into real Jev with a personal API key, **explicitly** choosing a small initial live call count; never default to real calls or silently retry a batch without a bound.
 
-Batch orchestration must live **outside** individual workflow code, using the Cadence client. Bound submission and simultaneous open executions with configurable concurrency. Each workflow receives one ticket only: no giant workflow looping over thousands of tickets. The simulator must locate the correct child and assignment before sending Signals; do not assume the child exists immediately after the parent starts. Do not use a random generator in workflow logic. On an unsuccessful batch, report failures and pending workflows instead of claiming a successful completion.
+Batch orchestration must live **outside** individual workflow code, using the Cadence client. Bound submission and simultaneous open executions with configurable concurrency. Each workflow receives one ticket only: no giant workflow looping over thousands of tickets. Do not use a random generator in workflow logic. On an unsuccessful batch, report failures and pending workflows instead of claiming a successful completion. A future automated simulator must locate the correct child and assignment before sending Signals; it must use the same validated Signal path as the CLI and CWC rather than introducing a separate mechanism.
 
 ## 7. Jev and mock implementation
 
@@ -137,7 +139,7 @@ Do not claim a fixed throughput, 10× cost advantage, or Uber/Netflix production
 - Failure/restart demo or test proves a recorded classification Activity result is not re-inferred on workflow replay. Do not claim exactly-once external Activity execution.
 - The CWC query produces the documented formatted Markdown envelope and a working acknowledgment button on a supported Cadence Web version. An ordinary CLI Signal must also work.
 - Default mock mode can run one ticket and a bounded synthetic batch end to end, with no external AI key; timeout and acknowledgment paths are observable.
-- README contains Windows PowerShell-friendly setup and run commands, local Cadence prerequisites, mode/configuration instructions, safety notes for live API usage, optional CWC instructions, results interpretation, and a **copy-out** guide pointing to `workflow.go` and `main.go`.
+- README contains Bash-first setup and run commands with brief PowerShell equivalents, local Cadence prerequisites, mode/configuration instructions, safety notes for live API usage, optional CWC instructions, results interpretation, and a **copy-out** guide pointing to `workflow.go` and `main.go`.
 - No unapproved/non-public employer code or data; only independently authored code, synthetic inputs, and public APIs/docs.
 
 ## 11. Implementation workflow for Codex

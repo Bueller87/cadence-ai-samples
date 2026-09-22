@@ -36,7 +36,7 @@ const (
 	childWorkflowSchedulingOverhead  = 2 * time.Minute
 	parentWorkflowSchedulingOverhead = time.Minute
 
-	jevEndpoint = "https://www.uber.com" //"https://api.typesafe.ai/v1/systemone"
+	jevEndpoint = "https://api.typesafe.ai/v1/systemone"
 	jevModel    = "jev-latest"
 
 	errReasonJevConfiguration     = "JevConfigurationError"
@@ -104,6 +104,8 @@ type RoutingDecision struct {
 	Model                   string             `json:"model"`
 	InputTokens             int                `json:"input_tokens,omitempty"`
 	OutputTokens            int                `json:"output_tokens,omitempty"`
+	TokenUsageReported      bool               `json:"token_usage_reported"`
+	InferenceLatency        time.Duration      `json:"inference_latency,omitempty"`
 }
 
 // ClassifiedTicket is passed from the parent to a department Child Workflow.
@@ -378,6 +380,7 @@ func (classifier *JevClassifier) ClassifyTicket(ctx context.Context, ticket Tick
 	request.Header.Set("Authorization", "Bearer "+classifier.apiKey)
 	request.Header.Set("Content-Type", "application/json")
 
+	inferenceStarted := time.Now()
 	response, err := classifier.httpClient.Do(request)
 	if err != nil {
 		return RoutingDecision{}, fmt.Errorf("Jev request failed: %w", err)
@@ -405,7 +408,12 @@ func (classifier *JevClassifier) ClassifyTicket(ctx context.Context, ticket Tick
 		return RoutingDecision{}, malformedJevResponse("response contains trailing data")
 	}
 
-	return routingDecisionFromJev(decoded)
+	decision, err := routingDecisionFromJev(decoded)
+	if err != nil {
+		return RoutingDecision{}, err
+	}
+	decision.InferenceLatency = time.Since(inferenceStarted)
+	return decision, nil
 }
 
 func routingDecisionFromJev(response jevResponse) (RoutingDecision, error) {
@@ -454,6 +462,7 @@ func routingDecisionFromJev(response jevResponse) (RoutingDecision, error) {
 			}
 			decision.OutputTokens = *response.Usage.OutputTokens
 		}
+		decision.TokenUsageReported = response.Usage.InputTokens != nil && response.Usage.OutputTokens != nil
 	}
 
 	return decision, nil

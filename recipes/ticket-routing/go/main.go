@@ -30,7 +30,7 @@ const (
 
 func main() {
 	defaultSLA := defaultSLAConfig()
-	mode := flag.String("mode", "demo", "run mode: worker, demo, start-ticket, acknowledge, live-demo, or batch")
+	mode := flag.String("mode", "demo", "run mode: worker, demo, start-ticket, acknowledge, live-demo, batch, or live-batch")
 	address := flag.String("address", "127.0.0.1:7933", "Cadence frontend address")
 	domain := flag.String("domain", "cadence-ai-samples", "Cadence domain")
 	taskList := flag.String("task-list", TaskList, "Cadence task list")
@@ -46,17 +46,51 @@ func main() {
 	batchCount := flag.Int("count", defaultBatchCount, "number of synthetic tickets to execute in batch mode")
 	batchConcurrency := flag.Int("concurrency", defaultBatchConcurrency, "maximum in-flight workflow executions in batch mode")
 	batchSLA := flag.Duration("batch-sla", defaultBatchSLA, "acknowledgment SLA for every routed ticket in batch mode")
+	confirmLive := flag.Bool("confirm-live", false, "confirm that live-batch may consume real Jev API usage")
+	liveSample := flag.String("sample", liveSampleSequential, "live-batch dataset selection: sequential or balanced")
+	showClassifications := flag.Bool("show-classifications", false, "print ordered per-ticket classifications in live-batch mode")
+	inputTokenPrice := flag.Float64("input-token-price-per-million", 0, "optional input-token price per million tokens for illustrative live-batch cost")
 	flag.Parse()
+	explicitFlags := make(map[string]bool)
+	flag.Visit(func(value *flag.Flag) {
+		explicitFlags[value.Name] = true
+	})
 	slaConfig := SLAConfig{Critical: *criticalSLA, High: *highSLA, Normal: *normalSLA, Low: *lowSLA}
 	batchConfig := BatchConfig{Count: *batchCount, Concurrency: *batchConcurrency, SLA: *batchSLA}
+	providerSetting := configuredProvider()
+	var inputTokenPricePointer *float64
+	if explicitFlags["input-token-price-per-million"] {
+		inputTokenPricePointer = inputTokenPrice
+	}
+	liveBatchConfig := LiveBatchConfig{
+		BatchConfig:               batchConfig,
+		Provider:                  providerSetting,
+		CountExplicit:             explicitFlags["count"],
+		ConcurrencyExplicit:       explicitFlags["concurrency"],
+		ConfirmLive:               *confirmLive,
+		TaskList:                  *taskList,
+		TaskListExplicit:          explicitFlags["task-list"],
+		Sample:                    *liveSample,
+		ShowClassifications:       *showClassifications,
+		InputTokenPricePerMillion: inputTokenPricePointer,
+	}
 	if *mode == "batch" {
 		if err := batchConfig.Validate(); err != nil {
+			log.Fatal(err)
+		}
+	}
+	if *mode == "live-batch" {
+		fmt.Printf("Requested live Jev batch: count=%d concurrency=%d sample=%s task-list=%s\n", *batchCount, *batchConcurrency, *liveSample, *taskList)
+		if err := liveBatchConfig.Validate(); err != nil {
 			log.Fatal(err)
 		}
 	}
 
 	provider, classifierActivity, err := configuredClassifier(*mode)
 	if err != nil {
+		log.Fatal(err)
+	}
+	if err := validateLiveTaskList(*mode, provider, *taskList, explicitFlags["task-list"]); err != nil {
 		log.Fatal(err)
 	}
 
@@ -96,8 +130,13 @@ func main() {
 		if err := runBatch(context.Background(), cadenceClient, *taskList, batchConfig, os.Stdout); err != nil {
 			log.Fatal(err)
 		}
+	case "live-batch":
+		cadenceClient := client.NewClient(service, *domain, nil)
+		if err := runLiveBatch(context.Background(), cadenceClient, liveBatchConfig, os.Stdout); err != nil {
+			log.Fatal(err)
+		}
 	default:
-		fmt.Fprintf(os.Stderr, "unsupported mode %q; use worker, demo, start-ticket, acknowledge, live-demo, or batch\n", *mode)
+		fmt.Fprintf(os.Stderr, "unsupported mode %q; use worker, demo, start-ticket, acknowledge, live-demo, batch, or live-batch\n", *mode)
 		os.Exit(2)
 	}
 }
@@ -271,13 +310,13 @@ func ticketResultSummary(result TicketResult) string {
 }
 
 func configuredClassifier(mode string) (string, interface{}, error) {
-	provider := strings.ToLower(strings.TrimSpace(os.Getenv("AI_PROVIDER")))
-	if provider == "" {
-		provider = "mock"
-	}
+	provider := configuredProvider()
 
 	if mode == "live-demo" && provider != "jev" {
 		return "", nil, fmt.Errorf("live-demo requires explicit AI_PROVIDER=jev opt-in")
+	}
+	if mode == "live-batch" && provider != "jev" {
+		return "", nil, fmt.Errorf("live-batch requires explicit AI_PROVIDER=jev opt-in")
 	}
 	if (mode == "demo" || mode == "start-ticket" || mode == "batch") && provider != "mock" {
 		return "", nil, fmt.Errorf("%s is mock-only; use live-demo for one explicitly opted-in Jev ticket", mode)
@@ -298,6 +337,23 @@ func configuredClassifier(mode string) (string, interface{}, error) {
 	default:
 		return "", nil, fmt.Errorf("unsupported AI_PROVIDER %q; use mock or jev", provider)
 	}
+}
+
+func configuredProvider() string {
+	provider := strings.ToLower(strings.TrimSpace(os.Getenv("AI_PROVIDER")))
+	if provider == "" {
+		return "mock"
+	}
+	return provider
+}
+
+func validateLiveTaskList(mode, provider, taskList string, taskListExplicit bool) error {
+	if provider == "jev" && (mode == "worker" || mode == "live-demo") {
+		if !taskListExplicit || strings.TrimSpace(taskList) == "" || taskList == TaskList {
+			return fmt.Errorf("%s requires an explicit non-default -task-list dedicated to live classification", mode)
+		}
+	}
+	return nil
 }
 
 func classificationActivityName() string {
