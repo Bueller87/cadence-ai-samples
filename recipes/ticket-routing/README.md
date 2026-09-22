@@ -35,31 +35,31 @@ Each assignment has a deterministic identifier. The Child Workflow accepts an ac
 
 The Cadence project's public Docker Compose configuration can run a local server and Cadence Web. From a separate clone of [cadence-workflow/cadence](https://github.com/cadence-workflow/cadence):
 
-```powershell
+```bash
 docker compose -f docker/docker-compose.yml up -d
 cadence --domain cadence-ai-samples domain register
 ```
 
-Cadence Web is normally available at <http://localhost:8088>. Unit tests use the Cadence test environment and local HTTP test servers; they do not need a Cadence server, Jev credentials, or paid API calls.
+Cadence Web is normally available at <http://localhost:8088>. Unit tests use the Cadence test environment and local HTTP test servers; they do not need a Cadence server, Jev credentials, or paid API calls. Commands below use Bash. In PowerShell, use `Set-Location` for `cd`, `$env:NAME = "value"` for `export NAME=value`, and `Remove-Item Env:NAME` for `unset NAME`.
 
 ## Run with the mock classifier
 
-From the repository root, change into the Go module directory in two PowerShell terminals:
+From the repository root, change into the Go module directory in two terminals:
 
-```powershell
-Set-Location .\recipes\ticket-routing\go
+```bash
+cd recipes/ticket-routing/go
 ```
 
 The mock is selected when `AI_PROVIDER` is unset or set to `mock`. Start the worker in the first terminal:
 
-```powershell
-$env:AI_PROVIDER = "mock"
+```bash
+export AI_PROVIDER=mock
 go run . -mode worker
 ```
 
 Run the four fictional demo tickets in the second terminal:
 
-```powershell
+```bash
 go run . -mode demo
 ```
 
@@ -67,29 +67,29 @@ No API key is read or required in mock mode. Without acknowledgment Signals, the
 
 ## Manual acknowledgment demonstration
 
-Use three PowerShell terminals. From the repository root, change into the Go module directory in each terminal:
+Use three terminals. From the repository root, change into the Go module directory in each terminal:
 
-```powershell
-Set-Location .\recipes\ticket-routing\go
+```bash
+cd recipes/ticket-routing/go
 ```
 
 In terminal 1, start the worker with mock classification:
 
-```powershell
-$env:AI_PROVIDER = "mock"
+```bash
+export AI_PROVIDER=mock
 go run . -mode worker
 ```
 
 In terminal 2, start one synthetic billing ticket with a two-minute acknowledgment SLA:
 
-```powershell
-$env:AI_PROVIDER = "mock"
+```bash
+export AI_PROVIDER=mock
 go run . -mode start-ticket -ticket-id manual-billing-001 -manual-sla 2m
 ```
 
 The command prints the parent and Child Workflow IDs, employee ID, assignment ID, Signal name, SLA, and a ready-to-copy acknowledgment command. It then waits and prints the final workflow status. Wait until the Child Workflow appears in Cadence Web, then run this command in terminal 3 before the deadline:
 
-```powershell
+```bash
 go run . -mode acknowledge -ticket-id "manual-billing-001" -department "billing" -employee-id "SW-BILLING-101" -assignment-id "manual-billing-001:billing:SW-BILLING-101"
 ```
 
@@ -97,7 +97,7 @@ Terminal 2 then reports `ACKNOWLEDGED`.
 
 To demonstrate timeout, start a different ticket with a short SLA and do not run the acknowledgment command:
 
-```powershell
+```bash
 go run . -mode start-ticket -ticket-id manual-timeout-001 -manual-sla 15s
 ```
 
@@ -107,27 +107,23 @@ After the durable timer fires, the command reports `SLA_TIMEOUT`. Ticket IDs mus
 
 The CWC query follows Cadence's [formatted Markdown response and Signal-button contract](https://cadenceworkflow.io/docs/concepts/workflow-queries-formatted-data) and requires Cadence Web v4.0.14 or newer. It assumes the default local Cadence Web cluster name, `cluster0`.
 
-Use two PowerShell terminals. In terminal 1, start the mock worker:
+Use two terminals. In terminal 1, start the mock worker:
 
-```powershell
-Set-Location .\recipes\ticket-routing\go
-$env:AI_PROVIDER = "mock"
+```bash
+cd recipes/ticket-routing/go
+export AI_PROVIDER=mock
 go run . -mode worker
 ```
 
 In terminal 2, start one ticket with enough time to use Cadence Web:
 
-```powershell
-Set-Location .\recipes\ticket-routing\go
-$env:AI_PROVIDER = "mock"
+```bash
+cd recipes/ticket-routing/go
+export AI_PROVIDER=mock
 go run . -mode start-ticket -ticket-id cwc-billing-001 -manual-sla 2m
 ```
 
-The starter prints the department Child Workflow ID and waits for the final result. Open Cadence Web from PowerShell:
-
-```powershell
-Start-Process "http://localhost:8088"
-```
+The starter prints the department Child Workflow ID and waits for the final result. Open <http://localhost:8088> in a browser.
 
 In Cadence Web, select the `cadence-ai-samples` domain, open the Child Workflow ID printed by the starter (`ticket-routing-cwc-billing-001-child-billing`), open its **Queries** tab, select `ticket-assignment`, and run the query. Confirm the ticket, department, employee, priority, SLA duration/deadline, and `AWAITING_ACKNOWLEDGMENT` status, then click **Acknowledge Ticket**.
 
@@ -146,7 +142,7 @@ Cadence Web shows the Child and parent Workflows as completed. Running `ticket-a
 
 To demonstrate the missed-SLA outcome, start a new ticket and do not click the button:
 
-```powershell
+```bash
 go run . -mode start-ticket -ticket-id cwc-timeout-001 -manual-sla 20s
 ```
 
@@ -158,10 +154,10 @@ Live inference consumes TypeSafe API usage. Start with the single synthetic tick
 
 In the worker terminal, set temporary process environment variables and start the worker:
 
-```powershell
-Set-Location .\recipes\ticket-routing\go
-$env:AI_PROVIDER = "jev"
-$env:TYPESAFE_API_KEY = "paste-your-personal-key-here"
+```bash
+cd recipes/ticket-routing/go
+export AI_PROVIDER=jev
+export TYPESAFE_API_KEY='paste-your-personal-key-here'
 go run . -mode worker -task-list ticket-routing-jev
 ```
 
@@ -169,9 +165,9 @@ The worker fails during startup if `TYPESAFE_API_KEY` is missing. The key is rea
 
 In a second terminal, explicitly opt into the one-ticket live starter. This terminal does not need the API key:
 
-```powershell
-Set-Location .\recipes\ticket-routing\go
-$env:AI_PROVIDER = "jev"
+```bash
+cd recipes/ticket-routing/go
+export AI_PROVIDER=jev
 go run . -mode live-demo -task-list ticket-routing-jev
 ```
 
@@ -179,9 +175,9 @@ The output identifies the result as real Jev classification and displays departm
 
 Remove the temporary worker-terminal variables when finished:
 
-```powershell
-Remove-Item Env:AI_PROVIDER -ErrorAction SilentlyContinue
-Remove-Item Env:TYPESAFE_API_KEY -ErrorAction SilentlyContinue
+```bash
+unset AI_PROVIDER
+unset TYPESAFE_API_KEY
 ```
 
 ## First Live Jev Test
@@ -223,7 +219,7 @@ The expected labels are provisional. Review them, especially the ambiguous cases
 
 Validate the included fixture from `recipes/ticket-routing/go`:
 
-```powershell
+```bash
 go test ./... -run TestSyntheticTicketDataset
 ```
 
@@ -233,25 +229,25 @@ This checks JSONL parsing, the exact 40-record count, unique ticket IDs, valid l
 
 The `batch` mode starts one independent `TicketIntakeWorkflow` per fixture record. It validates the JSONL dataset before submission, repeats the unchanged 40-record fixture when `-count` is larger than 40, and gives every execution a unique ticket and workflow ID. The expected labels are only provisional fixture metadata: the runner does not use them to route tickets or calculate classification accuracy.
 
-Start the mock worker in one PowerShell terminal, from the repository root:
+Start the mock worker in one terminal, from the repository root:
 
-```powershell
-Set-Location .\recipes\ticket-routing\go
-$env:AI_PROVIDER = "mock"
+```bash
+cd recipes/ticket-routing/go
+export AI_PROVIDER=mock
 go run . -mode worker
 ```
 
 In another terminal, change to the same `go` directory and run 40 tickets with the default one-second SLA and at most 10 workflows in flight:
 
-```powershell
-Set-Location .\recipes\ticket-routing\go
+```bash
+cd recipes/ticket-routing/go
 go run . -mode batch -count 40 -concurrency 10 -batch-sla 1s
 ```
 
 To repeat the fixture and run 1,000 mock tickets with a bounded 25-workflow concurrency:
 
-```powershell
-Set-Location .\recipes\ticket-routing\go
+```bash
+cd recipes/ticket-routing/go
 go run . -mode batch -count 1000 -concurrency 25 -batch-sla 1s
 ```
 
@@ -278,8 +274,6 @@ export AI_PROVIDER=jev
 go run . -mode live-batch -count 3 -concurrency 1 -batch-sla 1s -task-list ticket-routing-jev -confirm-live
 ```
 
-PowerShell users can replace `cd` with `Set-Location`, `export AI_PROVIDER=jev` with `$env:AI_PROVIDER = "jev"`, and the API-key export with `$env:TYPESAFE_API_KEY = "paste-your-personal-key-here"`.
-
 Dataset selection is sequential by default, preserving file order. Because the fixture is grouped by provisional department label, use `-sample balanced` for a small representative live run. Balanced selection deterministically takes the first unused fixture for billing, technical, account, and content, in that order, then repeats that department order if more tickets are requested. The provisional labels are used only to choose fixture records; they are not included in the workflow input, sent to Jev, used as routing instructions, or treated as validated ground truth.
 
 For one fixture from each provisional department group and an ordered classification report:
@@ -302,11 +296,30 @@ The live report keeps three measurements distinct:
 
 The report aggregates provider-reported input and output tokens and counts successful responses whose complete usage information is missing. Cost calculations cover reported input tokens from successful recorded responses only and exclude Cadence infrastructure. A failed or retried Activity may have consumed additional API usage, so completed workflows do not establish the number of billed attempts and the estimate may be lower than actual billed usage. The provisional expected labels in the synthetic fixture are not used to claim classification accuracy.
 
+### Final local live Jev run
+
+Kevin's final local functional run used 10 synthetic tickets with `-sample balanced` at concurrency 2. No acknowledgment Signals were sent, so every routed ticket completed with the expected business outcome of `SLA_TIMEOUT`.
+
+| Field | Observed value |
+|---|---:|
+| Completed executions | 10 |
+| Technical failures | 0 |
+| `SLA_TIMEOUT` outcomes | 10 |
+| Batch duration | 6.38 s |
+| Average end-to-end client wait | 1.275 s |
+| Jev request/response latency | min 102 ms, avg 168 ms, max 269 ms |
+| Input tokens | 6,707 |
+| Output tokens | 1,280 |
+| Successful responses missing complete token usage | 0 |
+| Reported model | `jev-1.13.0` |
+
+This is a small local functional test, not a production throughput benchmark or a validated classification-accuracy benchmark. The fixture's expected labels remain provisional, and a reported model confidence is not proof that a classification is correct.
+
 ## Build and test
 
 From `recipes/ticket-routing/go`:
 
-```powershell
+```bash
 gofmt -w main.go workflow.go workflow_test.go batch.go batch_test.go
 go build ./...
 go test ./...
