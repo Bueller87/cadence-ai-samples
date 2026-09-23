@@ -20,22 +20,18 @@ from urllib.parse import urlparse
 
 from agents import (
     AgentOutputSchemaBase,
+    Handoff,
     ModelResponse,
     ModelSettings,
     ModelTracing,
-    TResponseInputItem,
+    Tool,
 )
+from agents.items import TResponseInputItem, TResponseOutputItem
+from agents.usage import deserialize_usage, serialize_usage
 from cadence import activity as cadence_activity
 from cadence.contrib.openai.cadence_model import CadenceModel
-from cadence.contrib.openai.cadence_handoff import (
-    CadenceHandoff,
-    from_cadence_handoff,
-)
-from cadence.contrib.openai.cadence_tool import (
-    CadenceTool,
-    from_cadence_tool,
-)
 from openai.types.responses import ResponsePromptParam
+from pydantic import TypeAdapter
 
 
 OPENAI_WORKFLOW = "OpenAIAgentCompatibilityWorkflow"
@@ -46,6 +42,7 @@ OPENAI_COMPAT_ACTIVITY = "OpenAICompatibleChatCompletions.invoke_model"
 ADK_ACTIVITY = "GoogleADKActivities.generate_content_async"
 ECHO_ACTIVITY = "echo_token"
 TOOL_TOKEN = "compatibility-check"
+RESPONSE_OUTPUT_ITEM_ADAPTER = TypeAdapter(TResponseOutputItem)
 
 
 class SpikeCase(StrEnum):
@@ -136,31 +133,37 @@ class OpenAICompatibleChatCompletionsActivities:
         self,
         model_name: str,
         system_instructions: str | None,
-        input: str | list[TResponseInputItem],
-        model_settings: ModelSettings,
-        tools: list[CadenceTool],
-        output_schema: AgentOutputSchemaBase | None,
-        handoffs: list[CadenceHandoff],
-        tracing: ModelTracing,
+        input: Any,
+        model_settings: dict[str, Any],
+        tracing: int,
         previous_response_id: str | None,
         conversation_id: str | None,
-        prompt: ResponsePromptParam | None,
-    ) -> ModelResponse:
+    ) -> dict[str, Any]:
+        """Call the provider outside workflow code using JSON-safe arguments."""
+
         if self._provider is None:
             raise RuntimeError("the worker did not configure a model provider")
+        if not isinstance(model_settings, dict):
+            raise ValueError("model settings must decode to an object")
         model = self._provider.get_model(model_name)
-        return await model.get_response(
+        response = await model.get_response(
             system_instructions=system_instructions,
             input=input,
-            model_settings=model_settings,
-            tools=[from_cadence_tool(tool) for tool in tools],
-            output_schema=output_schema,
-            handoffs=[from_cadence_handoff(handoff) for handoff in handoffs],
-            tracing=tracing,
+            model_settings=ModelSettings(**model_settings),
+            tools=[],
+            output_schema=None,
+            handoffs=[],
+            tracing=ModelTracing(tracing),
             previous_response_id=previous_response_id,
             conversation_id=conversation_id,
-            prompt=prompt,
+            prompt=None,
         )
+        return {
+            "output": [item.model_dump(mode="json") for item in response.output],
+            "usage": serialize_usage(response.usage),
+            "response_id": response.response_id,
+            "request_id": response.request_id,
+        }
 
 
 class OpenAICompatibleCadenceModel(CadenceModel):
@@ -174,6 +177,41 @@ class OpenAICompatibleCadenceModel(CadenceModel):
         self._model_name = model_name
         self._openai_activities = (
             activities or OpenAICompatibleChatCompletionsActivities()
+        )
+
+    async def get_response(
+        self,
+        system_instructions: str | None,
+        input: str | list[TResponseInputItem],
+        model_settings: ModelSettings,
+        tools: list[Tool],
+        output_schema: AgentOutputSchemaBase | None,
+        handoffs: list[Handoff],
+        tracing: ModelTracing,
+        *,
+        previous_response_id: str | None,
+        conversation_id: str | None,
+        prompt: ResponsePromptParam | None,
+    ) -> ModelResponse:
+        if tools or handoffs or output_schema is not None or prompt is not None:
+            raise ValueError("this compatibility path supports plain no-tool requests only")
+        response = await self._openai_activities.invoke_model(
+            model_name=self._model_name,
+            system_instructions=system_instructions,
+            input=input,
+            model_settings=model_settings.to_json_dict(),
+            tracing=tracing.value,
+            previous_response_id=previous_response_id,
+            conversation_id=conversation_id,
+        )
+        return ModelResponse(
+            output=[
+                RESPONSE_OUTPUT_ITEM_ADAPTER.validate_python(item)
+                for item in response["output"]
+            ],
+            usage=deserialize_usage(response["usage"]),
+            response_id=response.get("response_id"),
+            request_id=response.get("request_id"),
         )
 
 

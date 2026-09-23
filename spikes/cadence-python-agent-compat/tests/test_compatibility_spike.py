@@ -176,7 +176,7 @@ class CompatibilitySpikeTests(unittest.TestCase):
                 RunConfig,
                 Runner,
             )
-            from agents.usage import Usage
+            from agents.usage import Usage, serialize_usage
             from openai.types.responses import ResponseOutputMessage, ResponseOutputText
         except ModuleNotFoundError:
             self.skipTest("OpenAI Agents SDK dependency is not installed")
@@ -201,6 +201,12 @@ class CompatibilitySpikeTests(unittest.TestCase):
             usage=Usage(),
             response_id=None,
         )
+        expected_transport = {
+            "output": [item.model_dump(mode="json") for item in expected.output],
+            "usage": serialize_usage(expected.usage),
+            "response_id": None,
+            "request_id": None,
+        }
 
         class FakeActivities:
             def __init__(self) -> None:
@@ -208,7 +214,7 @@ class CompatibilitySpikeTests(unittest.TestCase):
 
             async def invoke_model(self, **kwargs):
                 self.arguments = kwargs
-                return expected
+                return expected_transport
 
         activities = FakeActivities()
         model = OpenAICompatibleCadenceModel("provider-model", activities)
@@ -226,10 +232,11 @@ class CompatibilitySpikeTests(unittest.TestCase):
                 prompt=None,
             )
         )
-        self.assertIs(actual, expected)
+        self.assertEqual(actual.output[0].content[0].text, "READY")
         self.assertEqual(activities.arguments["model_name"], "provider-model")
         self.assertEqual(activities.arguments["input"], "Return READY.")
-        self.assertEqual(activities.arguments["tools"], [])
+        self.assertIsInstance(activities.arguments["model_settings"], dict)
+        self.assertEqual(activities.arguments["tracing"], ModelTracing.DISABLED.value)
 
         async def run_agent():
             return await Runner.run(
@@ -295,14 +302,10 @@ class CompatibilitySpikeTests(unittest.TestCase):
                     model_name="mock-model",
                     system_instructions="Be concise.",
                     input="Return READY.",
-                    model_settings=ModelSettings(),
-                    tools=[],
-                    output_schema=None,
-                    handoffs=[],
-                    tracing=ModelTracing.DISABLED,
+                    model_settings=ModelSettings().to_json_dict(),
+                    tracing=ModelTracing.DISABLED.value,
                     previous_response_id=None,
                     conversation_id=None,
-                    prompt=None,
                 )
             finally:
                 await client.close()
@@ -314,8 +317,35 @@ class CompatibilitySpikeTests(unittest.TestCase):
         )
         self.assertEqual(len(requests), 1)
         self.assertEqual(requests[0].url.path, "/v1/chat/completions")
-        self.assertEqual(response.usage.input_tokens, 3)
-        self.assertEqual(response.usage.output_tokens, 1)
+        self.assertEqual(response["usage"]["input_tokens"], 3)
+        self.assertEqual(response["usage"]["output_tokens"], 1)
+
+    def test_openai_compatible_activity_signature_is_converter_safe(self) -> None:
+        try:
+            from agents import ModelSettings, ModelTracing
+            from cadence.contrib.pydantic import PydanticDataConverter
+        except ModuleNotFoundError:
+            self.skipTest("released SDK dependencies are not installed")
+
+        converter = PydanticDataConverter()
+        payload = converter.to_data(
+            [
+                "provider-model",
+                None,
+                "Return READY.",
+                ModelSettings().to_json_dict(),
+                ModelTracing.DISABLED.value,
+                None,
+                None,
+            ]
+        )
+        parameters = (
+            OpenAICompatibleChatCompletionsActivities(None)
+            .invoke_model.signature.params_from_payload(converter, payload)
+        )
+        self.assertEqual(parameters[2], "Return READY.")
+        self.assertIsInstance(parameters[3], dict)
+        self.assertEqual(parameters[4], ModelTracing.DISABLED.value)
 
     def test_openai_compatible_history_uses_distinct_activity_name(self) -> None:
         before = HistoryEvidence(
