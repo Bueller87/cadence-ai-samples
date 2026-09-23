@@ -11,8 +11,8 @@ conclusions and execution-verified results are intentionally separate.
 | Google ADK + Gemini | Native supported path: `GoogleADKActivities.generate_content_async` | **Verified September 23, 2026**; `gemini-3.5-flash-lite`; replay evidence below | Google AI or Vertex credentials; explicit model and `--confirm-live` |
 | Google ADK + local Ollama/Llama 3.2 | Source-compatible: ADK registry resolves `ollama_chat/...` to its LiteLLM integration inside the Cadence Activity | **Verified September 23, 2026**; `ollama_chat/llama3.2:latest`; replay evidence below | Local Ollama, `OLLAMA_API_BASE`, and optional LiteLLM dependency |
 | OpenAI Agents SDK + OpenAI | Native supported path: `OpenAIActivities.invoke_model` | Not yet live-tested in this spike; official Cadence OpenAI samples were run separately on the work Mac | `OPENAI_API_KEY`; explicit model and `--confirm-live` |
-| OpenAI Agents SDK + Gemini | Released integration cannot inject an alternate client; the spike now supplies a local Chat Completions model/Activity bridge | Implemented and offline-tested; no live call attempted | `GEMINI_API_KEY`; optional `GEMINI_OPENAI_BASE_URL`; explicit model and `--confirm-live` |
-| OpenAI Agents SDK + local Ollama/Llama 3.2 | Released integration cannot inject an alternate client; the spike now supplies the same local Chat Completions bridge | Implemented and offline-tested; no live call attempted | Local Ollama; optional loopback `OLLAMA_OPENAI_BASE_URL`; model `llama3.2:latest` |
+| OpenAI Agents SDK + Gemini | Released integration cannot inject an alternate client; the spike supplies an app-local JSON-safe Chat Completions model/Activity bridge | **Verified September 23, 2026**; `gemini-3.5-flash-lite`; replay evidence below | `GEMINI_API_KEY`; optional `GEMINI_OPENAI_BASE_URL`; explicit model and `--confirm-live` |
+| OpenAI Agents SDK + local Ollama/Llama 3.2 | Released integration cannot inject an alternate client; the spike supplies the same app-local JSON-safe Chat Completions bridge | **Verified September 23, 2026**; `llama3.2:latest`; replay evidence below | Local Ollama; optional loopback `OLLAMA_OPENAI_BASE_URL`; model `llama3.2:latest` |
 | OpenAI Agents SDK + Claude | Blocked as-is: Activity hardcodes `OpenAIProvider` and the runner rejects non-string model objects | Blocked by source review; no live call attempted | No supported released configuration |
 
 ## Released dependency baseline
@@ -88,6 +88,69 @@ Conclusion: the Workflow completed after a worker restart without scheduling
 another model Activity. We did not independently measure Ollama HTTP request
 counts, so this result does not establish the number of provider requests made.
 
+## Execution-verified result: OpenAI Agents SDK + Gemini
+
+On September 23, 2026, the harness verified OpenAI Agents SDK + Gemini using
+the app-local JSON-safe Chat Completions Activity with
+`cadence-python-client==0.4.0`.
+
+- Case: `openai-gemini`
+- Model: `gemini-3.5-flash-lite`
+- Cadence domain: `default`
+- Task list: `agent-compat-openai-gemini`
+- Workflow ID: `openai-gemini-replay-002`
+- Run ID: `bfa23776-e1c7-4793-a750-70f0bfec556a`
+- Before restart: `OpenAICompatibleChatCompletions.invoke_model` had 1
+  scheduled and 1 completed Activity, with no failed or timed-out Activities.
+  No resume Signal had been received. The Workflow terminal status was
+  `RUNNING`; before-restart verification passed with a baseline model-Activity
+  count of 1.
+- After the worker restart and `resume-after-model` Signal: the same Activity
+  counts remained 1 scheduled and 1 completed, with no failed or timed-out
+  Activities. The terminal status was `COMPLETED`, after-resume verification
+  passed, and no additional model Activity was scheduled.
+
+Observed fact: complete Workflow history contains no additional scheduled
+`OpenAICompatibleChatCompletions.invoke_model` Activity after the worker
+restart.
+
+Conclusion: Cadence reused the recorded model Activity result during Workflow
+replay after the worker restart. This conclusion is based on Cadence history
+and successful Workflow completion. We did not independently measure
+provider-side HTTP request counts, so it does not establish the number of
+requests received or billed by Gemini. Tool-call compatibility was not tested.
+
+## Execution-verified result: OpenAI Agents SDK + local Ollama/Llama 3.2
+
+On September 23, 2026, the harness verified OpenAI Agents SDK + local Ollama
+using the same app-local JSON-safe Chat Completions Activity with
+`cadence-python-client==0.4.0`.
+
+- Case: `openai-ollama`
+- Model: `llama3.2:latest`
+- Cadence domain: `default`
+- Task list: `agent-compat-openai-ollama`
+- Workflow ID: `openai-ollama-replay-001`
+- Run ID: `9d1f6648-51f1-44a9-934c-5a1c1438f536`
+- Before restart: `OpenAICompatibleChatCompletions.invoke_model` had 1
+  scheduled and 1 completed Activity, with no failed or timed-out Activities.
+  No resume Signal had been received. The Workflow terminal status was
+  `RUNNING`; before-restart verification passed with a baseline model-Activity
+  count of 1.
+- After the worker restart and `resume-after-model` Signal: the same Activity
+  counts remained 1 scheduled and 1 completed, with no failed or timed-out
+  Activities. The terminal status was `COMPLETED`, after-resume verification
+  passed, and no additional model Activity was scheduled.
+
+Observed fact: complete Workflow history contains no additional scheduled
+`OpenAICompatibleChatCompletions.invoke_model` Activity after the worker
+restart.
+
+Conclusion: the Workflow completed after a worker restart without scheduling
+another model Activity. We did not independently measure provider-side HTTP
+request counts, so this result does not establish the number of requests made
+to local Ollama. Tool-call compatibility was not tested.
+
 ## How Cadence intercepts model calls
 
 ### OpenAI Agents SDK
@@ -124,9 +187,10 @@ only, and uses a non-secret placeholder API key required by the OpenAI client.
 Offline tests exercise model-to-Activity dispatch and parse a mocked Chat
 Completions response without external network access.
 
-This is implemented support, not execution verification. Neither new case has
-yet produced live Cadence history in this harness. Both intentionally reject
-the optional tool flag until tool-call compatibility is tested separately.
+Both paths are now execution-verified for the no-tool replay scenario described
+above. They intentionally reject the optional tool flag until tool-call
+compatibility is tested separately. The app-local JSON-safe Activity bridge is
+separate from PR #176's SDK data-converter fix.
 
 ### Google ADK
 
@@ -167,10 +231,11 @@ require its Cadence Activity to have scheduled and completed successfully.
 
 ## Recommendation
 
-The execution-verified Phase 5 combinations remain Google ADK + Gemini and
-Google ADK + local Ollama/Llama 3.2. OpenAI Agents + Gemini and OpenAI Agents +
-local Ollama/Llama 3.2 are implemented through the spike-local Activity but
-remain live-unverified. OpenAI Agents + OpenAI also remains unverified in this
-spike, although official Cadence OpenAI samples have been run separately on the
-work Mac. Keep OpenAI Agents + Claude unsupported on this released Cadence
-integration until Cadence adds provider-aware Activity reconstruction.
+The four execution-verified Phase 5 combinations are Google ADK + Gemini,
+Google ADK + local Ollama/Llama 3.2, OpenAI Agents SDK + Gemini, and OpenAI
+Agents SDK + local Ollama/Llama 3.2. The two OpenAI Agents alternatives rely on
+the spike-local JSON-safe Chat Completions Activity, not PR #176's converter
+fix. OpenAI Agents SDK + OpenAI remains unverified in this spike, although
+official Cadence OpenAI samples have been run separately on the work Mac. Keep
+OpenAI Agents SDK + Claude unsupported on this released Cadence integration
+until Cadence adds provider-aware Activity reconstruction.
