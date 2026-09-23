@@ -9,7 +9,7 @@ conclusions and execution-verified results are intentionally separate.
 | Combination | Source review | Execution result | Required worker configuration |
 |---|---|---|---|
 | OpenAI Agents SDK + OpenAI | Native supported path: `OpenAIActivities.invoke_model` | Not tested | `OPENAI_API_KEY`; explicit model and `--confirm-live` |
-| Google ADK + Gemini | Native supported path: `GoogleADKActivities.generate_content_async` | Not tested | Google AI or Vertex credentials; explicit model and `--confirm-live` |
+| Google ADK + Gemini | Native supported path: `GoogleADKActivities.generate_content_async` | **Verified September 23, 2026**; `gemini-3.5-flash-lite`; replay evidence below | Google AI or Vertex credentials; explicit model and `--confirm-live` |
 | OpenAI Agents SDK + Claude | Blocked as-is: Activity hardcodes `OpenAIProvider` and the runner rejects non-string model objects | Blocked by source review; no live call attempted | No supported released configuration |
 | Google ADK + local Ollama | Source-compatible: ADK registry resolves `ollama_chat/...` to its LiteLLM integration inside the Cadence Activity | Not tested | Local Ollama, `OLLAMA_API_BASE`, and optional LiteLLM dependency |
 
@@ -35,6 +35,31 @@ It is not a base dependency or a provider gateway.
 
 These links support the source-review column only. They are not execution
 evidence for any model/provider combination.
+
+## Execution-verified result: Google ADK + Gemini
+
+On September 23, 2026, the harness verified Google ADK + Gemini using model
+`gemini-3.5-flash-lite` in Cadence domain `default`.
+
+- Workflow ID: `gemini-replay-003`
+- Run ID: `af506501-17d5-460f-b194-6ad9b48e52c8`
+- Before restart: `GoogleADKActivities.generate_content_async` had 1 scheduled,
+  1 completed, 0 failed, and 0 timed out. The Workflow was `RUNNING`, awaiting
+  `resume-after-model`; before-restart verification passed with a
+  `baseline-model-scheduled` value of 1.
+- After the worker restart and `resume-after-model` Signal: the same Activity
+  counts remained 1 scheduled, 1 completed, 0 failed, and 0 timed out. The
+  Signal was present in complete Workflow history, the Workflow status was
+  `COMPLETED`, its output was `READY`, and after-resume verification passed.
+
+Observed fact: complete Workflow history contains no additional scheduled
+`GoogleADKActivities.generate_content_async` Activity after the worker restart.
+
+Conclusion: Cadence reused the recorded model Activity result during Workflow
+replay after the worker restart. This conclusion is based on Cadence history
+and successful Workflow completion. We did not independently measure
+provider-side request counts, so this result does not establish the number of
+requests received or billed by Gemini.
 
 ## How Cadence intercepts model calls
 
@@ -93,7 +118,8 @@ require its Cadence Activity to have scheduled and completed successfully.
 
 ## Recommendation
 
-Start Phase 5 with OpenAI Agents + OpenAI and Google ADK + Gemini. Treat ADK
-+ Ollama as an experimental local path until execution evidence is recorded.
-Keep OpenAI Agents + Claude unsupported on this released Cadence integration
-until Cadence adds provider-aware Activity reconstruction.
+The initial execution-verified Phase 5 combination is Google ADK + Gemini.
+Treat ADK + Ollama and OpenAI Agents + OpenAI as unverified until their staged
+replay checks are recorded. Keep OpenAI Agents + Claude unsupported on this
+released Cadence integration until Cadence adds provider-aware Activity
+reconstruction.

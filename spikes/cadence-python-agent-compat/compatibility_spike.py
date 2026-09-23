@@ -384,7 +384,7 @@ async def start_workflow(args: argparse.Namespace) -> None:
         args.with_tool,
         task_list=args.task_list,
         workflow_id=args.workflow_id,
-        execution_start_to_close_timeout=timedelta(minutes=5),
+        execution_start_to_close_timeout=timedelta(minutes=60),
         task_start_to_close_timeout=timedelta(seconds=30),
     )
     print(

@@ -23,13 +23,22 @@ PowerShell activation is `.venv\Scripts\Activate.ps1`.
 
 ## Explicit live runs
 
-Start a worker on a dedicated task list. Set cloud credentials only in this
-worker terminal; never pass them to `start`.
+Use a dedicated task list for each case. Set provider credentials only in the
+worker terminal; never pass them to `start`. Workflows started by this harness
+have a 60-minute execution timeout and a 30-second workflow-task timeout.
+
+Try the cases in this order: Gemini, Ollama, then OpenAI. Gemini is the only
+live-verified path so far; Ollama, OpenAI, and the optional `echo_token` tool
+path remain unverified.
+
+### 1. Google ADK + Gemini
+
+Configure the appropriate Google AI or Vertex credentials in the worker
+terminal, then start the dedicated worker:
 
 ```bash
-export OPENAI_API_KEY='your-key'
-python compatibility_spike.py --task-list agent-compat-openai worker \
-  --case openai-openai
+python compatibility_spike.py --task-list agent-compat-gemini worker \
+  --case adk-gemini
 ```
 
 In another terminal, a cloud-backed start requires `--confirm-live` and an
@@ -37,9 +46,9 @@ explicit model. It prints only workflow identifiers, never credentials or
 model output.
 
 ```bash
-python compatibility_spike.py --task-list agent-compat-openai start \
-  --case openai-openai --model YOUR_OPENAI_MODEL \
-  --workflow-id openai-replay-001 --pause-after-model --confirm-live
+python compatibility_spike.py --task-list agent-compat-gemini start \
+  --case adk-gemini --model gemini-3.5-flash-lite \
+  --workflow-id gemini-replay-004 --pause-after-model --confirm-live
 ```
 
 Use staged history verification before stopping the worker. It reads every
@@ -49,7 +58,7 @@ Workflow is still waiting without the resume Signal. Record the printed
 
 ```bash
 python compatibility_spike.py history \
-  --workflow-id openai-replay-001 --case openai-openai \
+  --workflow-id gemini-replay-004 --case adk-gemini \
   --stage before-restart
 ```
 
@@ -58,13 +67,13 @@ check with the recorded value (shown as `1` here):
 
 ```bash
 # stop the worker with Ctrl-C, then restart the same case and task list
-python compatibility_spike.py --task-list agent-compat-openai worker \
-  --case openai-openai
+python compatibility_spike.py --task-list agent-compat-gemini worker \
+  --case adk-gemini
 
 # in another terminal
-python compatibility_spike.py resume --workflow-id openai-replay-001
+python compatibility_spike.py resume --workflow-id gemini-replay-004
 python compatibility_spike.py history \
-  --workflow-id openai-replay-001 --case openai-openai \
+  --workflow-id gemini-replay-004 --case adk-gemini \
   --stage after-resume --baseline-model-scheduled 1
 ```
 
@@ -77,25 +86,25 @@ terminal status only; it never decodes model payloads or credentials.
 
 To exercise the harmless tool, add `--with-tool` to `start`. The agent is then
 explicitly instructed to call `echo_token` exactly once with a fixed synthetic
-token. Add `--expect-tool` to both staged history commands; verification fails
-unless the `echo_token` Activity was scheduled and completed:
+token. This optional live tool path has not been tested. Add `--expect-tool`
+to both staged history commands; verification fails unless the `echo_token`
+Activity was scheduled and completed:
 
 ```bash
-python compatibility_spike.py --task-list agent-compat-openai start \
-  --case openai-openai --model YOUR_OPENAI_MODEL \
-  --workflow-id openai-tool-replay-001 --pause-after-model \
+python compatibility_spike.py --task-list agent-compat-gemini start \
+  --case adk-gemini --model gemini-3.5-flash-lite \
+  --workflow-id gemini-tool-replay-001 --pause-after-model \
   --with-tool --confirm-live
 
 python compatibility_spike.py history \
-  --workflow-id openai-tool-replay-001 --case openai-openai \
+  --workflow-id gemini-tool-replay-001 --case adk-gemini \
   --stage before-restart --expect-tool
 ```
 
 After restart and resume, also include `--expect-tool` with
 `--stage after-resume` and the recorded model-Activity baseline.
 
-For Gemini, use `--case adk-gemini`, a separate task list, an explicit Gemini
-model, and the appropriate Google AI or Vertex credentials in the worker.
+### 2. Google ADK + local Ollama
 
 For local Ollama only, install the optional group and use ADK's required
 `ollama_chat/` model prefix:
@@ -110,12 +119,29 @@ python compatibility_spike.py --task-list agent-compat-ollama start \
   --workflow-id ollama-replay-001 --pause-after-model
 ```
 
+### 3. OpenAI Agents SDK + OpenAI
+
+Set the OpenAI credential only in the dedicated worker terminal:
+
+```bash
+export OPENAI_API_KEY='your-key'
+python compatibility_spike.py --task-list agent-compat-openai worker \
+  --case openai-openai
+```
+
+Keep that worker running. In a different terminal, start the Workflow:
+
+```bash
+python compatibility_spike.py --task-list agent-compat-openai start \
+  --case openai-openai --model YOUR_OPENAI_MODEL \
+  --workflow-id openai-replay-001 --pause-after-model --confirm-live
+```
+
 `openai-claude` intentionally fails before a Cadence client is created. The
 released integration cannot route that case durably without an SDK change.
 
-For Gemini, start the worker with `--case adk-gemini`. Selecting a worker case
-registers only that released integration, so an ADK-only worker does not
-require an OpenAI credential merely to start.
+Selecting a worker case registers only that released integration, so an
+ADK-only worker does not require an OpenAI credential merely to start.
 
 ## Windows PowerShell
 
