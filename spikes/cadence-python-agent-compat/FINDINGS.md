@@ -8,10 +8,10 @@ conclusions and execution-verified results are intentionally separate.
 
 | Combination | Source review | Execution result | Required worker configuration |
 |---|---|---|---|
-| OpenAI Agents SDK + OpenAI | Native supported path: `OpenAIActivities.invoke_model` | Not tested | `OPENAI_API_KEY`; explicit model and `--confirm-live` |
 | Google ADK + Gemini | Native supported path: `GoogleADKActivities.generate_content_async` | **Verified September 23, 2026**; `gemini-3.5-flash-lite`; replay evidence below | Google AI or Vertex credentials; explicit model and `--confirm-live` |
+| Google ADK + local Ollama/Llama 3.2 | Source-compatible: ADK registry resolves `ollama_chat/...` to its LiteLLM integration inside the Cadence Activity | **Verified September 23, 2026**; `ollama_chat/llama3.2:latest`; replay evidence below | Local Ollama, `OLLAMA_API_BASE`, and optional LiteLLM dependency |
+| OpenAI Agents SDK + OpenAI | Native supported path: `OpenAIActivities.invoke_model` | Not yet live-tested in this spike; official Cadence OpenAI samples were run separately on the work Mac | `OPENAI_API_KEY`; explicit model and `--confirm-live` |
 | OpenAI Agents SDK + Claude | Blocked as-is: Activity hardcodes `OpenAIProvider` and the runner rejects non-string model objects | Blocked by source review; no live call attempted | No supported released configuration |
-| Google ADK + local Ollama | Source-compatible: ADK registry resolves `ollama_chat/...` to its LiteLLM integration inside the Cadence Activity | Not tested | Local Ollama, `OLLAMA_API_BASE`, and optional LiteLLM dependency |
 
 ## Released dependency baseline
 
@@ -60,6 +60,31 @@ replay after the worker restart. This conclusion is based on Cadence history
 and successful Workflow completion. We did not independently measure
 provider-side request counts, so this result does not establish the number of
 requests received or billed by Gemini.
+
+## Execution-verified result: Google ADK + local Ollama/Llama 3.2
+
+On September 23, 2026, the harness verified Google ADK + local Ollama using
+`ollama_chat/llama3.2:latest` with `cadence-python-client==0.4.0`.
+
+- Cadence domain: `default`
+- Task list: `agent-compat-ollama`
+- Workflow ID: `ollama-replay-001`
+- Run ID: `a701a86a-ed3a-4492-9a60-6209559c243b`
+- Before restart: `GoogleADKActivities.generate_content_async` had 1 scheduled
+  and 1 completed Activity, with no failed or timed-out Activities. The
+  Workflow terminal status was `RUNNING`; before-restart verification passed
+  with a baseline model-Activity count of 1.
+- After the worker restart and `resume-after-model` Signal: the same Activity
+  counts remained 1 scheduled and 1 completed, with no failed or timed-out
+  Activities. The terminal status was `COMPLETED`, and after-resume
+  verification passed.
+
+Observed fact: complete Workflow history contains no additional scheduled
+`GoogleADKActivities.generate_content_async` Activity after the worker restart.
+
+Conclusion: the Workflow completed after a worker restart without scheduling
+another model Activity. We did not independently measure Ollama HTTP request
+counts, so this result does not establish the number of provider requests made.
 
 ## How Cadence intercepts model calls
 
@@ -118,8 +143,8 @@ require its Cadence Activity to have scheduled and completed successfully.
 
 ## Recommendation
 
-The initial execution-verified Phase 5 combination is Google ADK + Gemini.
-Treat ADK + Ollama and OpenAI Agents + OpenAI as unverified until their staged
-replay checks are recorded. Keep OpenAI Agents + Claude unsupported on this
-released Cadence integration until Cadence adds provider-aware Activity
-reconstruction.
+The execution-verified Phase 5 combinations are Google ADK + Gemini and Google
+ADK + local Ollama/Llama 3.2. OpenAI Agents + OpenAI remains unverified in this
+spike, although official Cadence OpenAI samples have been run separately on the
+work Mac. Keep OpenAI Agents + Claude unsupported on this released Cadence
+integration until Cadence adds provider-aware Activity reconstruction.
