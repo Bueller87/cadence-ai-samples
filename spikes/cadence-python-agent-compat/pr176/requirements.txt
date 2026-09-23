@@ -1,0 +1,5 @@
+cadence-python-client @ git+https://github.com/cadence-workflow/cadence-python-client.git@2bc1af4207d20cd99ae64fa1ef82d803905af947
+openai==2.30.0
+openai-agents==0.12.5
+pydantic==2.12.5
+pytest==8.4.1
