@@ -17,7 +17,7 @@ conclusions and execution-verified results are intentionally separate.
 
 - `cadence-python-client==0.4.0`
 - `openai-agents==0.12.5`
-- `openai==2.29.0`
+- `openai==2.30.0`
 - `google-adk==2.1.0`
 - `pydantic==2.12.5`
 
