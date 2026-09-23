@@ -23,6 +23,7 @@ RESUME_SIGNAL = "resume-after-model"
 OPENAI_ACTIVITY = "OpenAIActivities.invoke_model"
 ADK_ACTIVITY = "GoogleADKActivities.generate_content_async"
 ECHO_ACTIVITY = "echo_token"
+TOOL_TOKEN = "compatibility-check"
 
 
 class SpikeCase(StrEnum):
@@ -46,6 +47,15 @@ class HistorySummary:
     completed: dict[str, int]
     failed: dict[str, int]
     timed_out: dict[str, int]
+
+
+@dataclass(frozen=True)
+class HistoryEvidence:
+    """Payload-free evidence needed for replay and tool-call verification."""
+
+    activities: HistorySummary
+    signals: tuple[str, ...]
+    terminal_status: str | None
 
 
 def validate_start_request(
@@ -99,19 +109,86 @@ def summarize_observations(observations: Iterable[ActivityObservation]) -> Histo
     return HistorySummary(**{name: dict(value) for name, value in counters.items()})
 
 
-def replay_reused_completed_activities(
-    before_restart: HistorySummary,
-    after_resume: HistorySummary,
-    activity_type: str,
-) -> bool:
-    """A history-only replay check: no new model Activity may be scheduled."""
+def analyze_history_events(events: Iterable[Any]) -> HistoryEvidence:
+    """Extract only Activity names, Signal names, and terminal status."""
 
-    return (
-        after_resume.scheduled.get(activity_type, 0)
-        == before_restart.scheduled.get(activity_type, 0)
-        and after_resume.completed.get(activity_type, 0)
-        == before_restart.completed.get(activity_type, 0)
+    event_list = list(events)
+    signals: list[str] = []
+    terminal_status = None
+    terminal_by_attributes = {
+        "workflow_execution_completed_event_attributes": "COMPLETED",
+        "workflow_execution_failed_event_attributes": "FAILED",
+        "workflow_execution_timed_out_event_attributes": "TIMED_OUT",
+        "workflow_execution_canceled_event_attributes": "CANCELED",
+        "workflow_execution_terminated_event_attributes": "TERMINATED",
+        "workflow_execution_continued_as_new_event_attributes": "CONTINUED_AS_NEW",
+    }
+    for event in event_list:
+        attributes_name = event.WhichOneof("attributes")
+        if attributes_name == "workflow_execution_signaled_event_attributes":
+            signals.append(getattr(event, attributes_name).signal_name)
+        elif attributes_name in terminal_by_attributes:
+            terminal_status = terminal_by_attributes[attributes_name]
+    return HistoryEvidence(
+        activities=summarize_observations(
+            observations_from_history_events(event_list)
+        ),
+        signals=tuple(signals),
+        terminal_status=terminal_status,
     )
+
+
+def verification_errors(
+    stage: str,
+    evidence: HistoryEvidence,
+    model_activity: str,
+    expect_tool: bool,
+    baseline_model_scheduled: int | None = None,
+) -> list[str]:
+    """Return sanitized replay-verification failures for one history snapshot."""
+
+    errors: list[str] = []
+    summary = evidence.activities
+    scheduled = summary.scheduled.get(model_activity, 0)
+    completed = summary.completed.get(model_activity, 0)
+    failed = summary.failed.get(model_activity, 0)
+    timed_out = summary.timed_out.get(model_activity, 0)
+
+    if scheduled < 1 or completed < 1:
+        errors.append("no completed model Activity is present")
+    if completed != scheduled or failed or timed_out:
+        errors.append("not every scheduled model Activity completed successfully")
+
+    if expect_tool:
+        tool_scheduled = summary.scheduled.get(ECHO_ACTIVITY, 0)
+        tool_completed = summary.completed.get(ECHO_ACTIVITY, 0)
+        tool_failed = summary.failed.get(ECHO_ACTIVITY, 0)
+        tool_timed_out = summary.timed_out.get(ECHO_ACTIVITY, 0)
+        if (
+            tool_scheduled < 1
+            or tool_completed != tool_scheduled
+            or tool_failed
+            or tool_timed_out
+        ):
+            errors.append("the requested echo_token Activity did not complete")
+
+    if stage == "before-restart":
+        if RESUME_SIGNAL in evidence.signals:
+            errors.append("the resume Signal arrived before the worker restart")
+        if evidence.terminal_status is not None:
+            errors.append("the Workflow is not waiting after its final model call")
+    elif stage == "after-resume":
+        if baseline_model_scheduled is None or baseline_model_scheduled < 1:
+            errors.append("a positive --baseline-model-scheduled value is required")
+        elif scheduled > baseline_model_scheduled:
+            errors.append("an additional model Activity was scheduled after restart")
+        elif scheduled < baseline_model_scheduled:
+            errors.append("the recorded model-Activity baseline does not match history")
+        if RESUME_SIGNAL not in evidence.signals:
+            errors.append(f"Signal {RESUME_SIGNAL!r} is absent from history")
+        if evidence.terminal_status != "COMPLETED":
+            errors.append("the Workflow did not complete successfully after the Signal")
+    return errors
 
 
 def observations_from_history_events(events: Iterable[Any]) -> list[ActivityObservation]:
@@ -139,6 +216,15 @@ def observations_from_history_events(events: Iterable[Any]) -> list[ActivityObse
         activity_type = scheduled_types.get(attributes.scheduled_event_id, "unknown")
         observations.append(ActivityObservation(lifecycle_event, activity_type))
     return observations
+
+
+def agent_instruction(use_tool: bool) -> str:
+    if use_tool:
+        return (
+            f"Call echo_token exactly once with token {TOOL_TOKEN!r}. "
+            "Do not answer before using the tool. Then answer with READY."
+        )
+    return "Answer the user with a short plain-text response."
 
 
 def build_registry(case: SpikeCase):
@@ -177,7 +263,7 @@ def build_registry(case: SpikeCase):
                 agent = Agent(
                     name="compatibility-spike",
                     model=model_name,
-                    instructions="Answer the user with a short plain-text response.",
+                    instructions=agent_instruction(use_tool),
                     tools=tools,
                 )
                 result = await Runner.run(
@@ -217,7 +303,7 @@ def build_registry(case: SpikeCase):
                 agent = LlmAgent(
                     name="compatibility_spike",
                     model=model_name,
-                    instruction="Answer the user with a short plain-text response.",
+                    instruction=agent_instruction(use_tool),
                     tools=[echo_token] if use_tool else [],
                 )
                 session_service = InMemorySessionService()
@@ -256,13 +342,26 @@ def build_registry(case: SpikeCase):
     return registry
 
 
+def build_worker_client(target: str, domain: str):
+    """Build the worker client with the converter required by agent payloads."""
+
+    import cadence
+    from cadence.contrib.pydantic import PydanticDataConverter
+
+    return cadence.Client(
+        domain=domain,
+        target=target,
+        data_converter=PydanticDataConverter(),
+    )
+
+
 async def run_worker(
     target: str, domain: str, task_list: str, case: SpikeCase
 ) -> None:
     import cadence
 
     worker = cadence.worker.Worker(
-        cadence.Client(domain=domain, target=target),
+        build_worker_client(target, domain),
         task_list,
         build_registry(case),
     )
@@ -297,6 +396,11 @@ async def start_workflow(args: argparse.Namespace) -> None:
             "After the model Activity completes, stop and restart the worker, then run "
             f"the resume command with signal name {RESUME_SIGNAL!r}."
         )
+    if args.with_tool:
+        print(
+            f"The agent was instructed to call {ECHO_ACTIVITY} with a fixed test token; "
+            "verify its completed Activity in history with --expect-tool."
+        )
 
 
 async def resume_workflow(args: argparse.Namespace) -> None:
@@ -307,26 +411,78 @@ async def resume_workflow(args: argparse.Namespace) -> None:
     print(f"sent {RESUME_SIGNAL} to workflow-id={args.workflow_id}")
 
 
-async def inspect_history(args: argparse.Namespace) -> None:
-    from cadence import Client
+async def fetch_complete_history_events(
+    client: Any,
+    domain: str,
+    workflow_id: str,
+    run_id: str = "",
+) -> list[Any]:
+    """Read every history page without decoding any event payload."""
+
     from cadence.api.v1.common_pb2 import WorkflowExecution
     from cadence.api.v1.service_workflow_pb2 import GetWorkflowExecutionHistoryRequest
 
+    events: list[Any] = []
+    next_page_token = b""
+    while True:
+        request = GetWorkflowExecutionHistoryRequest(
+            domain=domain,
+            workflow_execution=WorkflowExecution(
+                workflow_id=workflow_id,
+                run_id=run_id,
+            ),
+            page_size=1000,
+            next_page_token=next_page_token,
+        )
+        response = await client.workflow_stub.GetWorkflowExecutionHistory(request)
+        events.extend(response.history.events)
+        if not response.next_page_token:
+            break
+        next_page_token = response.next_page_token
+    return events
+
+
+async def inspect_history(args: argparse.Namespace) -> None:
+    from cadence import Client
+
     client = Client(domain=args.domain, target=args.target)
-    request = GetWorkflowExecutionHistoryRequest(
-        domain=args.domain,
-        workflow_execution=WorkflowExecution(
-            workflow_id=args.workflow_id,
-            run_id=args.run_id or "",
-        ),
-        page_size=1000,
+    events = await fetch_complete_history_events(
+        client,
+        args.domain,
+        args.workflow_id,
+        args.run_id or "",
     )
-    response = await client.workflow_stub.GetWorkflowExecutionHistory(request)
-    summary = summarize_observations(observations_from_history_events(response.history.events))
+
+    evidence = analyze_history_events(events)
+    summary = evidence.activities
     print("Activity history summary (payloads omitted):")
     for lifecycle_event in ("scheduled", "completed", "failed", "timed_out"):
         counts = getattr(summary, lifecycle_event)
         print(f"{lifecycle_event}: {dict(sorted(counts.items()))}")
+    print(f"signals: {list(evidence.signals)}")
+    print(f"terminal-status: {evidence.terminal_status or 'RUNNING'}")
+
+    if args.stage == "snapshot":
+        return
+    if not args.case:
+        raise ValueError("--case is required for staged history verification")
+    model_activity = expected_model_activity(SpikeCase(args.case))
+    errors = verification_errors(
+        args.stage,
+        evidence,
+        model_activity,
+        args.expect_tool,
+        args.baseline_model_scheduled,
+    )
+    if errors:
+        for error in errors:
+            print(f"verification-error: {error}")
+        raise ValueError(f"{args.stage} history verification failed")
+    print(f"verification: PASS ({args.stage})")
+    print(
+        "baseline-model-scheduled: "
+        f"{summary.scheduled.get(model_activity, 0)}"
+    )
 
 
 def parser() -> argparse.ArgumentParser:
@@ -338,7 +494,11 @@ def parser() -> argparse.ArgumentParser:
 
     worker = subcommands.add_parser("worker")
     worker.add_argument(
-        "--case", choices=[case.value for case in SpikeCase if case != SpikeCase.OPENAI_CLAUDE], required=True
+        "--case",
+        choices=[
+            case.value for case in SpikeCase if case != SpikeCase.OPENAI_CLAUDE
+        ],
+        required=True,
     )
 
     start = subcommands.add_parser("start")
@@ -357,6 +517,14 @@ def parser() -> argparse.ArgumentParser:
     history = subcommands.add_parser("history")
     history.add_argument("--workflow-id", required=True)
     history.add_argument("--run-id", default="")
+    history.add_argument("--case", choices=[case.value for case in SpikeCase])
+    history.add_argument(
+        "--stage",
+        choices=["snapshot", "before-restart", "after-resume"],
+        default="snapshot",
+    )
+    history.add_argument("--baseline-model-scheduled", type=int)
+    history.add_argument("--expect-tool", action="store_true")
     return command_parser
 
 

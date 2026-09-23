@@ -78,11 +78,18 @@ history shows the expected model Activity completed:
 3. Send `resume-after-model` to the waiting workflow.
 4. Inspect history before and after resuming.
 
-Verification requires the model Activity scheduled and completed counts to be
-unchanged after restart, plus no second provider-invocation log line. This is
-evidence that Cadence replay reused the completed Activity result. The history
-command reports activity names and lifecycle counts only; it never decodes or
-prints workflow or activity payloads.
+Before restart, staged verification requires a completed model Activity and a
+Workflow that is still waiting without the resume Signal. After restart and
+resume, it requires the Signal in complete paginated history, successful
+Workflow completion, and no increase from the recorded model-Activity baseline.
+The combination of those facts and no second provider-invocation log line is
+the replay evidence; unchanged counts alone are insufficient. The history
+command reports only Activity names, Signal names, lifecycle counts, and
+terminal status. It never decodes or prints workflow or Activity payloads.
+
+When the optional tool check is selected, the agent instructions require one
+`echo_token` call with a fixed synthetic token. Both staged checks additionally
+require its Cadence Activity to have scheduled and completed successfully.
 
 ## Recommendation
 
