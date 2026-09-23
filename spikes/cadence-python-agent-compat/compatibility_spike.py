@@ -10,17 +10,39 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
 from enum import StrEnum
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
+from urllib.parse import urlparse
+
+from agents import (
+    AgentOutputSchemaBase,
+    ModelResponse,
+    ModelSettings,
+    ModelTracing,
+    TResponseInputItem,
+)
+from cadence import activity as cadence_activity
+from cadence.contrib.openai.cadence_model import CadenceModel
+from cadence.contrib.openai.cadence_handoff import (
+    CadenceHandoff,
+    from_cadence_handoff,
+)
+from cadence.contrib.openai.cadence_tool import (
+    CadenceTool,
+    from_cadence_tool,
+)
+from openai.types.responses import ResponsePromptParam
 
 
 OPENAI_WORKFLOW = "OpenAIAgentCompatibilityWorkflow"
 ADK_WORKFLOW = "GoogleADKAgentCompatibilityWorkflow"
 RESUME_SIGNAL = "resume-after-model"
 OPENAI_ACTIVITY = "OpenAIActivities.invoke_model"
+OPENAI_COMPAT_ACTIVITY = "OpenAICompatibleChatCompletions.invoke_model"
 ADK_ACTIVITY = "GoogleADKActivities.generate_content_async"
 ECHO_ACTIVITY = "echo_token"
 TOOL_TOKEN = "compatibility-check"
@@ -28,6 +50,8 @@ TOOL_TOKEN = "compatibility-check"
 
 class SpikeCase(StrEnum):
     OPENAI_OPENAI = "openai-openai"
+    OPENAI_GEMINI = "openai-gemini"
+    OPENAI_OLLAMA = "openai-ollama"
     ADK_GEMINI = "adk-gemini"
     OPENAI_CLAUDE = "openai-claude"
     ADK_OLLAMA = "adk-ollama"
@@ -58,10 +82,125 @@ class HistoryEvidence:
     terminal_status: str | None
 
 
+@dataclass(frozen=True)
+class OpenAICompatibleProviderConfig:
+    """Worker-only configuration; the credential is omitted from representations."""
+
+    base_url: str
+    api_key: str = field(repr=False)
+
+
+def openai_compatible_provider_config(
+    case: SpikeCase,
+    environ: Mapping[str, str] = os.environ,
+) -> OpenAICompatibleProviderConfig:
+    """Read alternative-provider settings only while configuring a worker."""
+
+    if case is SpikeCase.OPENAI_GEMINI:
+        api_key = environ.get("GEMINI_API_KEY", "").strip()
+        if not api_key:
+            raise ValueError("openai-gemini worker requires GEMINI_API_KEY")
+        base_url = environ.get(
+            "GEMINI_OPENAI_BASE_URL",
+            "https://generativelanguage.googleapis.com/v1beta/openai/",
+        ).strip()
+    elif case is SpikeCase.OPENAI_OLLAMA:
+        api_key = environ.get("OLLAMA_OPENAI_API_KEY", "ollama").strip() or "ollama"
+        base_url = environ.get(
+            "OLLAMA_OPENAI_BASE_URL",
+            "http://localhost:11434/v1/",
+        ).strip()
+    else:
+        raise ValueError(f"{case.value} is not an OpenAI-compatible provider case")
+
+    parsed = urlparse(base_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("the OpenAI-compatible base URL must be an absolute HTTP URL")
+    if case is SpikeCase.OPENAI_OLLAMA and parsed.hostname not in {
+        "localhost",
+        "127.0.0.1",
+        "::1",
+    }:
+        raise ValueError("openai-ollama requires a loopback Ollama endpoint")
+    return OpenAICompatibleProviderConfig(base_url=base_url, api_key=api_key)
+
+
+class OpenAICompatibleChatCompletionsActivities:
+    """App-local Activity for OpenAI-compatible Chat Completions backends."""
+
+    def __init__(self, provider: Any | None = None) -> None:
+        self._provider = provider
+
+    @cadence_activity.method(name=OPENAI_COMPAT_ACTIVITY)
+    async def invoke_model(
+        self,
+        model_name: str,
+        system_instructions: str | None,
+        input: str | list[TResponseInputItem],
+        model_settings: ModelSettings,
+        tools: list[CadenceTool],
+        output_schema: AgentOutputSchemaBase | None,
+        handoffs: list[CadenceHandoff],
+        tracing: ModelTracing,
+        previous_response_id: str | None,
+        conversation_id: str | None,
+        prompt: ResponsePromptParam | None,
+    ) -> ModelResponse:
+        if self._provider is None:
+            raise RuntimeError("the worker did not configure a model provider")
+        model = self._provider.get_model(model_name)
+        return await model.get_response(
+            system_instructions=system_instructions,
+            input=input,
+            model_settings=model_settings,
+            tools=[from_cadence_tool(tool) for tool in tools],
+            output_schema=output_schema,
+            handoffs=[from_cadence_handoff(handoff) for handoff in handoffs],
+            tracing=tracing,
+            previous_response_id=previous_response_id,
+            conversation_id=conversation_id,
+            prompt=prompt,
+        )
+
+
+class OpenAICompatibleCadenceModel(CadenceModel):
+    """Released Cadence model redirected to the app-local Activity name."""
+
+    def __init__(
+        self,
+        model_name: str,
+        activities: Any | None = None,
+    ) -> None:
+        self._model_name = model_name
+        self._openai_activities = (
+            activities or OpenAICompatibleChatCompletionsActivities()
+        )
+
+
+def build_openai_compatible_activities(
+    case: SpikeCase,
+) -> OpenAICompatibleChatCompletionsActivities:
+    """Build the provider client for an Activity worker, never for Workflow code."""
+
+    from agents import OpenAIProvider
+    from openai import AsyncOpenAI
+
+    config = openai_compatible_provider_config(case)
+    client = AsyncOpenAI(
+        api_key=config.api_key,
+        base_url=config.base_url,
+        max_retries=0,
+    )
+    return OpenAICompatibleChatCompletionsActivities(
+        OpenAIProvider(openai_client=client, use_responses=False)
+    )
+
+
 def validate_start_request(
     case: SpikeCase,
     model: str,
     confirm_live: bool,
+    use_tool: bool = False,
 ) -> None:
     """Reject unsupported or accidental cloud starts before opening a client."""
 
@@ -72,14 +211,28 @@ def validate_start_request(
             "openai-claude is blocked by cadence-python-client v0.4.0: "
             "the integration hardcodes OpenAIProvider inside its model Activity"
         )
-    if case in {SpikeCase.OPENAI_OPENAI, SpikeCase.ADK_GEMINI} and not confirm_live:
+    if case in {
+        SpikeCase.OPENAI_OPENAI,
+        SpikeCase.OPENAI_GEMINI,
+        SpikeCase.ADK_GEMINI,
+    } and not confirm_live:
         raise ValueError("cloud-backed cases require --confirm-live")
+    if case in {SpikeCase.OPENAI_GEMINI, SpikeCase.OPENAI_OLLAMA} and use_tool:
+        raise ValueError(
+            f"{case.value} does not support --with-tool until tool calls are validated"
+        )
+    if case is SpikeCase.OPENAI_OLLAMA and model != "llama3.2:latest":
+        raise ValueError("openai-ollama requires model llama3.2:latest")
     if case is SpikeCase.ADK_OLLAMA and not model.startswith("ollama_chat/"):
         raise ValueError("adk-ollama requires an ollama_chat/<model> string")
 
 
 def workflow_type_for(case: SpikeCase) -> str:
-    if case is SpikeCase.OPENAI_OPENAI:
+    if case in {
+        SpikeCase.OPENAI_OPENAI,
+        SpikeCase.OPENAI_GEMINI,
+        SpikeCase.OPENAI_OLLAMA,
+    }:
         return OPENAI_WORKFLOW
     if case in {SpikeCase.ADK_GEMINI, SpikeCase.ADK_OLLAMA}:
         return ADK_WORKFLOW
@@ -89,6 +242,8 @@ def workflow_type_for(case: SpikeCase) -> str:
 def expected_model_activity(case: SpikeCase) -> str:
     if case is SpikeCase.OPENAI_OPENAI:
         return OPENAI_ACTIVITY
+    if case in {SpikeCase.OPENAI_GEMINI, SpikeCase.OPENAI_OLLAMA}:
+        return OPENAI_COMPAT_ACTIVITY
     if case in {SpikeCase.ADK_GEMINI, SpikeCase.ADK_OLLAMA}:
         return ADK_ACTIVITY
     raise ValueError(f"{case.value} has no supported model Activity")
@@ -279,6 +434,44 @@ def build_registry(case: SpikeCase):
             def resume_after_model(self) -> None:
                 self._resumed = True
 
+    elif case in {SpikeCase.OPENAI_GEMINI, SpikeCase.OPENAI_OLLAMA}:
+        from agents import Agent, Runner, RunConfig
+
+        registry.register_activities(build_openai_compatible_activities(case))
+
+        @registry.workflow(name=OPENAI_WORKFLOW)
+        class OpenAICompatibleAgentWorkflow:
+            def __init__(self) -> None:
+                self._resumed = False
+
+            @cadence.workflow.run
+            async def run(
+                self,
+                model_name: str,
+                prompt: str,
+                pause_after_model: bool,
+                use_tool: bool,
+            ) -> str:
+                if use_tool:
+                    raise ValueError("tools are not enabled for this compatibility path")
+                agent = Agent(
+                    name="compatibility-spike",
+                    model=OpenAICompatibleCadenceModel(model_name),
+                    instructions=agent_instruction(False),
+                )
+                result = await Runner.run(
+                    agent,
+                    prompt,
+                    run_config=RunConfig(tracing_disabled=True),
+                )
+                if pause_after_model:
+                    await cadence.workflow.wait_condition(lambda: self._resumed)
+                return str(result.final_output)
+
+            @cadence.workflow.signal(name=RESUME_SIGNAL)
+            def resume_after_model(self) -> None:
+                self._resumed = True
+
     elif case in {SpikeCase.ADK_GEMINI, SpikeCase.ADK_OLLAMA}:
         from cadence.contrib.google_adk import CadenceAgentRunner, GoogleADKActivities
         from google.adk.agents import LlmAgent
@@ -374,7 +567,7 @@ async def start_workflow(args: argparse.Namespace) -> None:
     import cadence
 
     case = SpikeCase(args.case)
-    validate_start_request(case, args.model, args.confirm_live)
+    validate_start_request(case, args.model, args.confirm_live, args.with_tool)
     client = cadence.Client(domain=args.domain, target=args.target)
     execution = await client.start_workflow(
         workflow_type_for(case),
@@ -549,5 +742,12 @@ async def main() -> None:
         command_parser.error(str(error))
 
 
+def run_cli() -> None:
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("worker stopped")
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    run_cli()

@@ -27,9 +27,11 @@ Use a dedicated task list for each case. Set provider credentials only in the
 worker terminal; never pass them to `start`. Workflows started by this harness
 have a 60-minute execution timeout and a 30-second workflow-task timeout.
 
-Try the cases in this order: Gemini, Ollama, then OpenAI. Gemini is the only
-live-verified path so far; Ollama, OpenAI, and the optional `echo_token` tool
-path remain unverified.
+The Google ADK + Gemini and Google ADK + local Ollama paths have passed the
+staged live replay test. OpenAI Agents + OpenAI has not been live-tested in
+this harness. The two app-local Chat Completions paths described below are
+implemented and offline-tested but have not yet been run live. The optional
+`echo_token` tool path also remains unverified.
 
 ### 1. Google ADK + Gemini
 
@@ -136,6 +138,57 @@ python compatibility_spike.py --task-list agent-compat-openai start \
   --case openai-openai --model YOUR_OPENAI_MODEL \
   --workflow-id openai-replay-001 --pause-after-model --confirm-live
 ```
+
+### 4. OpenAI Agents SDK + Gemini through Chat Completions
+
+This case uses the spike's local `OpenAICompatibleChatCompletions.invoke_model`
+Activity. The released Cadence integration remains unchanged. Set the Gemini
+credential only in the worker terminal; the official OpenAI-compatible base
+URL is the default and can be overridden with `GEMINI_OPENAI_BASE_URL`.
+
+```bash
+export GEMINI_API_KEY='your-key'
+python compatibility_spike.py --task-list agent-compat-openai-gemini worker \
+  --case openai-gemini
+```
+
+In another terminal, explicitly opt in to the cloud-backed Workflow:
+
+```bash
+python compatibility_spike.py --task-list agent-compat-openai-gemini start \
+  --case openai-gemini --model gemini-3.5-flash-lite \
+  --workflow-id openai-gemini-replay-001 --pause-after-model --confirm-live
+```
+
+Use the same staged history procedure as above, with `--case openai-gemini`.
+The expected model Activity is
+`OpenAICompatibleChatCompletions.invoke_model`. Do not add `--with-tool`;
+tool-call compatibility has not been validated for this path.
+
+### 5. OpenAI Agents SDK + local Ollama through Chat Completions
+
+This path uses the same local Cadence Activity with Chat Completions forced.
+It defaults to `http://localhost:11434/v1/` and accepts only a loopback URL via
+`OLLAMA_OPENAI_BASE_URL`. The placeholder client key defaults to `ollama`; it
+is not a real credential and local Ollama does not authenticate it. This path
+does not require the optional LiteLLM dependency used by Google ADK + Ollama.
+
+```bash
+ollama pull llama3.2:latest
+python compatibility_spike.py --task-list agent-compat-openai-ollama worker \
+  --case openai-ollama
+```
+
+In another terminal:
+
+```bash
+python compatibility_spike.py --task-list agent-compat-openai-ollama start \
+  --case openai-ollama --model llama3.2:latest \
+  --workflow-id openai-ollama-replay-001 --pause-after-model
+```
+
+Use the staged history procedure with `--case openai-ollama`. Do not add
+`--with-tool`; the initial compatibility claim is intentionally no-tool.
 
 `openai-claude` intentionally fails before a Cadence client is created. The
 released integration cannot route that case durably without an SDK change.

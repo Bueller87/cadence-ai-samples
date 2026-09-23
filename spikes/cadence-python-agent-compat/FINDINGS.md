@@ -11,6 +11,8 @@ conclusions and execution-verified results are intentionally separate.
 | Google ADK + Gemini | Native supported path: `GoogleADKActivities.generate_content_async` | **Verified September 23, 2026**; `gemini-3.5-flash-lite`; replay evidence below | Google AI or Vertex credentials; explicit model and `--confirm-live` |
 | Google ADK + local Ollama/Llama 3.2 | Source-compatible: ADK registry resolves `ollama_chat/...` to its LiteLLM integration inside the Cadence Activity | **Verified September 23, 2026**; `ollama_chat/llama3.2:latest`; replay evidence below | Local Ollama, `OLLAMA_API_BASE`, and optional LiteLLM dependency |
 | OpenAI Agents SDK + OpenAI | Native supported path: `OpenAIActivities.invoke_model` | Not yet live-tested in this spike; official Cadence OpenAI samples were run separately on the work Mac | `OPENAI_API_KEY`; explicit model and `--confirm-live` |
+| OpenAI Agents SDK + Gemini | Released integration cannot inject an alternate client; the spike now supplies a local Chat Completions model/Activity bridge | Implemented and offline-tested; no live call attempted | `GEMINI_API_KEY`; optional `GEMINI_OPENAI_BASE_URL`; explicit model and `--confirm-live` |
+| OpenAI Agents SDK + local Ollama/Llama 3.2 | Released integration cannot inject an alternate client; the spike now supplies the same local Chat Completions bridge | Implemented and offline-tested; no live call attempted | Local Ollama; optional loopback `OLLAMA_OPENAI_BASE_URL`; model `llama3.2:latest` |
 | OpenAI Agents SDK + Claude | Blocked as-is: Activity hardcodes `OpenAIProvider` and the runner rejects non-string model objects | Blocked by source review; no live call attempted | No supported released configuration |
 
 ## Released dependency baseline
@@ -104,6 +106,28 @@ does not honor Agents SDK LiteLLM or custom-provider routing. A Claude model
 would require a Cadence SDK provider-selection change, which this spike does
 not implement.
 
+### App-local OpenAI-compatible Chat Completions path
+
+The spike adds two explicitly selected cases, `openai-gemini` and
+`openai-ollama`, without modifying the released Cadence package. Both use the
+OpenAI Agents SDK's existing runner loop and an app-local `CadenceModel`
+subclass whose inherited `get_response` method schedules the distinctly named
+`OpenAICompatibleChatCompletions.invoke_model` Cadence Activity. Only the
+Activity worker constructs the provider client and reads its endpoint and
+credential configuration. The Workflow receives the model name but never a
+credential or provider endpoint.
+
+The Activity uses `OpenAIProvider` with `use_responses=False`, so every request
+uses Chat Completions. Gemini defaults to Google's OpenAI-compatible endpoint.
+The Ollama case defaults to the local `/v1/` endpoint, permits loopback hosts
+only, and uses a non-secret placeholder API key required by the OpenAI client.
+Offline tests exercise model-to-Activity dispatch and parse a mocked Chat
+Completions response without external network access.
+
+This is implemented support, not execution verification. Neither new case has
+yet produced live Cadence history in this harness. Both intentionally reject
+the optional tool flag until tool-call compatibility is tested separately.
+
 ### Google ADK
 
 `CadenceAgentRunner` replaces each string `LlmAgent.model` with
@@ -143,8 +167,10 @@ require its Cadence Activity to have scheduled and completed successfully.
 
 ## Recommendation
 
-The execution-verified Phase 5 combinations are Google ADK + Gemini and Google
-ADK + local Ollama/Llama 3.2. OpenAI Agents + OpenAI remains unverified in this
+The execution-verified Phase 5 combinations remain Google ADK + Gemini and
+Google ADK + local Ollama/Llama 3.2. OpenAI Agents + Gemini and OpenAI Agents +
+local Ollama/Llama 3.2 are implemented through the spike-local Activity but
+remain live-unverified. OpenAI Agents + OpenAI also remains unverified in this
 spike, although official Cadence OpenAI samples have been run separately on the
 work Mac. Keep OpenAI Agents + Claude unsupported on this released Cadence
 integration until Cadence adds provider-aware Activity reconstruction.
