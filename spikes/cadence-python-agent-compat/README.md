@@ -27,11 +27,21 @@ Use a dedicated task list for each case. Set provider credentials only in the
 worker terminal; never pass them to `start`. Workflows started by this harness
 have a 60-minute execution timeout and a 30-second workflow-task timeout.
 
-The Google ADK + Gemini and Google ADK + local Ollama paths have passed the
-staged live replay test. OpenAI Agents + OpenAI has not been live-tested in
-this harness. The two app-local Chat Completions paths described below are
-implemented and offline-tested but have not yet been run live. The optional
-`echo_token` tool path also remains unverified.
+Four paths have passed the staged live worker-restart replay test using
+released `cadence-python-client==0.4.0`: Google ADK + Gemini, Google ADK +
+local Ollama/Llama 3.2, OpenAI Agents SDK + Gemini through the app-local
+JSON-safe Chat Completions Activity, and OpenAI Agents SDK + local
+Ollama/Llama 3.2 through that same Activity. The optional `echo_token` tool
+path remains unverified.
+
+The native OpenAI Agents + OpenAI path has separate results: the released
+v0.4.0 SDK failed Activity argument decoding with the TypedDict-union error in
+[upstream issue #173](https://github.com/cadence-workflow/cadence-python-client/issues/173),
+while an isolated environment pinned to PR #176 commit
+`2bc1af4207d20cd99ae64fa1ef82d803905af947` passed a live no-tool replay test.
+The latter is an experimental PR build, not a released-SDK result or a required
+dependency for this setup. See [FINDINGS.md](FINDINGS.md) for the exact runs,
+history evidence, and limitations.
 
 ### 1. Google ADK + Gemini
 
@@ -121,7 +131,7 @@ python compatibility_spike.py --task-list agent-compat-ollama start \
   --workflow-id ollama-replay-001 --pause-after-model
 ```
 
-### 3. OpenAI Agents SDK + OpenAI
+### 3. OpenAI Agents SDK + OpenAI (native Activity)
 
 Set the OpenAI credential only in the dedicated worker terminal:
 
@@ -139,12 +149,24 @@ python compatibility_spike.py --task-list agent-compat-openai start \
   --workflow-id openai-replay-001 --pause-after-model --confirm-live
 ```
 
+In the normal v0.4.0 environment, this native
+`OpenAIActivities.invoke_model` path reproduced the TypedDict-union decoding
+failure before the Activity body ran. Do not treat it as a working released-SDK
+live path. A separate isolated PR #176 environment passed the same native
+no-tool restart/replay procedure with live `gpt-5-nano`; that experimental
+result does not validate the released v0.4.0 path. Details and the PR pin are
+in [FINDINGS.md](FINDINGS.md).
+
 ### 4. OpenAI Agents SDK + Gemini through Chat Completions
 
 This case uses the spike's local `OpenAICompatibleChatCompletions.invoke_model`
 Activity. The released Cadence integration remains unchanged. Set the Gemini
 credential only in the worker terminal; the official OpenAI-compatible base
 URL is the default and can be overridden with `GEMINI_OPENAI_BASE_URL`.
+
+This app-local JSON-safe Chat Completions path passed the no-tool live
+worker-restart replay procedure on released v0.4.0. It is distinct from the
+native `OpenAIActivities.invoke_model` path above.
 
 ```bash
 export GEMINI_API_KEY='your-key'
@@ -172,6 +194,8 @@ It defaults to `http://localhost:11434/v1/` and accepts only a loopback URL via
 `OLLAMA_OPENAI_BASE_URL`. The placeholder client key defaults to `ollama`; it
 is not a real credential and local Ollama does not authenticate it. This path
 does not require the optional LiteLLM dependency used by Google ADK + Ollama.
+It passed the no-tool live worker-restart replay procedure on released v0.4.0;
+it is the app-local bridge rather than the native OpenAI Activity.
 
 ```bash
 ollama pull llama3.2:latest
