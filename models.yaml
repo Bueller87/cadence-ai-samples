@@ -1,0 +1,13 @@
+models:
+  - id: gemini-flash-lite
+    provider: google
+    model: gemini-3.5-flash-lite
+    endpoint: https://generativelanguage.googleapis.com
+  - id: llama3.2-local
+    provider: ollama
+    model: llama3.2:latest
+    endpoint: http://localhost:11434
+  - id: openai-nano
+    provider: openai
+    model: gpt-5-nano
+    endpoint: https://api.openai.com/v1
