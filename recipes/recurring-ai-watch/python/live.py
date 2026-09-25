@@ -1,4 +1,4 @@
-"""Worker-local TypeSafe Jev and Google ADK integrations for live mode."""
+"""The one supported live path: TypeSafe Jev then Google ADK/Gemini."""
 
 from __future__ import annotations
 
@@ -21,87 +21,74 @@ from google.genai import types
 
 from config import CatalogSelection
 from workflow import (
-    CLASSIFY_UPDATE_ACTIVITY,
-    PROCESSING_ACTIVITY_OPTIONS,
+    AI_ACTIVITY_OPTIONS,
+    CLASSIFY_ACTIVITY,
     MockClassification,
     ReleaseNote,
 )
 
 
-OFFICIAL_GOOGLE_ENDPOINT = "https://generativelanguage.googleapis.com"
-LIVE_AGENT_ID = "google-adk"
-LIVE_MODEL_ID = "gemini-flash-lite"
-LIVE_CLASSIFIER_ID = "jev-default"
+GOOGLE_ENDPOINT = "https://generativelanguage.googleapis.com"
 
 
 class LiveAuthenticationError(Exception):
-    """A non-retryable provider credential failure."""
+    pass
 
 
 class LiveConfigurationError(Exception):
-    """A non-retryable live worker configuration failure."""
+    pass
 
 
 class LiveSchemaError(Exception):
-    """A non-retryable provider request or response schema failure."""
+    pass
 
 
-def is_retryable_provider_status(status_code: int) -> bool:
-    return status_code in {408, 409, 425, 429, 529} or status_code >= 500
+def retryable(status: int) -> bool:
+    return status in {408, 409, 425, 429, 529} or status >= 500
 
 
-def validate_live_selection(selection: CatalogSelection) -> None:
-    """Accept only the integration tuple verified by the Phase 5 spike."""
-
-    if (
-        selection.agent.id != LIVE_AGENT_ID
-        or selection.agent.framework != "google-adk"
-        or selection.model.id != LIVE_MODEL_ID
-        or selection.model.provider != "google"
-        or selection.classifier.id != LIVE_CLASSIFIER_ID
-        or selection.classifier.provider != "typesafe"
-    ):
+def validate_live(selection: CatalogSelection) -> None:
+    supported = (
+        selection.agent.id == "google-adk"
+        and selection.agent.framework == "google-adk"
+        and selection.model.id == "gemini-flash-lite"
+        and selection.model.provider == "google"
+        and selection.classifier.id == "jev-default"
+        and selection.classifier.provider == "typesafe"
+    )
+    if not supported:
         raise LiveConfigurationError(
             "live mode supports only google-adk + gemini-flash-lite + jev-default"
         )
-    if selection.model.endpoint.rstrip("/") != OFFICIAL_GOOGLE_ENDPOINT:
-        raise LiveConfigurationError(
-            "live mode requires the official Google Generative Language endpoint"
-        )
+    if selection.model.endpoint.rstrip("/") != GOOGLE_ENDPOINT:
+        raise LiveConfigurationError("live mode requires Google's official endpoint")
 
 
-def configure_live_worker(
+def live_activities(
     selection: CatalogSelection,
     environ: MutableMapping[str, str] = os.environ,
-) -> tuple["LiveJevClassifier", "LiveGoogleADKActivities"]:
-    """Validate worker-only settings and construct live Activity implementations."""
-
-    validate_live_selection(selection)
+) -> tuple["JevClassifier", "GeminiActivities"]:
+    validate_live(selection)
     model_key = environ.get("MODEL_AI_KEY", "").strip()
     classifier_key = environ.get("CLASSIFIER_AI_KEY", "").strip()
-    if not model_key:
-        raise LiveConfigurationError("live worker requires MODEL_AI_KEY")
-    if not classifier_key:
-        raise LiveConfigurationError("live worker requires CLASSIFIER_AI_KEY")
-
-    # Google ADK reads this provider-specific name inside the model Activity.
+    if not model_key or not classifier_key:
+        raise LiveConfigurationError(
+            "live worker requires MODEL_AI_KEY and CLASSIFIER_AI_KEY"
+        )
     environ["GOOGLE_API_KEY"] = model_key
     return (
-        LiveJevClassifier(
-            api_key=classifier_key,
-            endpoint=selection.classifier.endpoint,
-            model=selection.classifier.model,
+        JevClassifier(
+            classifier_key,
+            selection.classifier.endpoint,
+            selection.classifier.model,
         ),
-        LiveGoogleADKActivities(),
+        GeminiActivities(),
     )
 
 
-class LiveJevClassifier:
-    """One-question TypeSafe System One classifier using the proven Jev contract."""
-
+class JevClassifier:
     def __init__(
         self,
-        *,
         api_key: str,
         endpoint: str,
         model: str,
@@ -110,36 +97,30 @@ class LiveJevClassifier:
         self._api_key = api_key
         self._endpoint = endpoint
         self._model = model
-        self._opener = opener
+        self._open = opener
 
-    @activity.method(name=CLASSIFY_UPDATE_ACTIVITY)
-    def classify_update(self, update: ReleaseNote) -> MockClassification:
-        payload = {
-            "state": f"Version: {update.version}\nRelease notes: {update.notes}",
-            "model": self._model,
-            "questions": {
-                "warrants_report": {
-                    "type": "choice",
-                    "instructions": (
-                        "Does this release potentially affect the fictional "
-                        "application's background-job behavior?"
-                    ),
-                    "criteria": {
-                        "yes": (
-                            "The release may change retries, scheduling, queues, "
-                            "workers, timeouts, or other background-job behavior."
-                        ),
-                        "no": (
-                            "The release is unrelated to the fictional application's "
-                            "background-job behavior."
-                        ),
-                    },
-                }
+    @activity.method(name=CLASSIFY_ACTIVITY)
+    def classify(self, update: ReleaseNote) -> MockClassification:
+        question = {
+            "type": "choice",
+            "instructions": (
+                "Does this release potentially affect the fictional application's "
+                "background-job behavior?"
+            ),
+            "criteria": {
+                "yes": "It may affect retries, queues, workers, scheduling, or timeouts.",
+                "no": "It does not affect background-job behavior.",
             },
         }
         request = Request(
             self._endpoint,
-            data=json.dumps(payload).encode("utf-8"),
+            data=json.dumps(
+                {
+                    "state": f"Version: {update.version}\nRelease notes: {update.notes}",
+                    "model": self._model,
+                    "questions": {"relevant": question},
+                }
+            ).encode(),
             headers={
                 "Authorization": f"Bearer {self._api_key}",
                 "Content-Type": "application/json",
@@ -147,147 +128,99 @@ class LiveJevClassifier:
             method="POST",
         )
         try:
-            with self._opener(request, timeout=20) as response:
-                body = response.read(1_048_577)
+            with self._open(request, timeout=20) as response:
+                answer = json.loads(response.read(1_048_577))["answers"]["relevant"]
         except HTTPError as error:
-            if error.code in {401, 403}:
-                raise LiveAuthenticationError(
-                    "Jev rejected the configured classifier credential"
-                ) from error
-            if is_retryable_provider_status(error.code):
+            if retryable(error.code):
                 raise
-            raise LiveSchemaError(
-                f"Jev rejected the classifier request with HTTP {error.code}"
-            ) from error
-
-        if len(body) > 1_048_576:
-            raise LiveSchemaError("Jev response exceeded the size limit")
-        try:
-            decoded = json.loads(body)
-            if not isinstance(decoded["model"], str) or not decoded["model"].strip():
-                raise ValueError("missing model")
-            answer = decoded["answers"]["warrants_report"]
-            if answer["type"] != "choice" or answer["choice"] not in {"yes", "no"}:
-                raise ValueError("invalid choice answer")
-            confidence = answer["confidence"]
-            probabilities = answer["probabilities"]
-            if (
-                isinstance(confidence, bool)
-                or not isinstance(confidence, (int, float))
-                or not 0 <= confidence <= 1
-                or not isinstance(probabilities, dict)
-                or not probabilities
-                or answer["choice"] not in probabilities
-                or any(
-                    isinstance(probability, bool)
-                    or not isinstance(probability, (int, float))
-                    or not 0 <= probability <= 1
-                    for probability in probabilities.values()
-                )
-                or abs(sum(probabilities.values()) - 1) > 0.02
-            ):
-                raise ValueError("invalid choice confidence")
+            if error.code in {401, 403}:
+                raise LiveAuthenticationError("Jev authentication failed") from error
+            raise LiveSchemaError(f"Jev rejected the request: HTTP {error.code}") from error
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
-            raise LiveSchemaError("Jev returned an invalid classifier response") from error
+            raise LiveSchemaError("Jev returned an invalid response") from error
 
-        selected = answer["choice"]
+        if not isinstance(answer, dict):
+            raise LiveSchemaError("Jev returned an invalid response")
+
+        choice = answer.get("choice")
+        confidence = answer.get("confidence")
+        if answer.get("type") != "choice" or choice not in ("yes", "no"):
+            raise LiveSchemaError("Jev returned an invalid choice")
+        if not isinstance(confidence, (int, float)) or not 0 <= confidence <= 1:
+            raise LiveSchemaError("Jev returned an invalid confidence")
         return MockClassification(
-            warrants_report=selected == "yes",
-            reason=f"Jev selected {selected} with confidence {confidence:.2f}",
+            choice == "yes", f"Jev selected {choice} ({confidence:.2f})"
         )
 
 
-class LiveGoogleADKActivities(GoogleADKActivities):
-    """Native Google ADK Activity with non-retryable failures made explicit."""
-
+class GeminiActivities(GoogleADKActivities):
     @activity.override(GoogleADKActivities.generate_content_async)
     async def generate_content_async(
-        self,
-        model_name: str,
-        llm_request: LlmRequest,
+        self, model_name: str, llm_request: LlmRequest
     ) -> list[LlmResponse]:
         try:
             return await super().generate_content_async(model_name, llm_request)
         except genai_errors.APIError as error:
-            if is_retryable_provider_status(error.code):
-                raise
-            if error.code in {401, 403}:
-                raise LiveAuthenticationError(
-                    "Gemini rejected the configured model credential"
-                ) from error
-            raise LiveSchemaError(
-                f"Gemini rejected the model request with HTTP {error.code}"
-            ) from error
-        except (TypeError, ValueError) as error:
-            raise LiveSchemaError("Gemini model configuration or schema is invalid") from error
+            # Google reports invalid API keys as HTTP 400, not necessarily 401.
+            body = error.details if isinstance(error.details, dict) else {}
+            body = body.get("error", body)
+            details = body.get("details", []) if isinstance(body, dict) else []
+            invalid_key = any(
+                isinstance(detail, dict) and detail.get("reason") == "API_KEY_INVALID"
+                for detail in (details if isinstance(details, list) else [])
+            )
+            if error.code in {401, 403} or invalid_key:
+                raise LiveAuthenticationError("Gemini rejected MODEL_AI_KEY") from None
+            if retryable(error.code):
+                raise RuntimeError(f"Gemini temporary failure: HTTP {error.code}") from None
+            raise LiveSchemaError(f"Gemini rejected the request: HTTP {error.code}") from None
+        except (TypeError, ValueError):
+            raise LiveSchemaError("Gemini configuration or schema is invalid") from None
 
 
 class RetryingCadenceModel(CadenceModel):
-    """Cadence's native ADK model bridge with this sample's bounded policy."""
-
     async def generate_content_async(
-        self,
-        llm_request: LlmRequest,
-        stream: bool = False,
+        self, llm_request: LlmRequest, stream: bool = False
     ) -> AsyncGenerator[LlmResponse, None]:
         if stream:
             raise RuntimeError("Streaming is not supported")
-        model_activity = (
-            self._google_adk_activities.generate_content_async.with_options(
-                **PROCESSING_ACTIVITY_OPTIONS
-            )
+        call = self._google_adk_activities.generate_content_async.with_options(
+            **AI_ACTIVITY_OPTIONS
         )
-        responses = await model_activity(
-            model_name=self.model,
-            llm_request=llm_request,
-        )
-        for response in responses:
+        for response in await call(model_name=self.model, llm_request=llm_request):
             yield response
 
 
 async def generate_live_report(update: ReleaseNote, model_name: str | None) -> str:
-    """Run the verified no-tool, non-streaming Google ADK path in Workflow code."""
-
     if not model_name:
-        raise LiveConfigurationError("live report generation requires a model name")
+        raise LiveConfigurationError("live mode requires a model name")
     agent = LlmAgent(
         name="recurring_ai_watch",
         model=RetryingCadenceModel(model=model_name),
         instruction=(
-            "Write a concise application impact report with three parts: what changed; "
-            "why it may matter to the fictional application's background jobs; and "
-            "what a developer should examine next. Use only the supplied release note."
+            "Briefly explain what changed, why it may affect this application's "
+            "background jobs, and what a developer should examine next. No tools."
         ),
-        tools=[],
     )
-    session_service = InMemorySessionService()
+    sessions = InMemorySessionService()
     runner = CadenceAgentRunner(
-        app_name="recurring-ai-watch",
-        agent=agent,
-        session_service=session_service,
+        app_name="recurring-ai-watch", agent=agent, session_service=sessions
     )
     workflow_id = workflow.WorkflowContext.get().info().workflow_id
-    session_id = f"{workflow_id}-{update.version}"
-    await session_service.create_session(
-        app_name=runner.app_name,
-        user_id="watch-user",
-        session_id=session_id,
+    await sessions.create_session(
+        app_name=runner.app_name, user_id="watch", session_id=workflow_id
     )
-    final_text = ""
+    report = ""
     async for event in runner.run_async(
-        user_id="watch-user",
-        session_id=session_id,
+        user_id="watch",
+        session_id=workflow_id,
         new_message=types.Content(
             role="user",
-            parts=[
-                types.Part.from_text(
-                    text=f"Version: {update.version}\nRelease notes: {update.notes}"
-                )
-            ],
+            parts=[types.Part.from_text(text=f"{update.version}: {update.notes}")],
         ),
     ):
         if event.is_final_response() and event.content and event.content.parts:
-            final_text = "".join(part.text or "" for part in event.content.parts).strip()
-    if not final_text:
-        raise LiveSchemaError("Gemini returned no report text")
-    return final_text
+            report = "".join(part.text or "" for part in event.content.parts).strip()
+    if not report:
+        raise LiveSchemaError("Gemini returned no report")
+    return report

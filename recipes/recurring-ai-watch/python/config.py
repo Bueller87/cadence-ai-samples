@@ -1,6 +1,4 @@
-"""Portable loader for the Recurring AI Watch YAML catalogs."""
-
-from __future__ import annotations
+"""Portable loader for the three root YAML catalogs."""
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -9,7 +7,7 @@ import yaml
 
 
 class CatalogError(ValueError):
-    """Raised when a catalog is missing, malformed, or has no selected entry."""
+    pass
 
 
 @dataclass(frozen=True)
@@ -48,83 +46,60 @@ def load_selection(
     model_id: str,
     classifier_id: str,
 ) -> CatalogSelection:
-    """Load catalogs from *catalog_dir* and select entries by their exact IDs."""
-
     directory = Path(catalog_dir)
-    agents = _load_entries(directory / "agents.yaml", "agents", ("id", "framework"))
-    models = _load_entries(
-        directory / "models.yaml", "models", ("id", "provider", "model", "endpoint")
+    agent = _select(directory / "agents.yaml", "agents", ("id", "framework"), agent_id)
+    model = _select(
+        directory / "models.yaml",
+        "models",
+        ("id", "provider", "model", "endpoint"),
+        model_id,
     )
-    classifiers = _load_entries(
+    classifier = _select(
         directory / "classifiers.yaml",
         "classifiers",
         ("id", "provider", "model", "endpoint"),
+        classifier_id,
     )
-
-    agent = _select(agents, agent_id, "agents.yaml", "agents")
-    model = _select(models, model_id, "models.yaml", "models")
-    classifier = _select(classifiers, classifier_id, "classifiers.yaml", "classifiers")
-
     return CatalogSelection(
-        agent=AgentConfig(id=agent["id"], framework=agent["framework"]),
-        model=ModelConfig(
-            id=model["id"],
-            provider=model["provider"],
-            model=model["model"],
-            endpoint=model["endpoint"],
-        ),
-        classifier=ClassifierConfig(
-            id=classifier["id"],
-            provider=classifier["provider"],
-            model=classifier["model"],
-            endpoint=classifier["endpoint"],
-        ),
+        agent=AgentConfig(**agent),
+        model=ModelConfig(**model),
+        classifier=ClassifierConfig(**classifier),
     )
-
-
-def _load_entries(
-    path: Path, collection_name: str, required_fields: tuple[str, ...]
-) -> list[dict[str, str]]:
-    try:
-        document = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except FileNotFoundError as exc:
-        raise CatalogError(f"catalog file not found: {path}") from exc
-    except yaml.YAMLError as exc:
-        raise CatalogError(f"invalid YAML in {path.name}: {exc}") from exc
-
-    if not isinstance(document, dict) or not isinstance(document.get(collection_name), list):
-        raise CatalogError(f"{path.name}: expected a {collection_name!r} list")
-
-    seen_ids: set[str] = set()
-    entries: list[dict[str, str]] = []
-    for index, raw_entry in enumerate(document[collection_name]):
-        if not isinstance(raw_entry, dict):
-            raise CatalogError(f"{path.name}: {collection_name}[{index}] must be a mapping")
-
-        entry: dict[str, str] = {}
-        for field in required_fields:
-            value = raw_entry.get(field)
-            if not isinstance(value, str) or not value:
-                raise CatalogError(
-                    f"{path.name}: {collection_name}[{index}] is missing required "
-                    f"non-empty string field {field!r}"
-                )
-            entry[field] = value
-
-        if entry["id"] in seen_ids:
-            raise CatalogError(
-                f"{path.name}: duplicate {collection_name} ID {entry['id']!r}"
-            )
-        seen_ids.add(entry["id"])
-        entries.append(entry)
-
-    return entries
 
 
 def _select(
-    entries: list[dict[str, str]], entry_id: str, filename: str, collection_name: str
+    path: Path, section: str, required: tuple[str, ...], selected_id: str
 ) -> dict[str, str]:
-    for entry in entries:
-        if entry["id"] == entry_id:
-            return entry
-    raise CatalogError(f"{filename}: unknown {collection_name} ID {entry_id!r}")
+    try:
+        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as error:
+        raise CatalogError(f"catalog file not found: {path}") from error
+    except yaml.YAMLError as error:
+        raise CatalogError(f"invalid YAML in {path.name}: {error}") from error
+    if not isinstance(document, dict) or not isinstance(document.get(section), list):
+        raise CatalogError(f"{path.name}: expected a {section!r} list")
+
+    seen: set[str] = set()
+    selected: dict[str, str] | None = None
+    for index, raw in enumerate(document[section]):
+        if not isinstance(raw, dict):
+            raise CatalogError(f"{path.name}: {section}[{index}] must be a mapping")
+        entry = {field: raw.get(field) for field in required}
+        missing = next(
+            (field for field, value in entry.items() if not isinstance(value, str) or not value),
+            None,
+        )
+        if missing:
+            raise CatalogError(
+                f"{path.name}: {section}[{index}] is missing required "
+                f"non-empty string field {missing!r}"
+            )
+        if entry["id"] in seen:
+            raise CatalogError(f"{path.name}: duplicate {section} ID {entry['id']!r}")
+        seen.add(entry["id"])
+        if entry["id"] == selected_id:
+            selected = entry  # type: ignore[assignment]
+
+    if selected is None:
+        raise CatalogError(f"{path.name}: unknown {section} ID {selected_id!r}")
+    return selected

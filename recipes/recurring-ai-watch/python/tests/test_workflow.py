@@ -10,9 +10,8 @@ from cadence.error import ActivityFailure
 from workflow import (
     CHECKS_PER_RUN,
     CHECK_NOW_SIGNAL,
-    CLASSIFY_UPDATE_ACTIVITY,
-    GENERATE_REPORT_ACTIVITY,
-    GET_UPDATE_ACTIVITY,
+    CLASSIFY_ACTIVITY,
+    MOCK_REPORT_ACTIVITY,
     STOP_WATCH_SIGNAL,
     WATCH_STATUS_QUERY,
     WATCH_WORKFLOW,
@@ -22,7 +21,7 @@ from workflow import (
     WatchInput,
     WatchStatus,
     build_registry,
-    classify_update,
+    mock_classify,
 )
 
 
@@ -30,19 +29,17 @@ class MockActivityTests(unittest.IsolatedAsyncioTestCase):
     async def test_mock_classification_skips_and_selects_relevant_updates(self) -> None:
         with TestActivityEnvironment() as environment:
             skipped = await environment.execute_activity(
-                classify_update,
+                mock_classify,
                 ReleaseNote("2.4.0", "Documentation corrections."),
             )
             relevant = await environment.execute_activity(
-                classify_update,
+                mock_classify,
                 ReleaseNote("2.5.0", "Retry defaults changed for background jobs."),
             )
 
         self.assertEqual(
             skipped,
-            MockClassification(
-                False, "Release notes do not affect the fictional application."
-            ),
+            MockClassification(False, "No background-job impact."),
         )
         self.assertEqual(
             relevant,
@@ -57,10 +54,8 @@ class WatchWorkflowTests(unittest.IsolatedAsyncioTestCase):
         watch._next_update_index = 2
         watch._latest_update = ReleaseNote("2.5.0", "Retry defaults changed.")
         watch._latest_report = "keep this report"
-        watch._pending_update = ReleaseNote("2.5.1", "Pending report.")
-        watch._pending_stage = "REPORT"
 
-        continued = watch._continuation_input(
+        continued = watch._next_run(
             WatchInput(interval=timedelta(seconds=7), max_checks=25)
         )
 
@@ -69,10 +64,8 @@ class WatchWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(continued.next_update_index, 2)
         self.assertEqual(continued.latest_update.version, "2.5.0")
         self.assertEqual(continued.latest_report, "keep this report")
-        self.assertEqual(continued.cumulative_check_count, CHECKS_PER_RUN)
-        self.assertTrue(continued.wait_before_next_check)
-        self.assertEqual(continued.pending_update.version, "2.5.1")
-        self.assertEqual(continued.pending_stage, "REPORT")
+        self.assertEqual(continued.check_count, CHECKS_PER_RUN)
+        self.assertTrue(continued.wait_before_first_check)
 
     async def test_continue_as_new_after_twenty_checks_carries_state(self) -> None:
         watch = RecurringAIWatchWorkflow()
@@ -92,16 +85,16 @@ class WatchWorkflowTests(unittest.IsolatedAsyncioTestCase):
             continued.append(next_input)
             raise Continued()
 
-        watch._perform_check = perform_check  # type: ignore[method-assign]
-        watch._wait_for_next_cycle = skip_wait  # type: ignore[method-assign]
+        watch._check = perform_check  # type: ignore[method-assign]
+        watch._wait = skip_wait  # type: ignore[method-assign]
         with patch("workflow.workflow.continue_as_new", capture_continuation):
             with self.assertRaises(Continued):
                 await watch.run(WatchInput(interval=timedelta(seconds=1)))
 
         self.assertEqual(len(continued), 1)
-        self.assertEqual(continued[0].cumulative_check_count, CHECKS_PER_RUN)
+        self.assertEqual(continued[0].check_count, CHECKS_PER_RUN)
         self.assertEqual(continued[0].next_update_index, CHECKS_PER_RUN)
-        self.assertTrue(continued[0].wait_before_next_check)
+        self.assertTrue(continued[0].wait_before_first_check)
 
     async def test_continued_run_does_not_repeat_analysis_for_exhausted_updates(self) -> None:
         classifications = 0
@@ -118,8 +111,8 @@ class WatchWorkflowTests(unittest.IsolatedAsyncioTestCase):
             return "mocked"
 
         with TestWorkflowEnvironment(build_registry()) as environment:
-            environment.on_activity(CLASSIFY_UPDATE_ACTIVITY, fn=count_classification)
-            environment.on_activity(GENERATE_REPORT_ACTIVITY, fn=count_report)
+            environment.on_activity(CLASSIFY_ACTIVITY, fn=count_classification)
+            environment.on_activity(MOCK_REPORT_ACTIVITY, fn=count_report)
             started_at = environment.now()
             execution = await environment.client.start_workflow(
                 WATCH_WORKFLOW,
@@ -129,8 +122,8 @@ class WatchWorkflowTests(unittest.IsolatedAsyncioTestCase):
                     next_update_index=3,
                     latest_update=ReleaseNote("2.5.1", "Corrected documentation."),
                     latest_report="report from an earlier run",
-                    cumulative_check_count=CHECKS_PER_RUN,
-                    wait_before_next_check=True,
+                    check_count=CHECKS_PER_RUN,
+                    wait_before_first_check=True,
                 ),
                 workflow_id="continued-exhausted-updates",
                 task_list="test-task-list",
@@ -147,15 +140,30 @@ class WatchWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reports, 0)
         self.assertEqual(elapsed, timedelta(seconds=1))
 
+    async def test_stop_takes_precedence_at_continue_as_new_boundary(self) -> None:
+        # Test loop ordering, not Signal/timer delivery (covered on a local server).
+        watch = RecurringAIWatchWorkflow()
+
+        async def check() -> None:
+            watch._check_count += 1
+            if watch._check_count == CHECKS_PER_RUN:
+                watch.stop_watch()
+
+        async def wait(_interval: timedelta) -> None:
+            pass
+
+        with (
+            patch.object(watch, "_check", check),
+            patch.object(watch, "_wait", wait),
+            patch("workflow.workflow.continue_as_new") as continue_as_new,
+        ):
+            result = await watch.run(WatchInput())
+        self.assertEqual(result.state, "STOPPED")
+        self.assertEqual(result.check_count, CHECKS_PER_RUN)
+        continue_as_new.assert_not_called()
+
     async def test_classification_failure_recovers_pending_update_next_check(self) -> None:
-        update_indexes: list[int] = []
         classification_attempts = 0
-
-        def get_update(index: int):
-            from workflow import get_scripted_update
-
-            update_indexes.append(index)
-            return get_scripted_update(index)
 
         def classify_then_recover(*args: object) -> MockClassification:
             nonlocal classification_attempts
@@ -165,10 +173,7 @@ class WatchWorkflowTests(unittest.IsolatedAsyncioTestCase):
             return MockClassification(False, "recovered")
 
         with TestWorkflowEnvironment(build_registry()) as environment:
-            environment.on_activity(GET_UPDATE_ACTIVITY, fn=get_update)
-            environment.on_activity(
-                CLASSIFY_UPDATE_ACTIVITY, fn=classify_then_recover
-            )
+            environment.on_activity(CLASSIFY_ACTIVITY, fn=classify_then_recover)
             execution = await environment.client.start_workflow(
                 WATCH_WORKFLOW,
                 WatchInput(interval=timedelta(seconds=1), max_checks=2),
@@ -180,7 +185,6 @@ class WatchWorkflowTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(result.check_count, 2)
-        self.assertEqual(update_indexes, [0])
         self.assertEqual(classification_attempts, 2)
 
     async def test_non_retryable_classification_failure_terminates_watch(self) -> None:
@@ -193,7 +197,7 @@ class WatchWorkflowTests(unittest.IsolatedAsyncioTestCase):
 
         with TestWorkflowEnvironment(build_registry()) as environment:
             environment.on_activity(
-                CLASSIFY_UPDATE_ACTIVITY, fn=reject_configuration
+                CLASSIFY_ACTIVITY, fn=reject_configuration
             )
             execution = await environment.client.start_workflow(
                 WATCH_WORKFLOW,
@@ -221,7 +225,7 @@ class WatchWorkflowTests(unittest.IsolatedAsyncioTestCase):
             return "live report"
 
         with TestWorkflowEnvironment(build_registry()) as environment:
-            environment.on_activity(CLASSIFY_UPDATE_ACTIVITY, fn=classify_for_live)
+            environment.on_activity(CLASSIFY_ACTIVITY, fn=classify_for_live)
             with patch("live.generate_live_report", generate_report):
                 execution = await environment.client.start_workflow(
                     WATCH_WORKFLOW,
@@ -240,16 +244,9 @@ class WatchWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls, ["jev", "gemini"])
         self.assertEqual(result.latest_report, "live report")
 
-    async def test_report_failure_recovers_without_reclassifying(self) -> None:
-        update_indexes: list[int] = []
+    async def test_report_failure_retries_release_from_classification(self) -> None:
         classification_attempts = 0
         report_attempts = 0
-
-        def get_update(index: int):
-            from workflow import get_scripted_update
-
-            update_indexes.append(index)
-            return get_scripted_update(index)
 
         def classify(*args: object) -> MockClassification:
             nonlocal classification_attempts
@@ -264,9 +261,8 @@ class WatchWorkflowTests(unittest.IsolatedAsyncioTestCase):
             return "recovered report"
 
         with TestWorkflowEnvironment(build_registry()) as environment:
-            environment.on_activity(GET_UPDATE_ACTIVITY, fn=get_update)
-            environment.on_activity(CLASSIFY_UPDATE_ACTIVITY, fn=classify)
-            environment.on_activity(GENERATE_REPORT_ACTIVITY, fn=report_then_recover)
+            environment.on_activity(CLASSIFY_ACTIVITY, fn=classify)
+            environment.on_activity(MOCK_REPORT_ACTIVITY, fn=report_then_recover)
             execution = await environment.client.start_workflow(
                 WATCH_WORKFLOW,
                 WatchInput(
@@ -282,24 +278,9 @@ class WatchWorkflowTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(result.check_count, 2)
-        self.assertEqual(update_indexes, [1])
-        self.assertEqual(classification_attempts, 1)
+        self.assertEqual(classification_attempts, 2)
         self.assertEqual(report_attempts, 2)
         self.assertEqual(result.latest_report, "recovered report")
-
-    async def test_stop_watch_while_waiting_completes_without_another_check(self) -> None:
-        watch = RecurringAIWatchWorkflow()
-        watch._check_count = 1
-        watch._latest_update = ReleaseNote("2.4.0", "Documentation corrections.")
-        watch._state = "WAITING"
-
-        watch.stop_watch()
-        result = watch._complete_if_stopped()
-
-        self.assertIsNotNone(result)
-        self.assertEqual(result.check_count, 1)
-        self.assertEqual(result.latest_update.version, "2.4.0")
-        self.assertEqual(result.state, "STOPPED")
 
     async def test_immediate_check_and_status_query(self) -> None:
         with TestWorkflowEnvironment(build_registry()) as environment:
@@ -394,8 +375,8 @@ class WatchWorkflowTests(unittest.IsolatedAsyncioTestCase):
             return "unexpected"
 
         with TestWorkflowEnvironment(build_registry()) as environment:
-            environment.on_activity(CLASSIFY_UPDATE_ACTIVITY, fn=count_classification)
-            environment.on_activity(GENERATE_REPORT_ACTIVITY, fn=count_report)
+            environment.on_activity(CLASSIFY_ACTIVITY, fn=count_classification)
+            environment.on_activity(MOCK_REPORT_ACTIVITY, fn=count_report)
             execution = await environment.client.start_workflow(
                 WATCH_WORKFLOW,
                 WatchInput(interval=timedelta(seconds=1), max_checks=5),
