@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "recurring-ai-watch"
+version = "0.0.0"
+requires-python = ">=3.12"
+dependencies = [
+    "cadence-python-client==0.4.0",
+    "google-adk==2.1.0",
+    "pydantic==2.12.5",
+    "PyYAML==6.0.2",
+]
+
+[tool.setuptools]
+py-modules = ["config", "workflow", "live", "main"]

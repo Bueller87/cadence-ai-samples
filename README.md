@@ -21,6 +21,8 @@ Recipes may use Go, Python, or an occasional minimal combination of both. AI pro
 
 ## Finding recipes
 
+All samples use the Cadence domain `cadence-ai-samples`.
+
 Browse recipe directories by problem or use case. The first recipe, [StreamWave ticket routing](recipes/ticket-routing/), demonstrates typed AI-assisted classification with durable Cadence routing. Each recipe README explains how to run it, what to expect, and how it handles failures.
 
 ## Contributing
