@@ -20,12 +20,7 @@ $Python = (Resolve-Path '.venv/Scripts/python.exe').Path
 & $Python -m pip install -e .
 ```
 
-The sample pins Cadence Python SDK 0.4.0 and Google ADK 2.1.0. For the existing
-development checkout, the already-tested interpreter can instead be selected with:
-
-```powershell
-$Python = (Resolve-Path '../../../spikes/cadence-python-agent-compat/.venv/Scripts/python.exe').Path
-```
+The sample pins Cadence Python SDK 0.4.0 and Google ADK 2.1.0.
 
 ## Mock run
 
@@ -71,10 +66,11 @@ Terminal 2:
 & $Python .\main.py stop
 ```
 
-Worker/start resolve IDs from the root YAML catalogs; `--catalog-dir` supports a
-copied sample. Endpoints remain Worker-local. Only the official native Google
-endpoint is supported. Other catalog combinations and substituted Google gateway
-endpoints are rejected. Keep mock and live Workers on separate task lists.
+Worker/start resolve command-line IDs through `agents.yaml`, `models.yaml`, and
+`classifiers.yaml`; `--catalog-dir` supports a copied sample. The selected entries
+provide endpoints, while credentials remain Worker-local. Only the official native
+Google endpoint is supported. Other catalog combinations and substituted Google
+gateway endpoints are rejected. Keep mock and live Workers on separate task lists.
 
 For an automated CLI smoke, keep the matching Worker running and execute this
 **as a script file** in Terminal 2:
@@ -125,8 +121,3 @@ The released SDK's in-memory tests auto-fire timers, so they cannot faithfully
 inject stop while timer-waiting or demonstrate server-side Activity retries.
 The smoke and local-server checks cover those boundaries. Local checks exercise
 Continue-As-New, exhausted-retry recovery, and stop during an active Activity.
-
-Live verification on September 25, 2026 used Workflow
-`watch-smoke-368f97966fab4e27bb88239bc6851b6d`: three Jev Activities, one completed
-Gemini Activity, a retained report, timer/check-now wake-ups, and STOPPED at check
-count 3 with no Activity after stop. This is a functional smoke, not a benchmark.

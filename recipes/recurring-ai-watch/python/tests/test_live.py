@@ -20,7 +20,7 @@ from live import (
     retryable,
     validate_live,
 )
-from workflow import MockClassification, ReleaseNote
+from workflow import ClassificationDecision, ReleaseNote
 
 
 def selection(*, model_endpoint: str = "https://generativelanguage.googleapis.com"):
@@ -126,7 +126,7 @@ class LiveJevClassifierTests(unittest.TestCase):
         self.assertEqual(timeout, 20)
         self.assertEqual(payload["model"], "jev-latest")
         self.assertEqual(list(payload["questions"]), ["relevant"])
-        self.assertEqual(result, MockClassification(True, "Jev selected yes (0.97)"))
+        self.assertEqual(result, ClassificationDecision(True, "Jev selected yes (0.97)"))
 
     def test_authentication_failure_is_non_retryable(self) -> None:
         def reject(*args: object, **kwargs: object):

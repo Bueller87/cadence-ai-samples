@@ -45,7 +45,7 @@ class ReleaseNote:
 
 
 @dataclass(frozen=True)
-class MockClassification:
+class ClassificationDecision:
     warrants_report: bool
     reason: str
 
@@ -81,10 +81,10 @@ SCRIPTED_RELEASES = (
 
 
 @activity.defn(name=CLASSIFY_ACTIVITY)
-def mock_classify(update: ReleaseNote) -> MockClassification:
+def mock_classify(update: ReleaseNote) -> ClassificationDecision:
     relevant = "Retry defaults changed" in update.notes
     LOGGER.info("watch classification version=%s report=%s", update.version, relevant)
-    return MockClassification(
+    return ClassificationDecision(
         relevant,
         "Changes background-job retry behavior."
         if relevant
@@ -166,7 +166,7 @@ class RecurringAIWatchWorkflow:
         try:
             decision = await workflow.execute_activity(
                 CLASSIFY_ACTIVITY,
-                MockClassification,
+                ClassificationDecision,
                 update,
                 **AI_ACTIVITY_OPTIONS,
             )

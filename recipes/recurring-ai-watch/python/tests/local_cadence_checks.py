@@ -18,7 +18,7 @@ from cadence.contrib.pydantic import PydanticDataConverter
 from cadence.worker import Worker
 from workflow import (
     CLASSIFY_ACTIVITY, STOP_WATCH_SIGNAL, WATCH_STATUS_QUERY, WATCH_WORKFLOW,
-    MockClassification, ReleaseNote, WatchInput, WatchStatus, build_registry,
+    ClassificationDecision, ReleaseNote, WatchInput, WatchStatus, build_registry,
 )
 
 
@@ -47,14 +47,14 @@ async def main():
     scenario = "continue"
 
     @activity.defn(name=CLASSIFY_ACTIVITY)
-    async def classify(update: ReleaseNote) -> MockClassification:
+    async def classify(update: ReleaseNote) -> ClassificationDecision:
         attempts.append((update.version, activity.info().attempt))
         if scenario == "retry" and len(attempts) <= 3:
             raise RuntimeError("scripted temporary outage")
         if scenario == "stop":
             active.set()
             await release.wait()
-        return MockClassification(update.version == "2.5.0", "local fixture")
+        return ClassificationDecision(update.version == "2.5.0", "local fixture")
 
     async def start(label, **values):
         return await client.start_workflow(

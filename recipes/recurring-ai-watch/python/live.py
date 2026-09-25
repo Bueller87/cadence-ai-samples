@@ -23,7 +23,7 @@ from config import CatalogSelection
 from workflow import (
     AI_ACTIVITY_OPTIONS,
     CLASSIFY_ACTIVITY,
-    MockClassification,
+    ClassificationDecision,
     ReleaseNote,
 )
 
@@ -100,7 +100,7 @@ class JevClassifier:
         self._open = opener
 
     @activity.method(name=CLASSIFY_ACTIVITY)
-    def classify(self, update: ReleaseNote) -> MockClassification:
+    def classify(self, update: ReleaseNote) -> ClassificationDecision:
         question = {
             "type": "choice",
             "instructions": (
@@ -148,7 +148,7 @@ class JevClassifier:
             raise LiveSchemaError("Jev returned an invalid choice")
         if not isinstance(confidence, (int, float)) or not 0 <= confidence <= 1:
             raise LiveSchemaError("Jev returned an invalid confidence")
-        return MockClassification(
+        return ClassificationDecision(
             choice == "yes", f"Jev selected {choice} ({confidence:.2f})"
         )
 

@@ -15,7 +15,7 @@ from workflow import (
     STOP_WATCH_SIGNAL,
     WATCH_STATUS_QUERY,
     WATCH_WORKFLOW,
-    MockClassification,
+    ClassificationDecision,
     RecurringAIWatchWorkflow,
     ReleaseNote,
     WatchInput,
@@ -39,11 +39,11 @@ class MockActivityTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             skipped,
-            MockClassification(False, "No background-job impact."),
+            ClassificationDecision(False, "No background-job impact."),
         )
         self.assertEqual(
             relevant,
-            MockClassification(True, "Changes background-job retry behavior."),
+            ClassificationDecision(True, "Changes background-job retry behavior."),
         )
 
 
@@ -100,10 +100,10 @@ class WatchWorkflowTests(unittest.IsolatedAsyncioTestCase):
         classifications = 0
         reports = 0
 
-        def count_classification(*args: object) -> MockClassification:
+        def count_classification(*args: object) -> ClassificationDecision:
             nonlocal classifications
             classifications += 1
-            return MockClassification(False, "mocked")
+            return ClassificationDecision(False, "mocked")
 
         def count_report(*args: object) -> str:
             nonlocal reports
@@ -165,12 +165,12 @@ class WatchWorkflowTests(unittest.IsolatedAsyncioTestCase):
     async def test_classification_failure_recovers_pending_update_next_check(self) -> None:
         classification_attempts = 0
 
-        def classify_then_recover(*args: object) -> MockClassification:
+        def classify_then_recover(*args: object) -> ClassificationDecision:
             nonlocal classification_attempts
             classification_attempts += 1
             if classification_attempts == 1:
                 raise RuntimeError("temporary classifier outage")
-            return MockClassification(False, "recovered")
+            return ClassificationDecision(False, "recovered")
 
         with TestWorkflowEnvironment(build_registry()) as environment:
             environment.on_activity(CLASSIFY_ACTIVITY, fn=classify_then_recover)
@@ -190,7 +190,7 @@ class WatchWorkflowTests(unittest.IsolatedAsyncioTestCase):
     async def test_non_retryable_classification_failure_terminates_watch(self) -> None:
         classification_attempts = 0
 
-        def reject_configuration(*args: object) -> MockClassification:
+        def reject_configuration(*args: object) -> ClassificationDecision:
             nonlocal classification_attempts
             classification_attempts += 1
             raise ActivityFailure("LiveAuthenticationError")
@@ -216,9 +216,9 @@ class WatchWorkflowTests(unittest.IsolatedAsyncioTestCase):
     async def test_live_path_classifies_before_generating_report(self) -> None:
         calls: list[str] = []
 
-        def classify_for_live(*args: object) -> MockClassification:
+        def classify_for_live(*args: object) -> ClassificationDecision:
             calls.append("jev")
-            return MockClassification(True, "needs report")
+            return ClassificationDecision(True, "needs report")
 
         async def generate_report(*args: object) -> str:
             calls.append("gemini")
@@ -248,10 +248,10 @@ class WatchWorkflowTests(unittest.IsolatedAsyncioTestCase):
         classification_attempts = 0
         report_attempts = 0
 
-        def classify(*args: object) -> MockClassification:
+        def classify(*args: object) -> ClassificationDecision:
             nonlocal classification_attempts
             classification_attempts += 1
-            return MockClassification(True, "needs report")
+            return ClassificationDecision(True, "needs report")
 
         def report_then_recover(*args: object) -> str:
             nonlocal report_attempts
@@ -364,10 +364,10 @@ class WatchWorkflowTests(unittest.IsolatedAsyncioTestCase):
         classifications = 0
         reports = 0
 
-        def count_classification(*args: object) -> MockClassification:
+        def count_classification(*args: object) -> ClassificationDecision:
             nonlocal classifications
             classifications += 1
-            return MockClassification(False, "mocked")
+            return ClassificationDecision(False, "mocked")
 
         def count_report(*args: object) -> str:
             nonlocal reports
