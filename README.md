@@ -28,3 +28,5 @@ Browse recipe directories by problem or use case. The first recipe, [StreamWave 
 ## Contributing
 
 Contributions are welcome. Start with a concrete real-world problem, write an implementation specification, and keep the resulting recipe focused and portable. See [CONTRIBUTING.md](CONTRIBUTING.md) and the reusable files in [`templates/recipe`](templates/recipe/).
+
+Create a Python recipe starter with `./scripts/new-recipe.sh your-recipe-name`.

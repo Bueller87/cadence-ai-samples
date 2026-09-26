@@ -1,4 +1,4 @@
-# [Recipe name] implementation specification
+# __RECIPE_TITLE__ implementation specification
 
 ## Problem statement
 
