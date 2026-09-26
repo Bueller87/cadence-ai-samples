@@ -7,11 +7,14 @@ name = "recurring-ai-watch"
 version = "0.0.0"
 requires-python = ">=3.12"
 dependencies = [
-    "cadence-python-client==0.4.0",
+    "cadence-python-client @ git+https://github.com/cadence-workflow/cadence-python-client.git@2bc1af4207d20cd99ae64fa1ef82d803905af947",
     "google-adk==2.1.0",
+    "openai==2.30.0",
+    "openai-agents==0.12.5",
+    "litellm==1.83.7",
     "pydantic==2.12.5",
     "PyYAML==6.0.2",
 ]
 
 [tool.setuptools]
-py-modules = ["config", "workflow", "live", "main"]
+py-modules = ["config", "workflow", "live", "inference", "main"]

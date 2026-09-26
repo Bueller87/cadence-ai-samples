@@ -12,7 +12,7 @@ from urllib.error import HTTPError
 from config import AgentConfig, CatalogSelection, ClassifierConfig, ModelConfig
 from live import (
     JevClassifier,
-    GeminiActivities,
+    ADKActivities,
     LiveAuthenticationError,
     LiveConfigurationError,
     LiveSchemaError,
@@ -62,7 +62,7 @@ class LiveConfigurationTests(unittest.TestCase):
         self.assertFalse(retryable(401))
         self.assertFalse(retryable(422))
 
-    def test_accepts_only_verified_tuple_and_official_google_endpoint(self) -> None:
+    def test_requires_official_google_endpoint(self) -> None:
         validate_live(selection())
 
         with self.assertRaisesRegex(LiveConfigurationError, "official endpoint"):
@@ -163,7 +163,7 @@ class GeminiFailureTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(GoogleADKActivities, "generate_content_async",
                           new=AsyncMock(side_effect=error)):
             try:
-                await GeminiActivities().generate_content_async("gemini-3.5-flash-lite", LlmRequest())
+                await ADKActivities().generate_content_async("gemini-3.5-flash-lite", LlmRequest())
             except LiveAuthenticationError as failure:
                 from workflow import AI_ACTIVITY_OPTIONS, _fatal
                 self.assertTrue(_fatal(failure))
@@ -181,7 +181,7 @@ class GeminiFailureTests(unittest.IsolatedAsyncioTestCase):
                 new=AsyncMock(side_effect=ClientError(status, {})),
             ):
                 with self.assertRaises(expected):
-                    await GeminiActivities().generate_content_async("gemini-3.5-flash-lite", LlmRequest())
+                    await ADKActivities().generate_content_async("gemini-3.5-flash-lite", LlmRequest())
 
 
 if __name__ == "__main__":

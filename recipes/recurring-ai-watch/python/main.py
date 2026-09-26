@@ -88,12 +88,13 @@ async def run_worker(args: argparse.Namespace, selection: CatalogSelection) -> N
             raise ValueError("live worker requires --confirm-live")
         from live import live_activities
 
-        classifier, gemini = live_activities(selection, os.environ)
-        registry = build_registry(classifier.classify, gemini)
+        classifier, model_activities = live_activities(selection, os.environ)
+        registry = build_registry(classifier.classify, model_activities)
     worker = Worker(client(args), args.task_list, registry)
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     async with worker:
-        print(f"{args.mode} worker polling task-list={args.task_list}")
+        print(f"{args.mode} worker polling task-list={args.task_list} "
+              f"agent={selection.agent.id} model={selection.model.id}")
         await asyncio.Event().wait()
 
 
@@ -110,6 +111,8 @@ async def start(args: argparse.Namespace, selection: CatalogSelection) -> None:
                 interval=timedelta(seconds=args.interval),
                 mode=args.mode,
                 model_name=selection.model.model if args.mode == "live" else None,
+                agent_framework=selection.agent.framework,
+                model_provider=selection.model.provider,
             ),
             task_list=args.task_list,
             workflow_id=args.workflow_id,
@@ -145,21 +148,18 @@ async def main(argv: Sequence[str] | None = None) -> None:
     cli = parser()
     args = cli.parse_args(argv)
     try:
-        if args.command == "worker":
+        if args.command in {"worker", "start"}:
             selection = load_selection(
                 args.catalog_dir,
                 agent_id=args.agent_id,
                 model_id=args.model_id,
                 classifier_id=args.classifier_id,
             )
+            if selection.classifier.id != "jev-default" or selection.classifier.provider != "typesafe":
+                raise ValueError("only jev-default is implemented; other classifiers are catalog candidates")
+        if args.command == "worker":
             await run_worker(args, selection)
         elif args.command == "start":
-            selection = load_selection(
-                args.catalog_dir,
-                agent_id=args.agent_id,
-                model_id=args.model_id,
-                classifier_id=args.classifier_id,
-            )
             await start(args, selection)
         elif args.command == "status":
             await status(args)
