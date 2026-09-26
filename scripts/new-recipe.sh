@@ -26,8 +26,10 @@ IFS=- read -r -a words <<< "$slug"
 title=""
 class_name=""
 for word in "${words[@]}"; do
-  title+="${word^} "
-  class_name+="${word^}"
+  first=$(printf '%s' "${word%"${word#?}"}" | tr '[:lower:]' '[:upper:]')
+  capitalized="$first${word#?}"
+  title+="$capitalized "
+  class_name+="$capitalized"
 done
 title=${title% }
 python_package=${slug//-/_}

@@ -149,7 +149,7 @@ class ADKActivities(GoogleADKActivities):
             details = details.get("error", details)
             details = details.get("details", []) if isinstance(details, dict) else []
             invalid_key = any(isinstance(item, dict) and item.get("reason") == "API_KEY_INVALID"
-                              for item in details if isinstance(details, list))
+                              for item in (details if isinstance(details, list) else []))
             if error.code in {401, 403} or invalid_key:
                 raise LiveAuthenticationError("Gemini rejected MODEL_AI_KEY") from None
             if retryable(error.code):
