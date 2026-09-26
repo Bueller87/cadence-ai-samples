@@ -13,11 +13,11 @@ Google ADK + Gemini and TypeSafe Jev. There is no real release polling or agent 
 Use Python 3.12 or newer and a running Cadence server at `localhost:7833`, with
 the existing domain `cadence-ai-samples`. Run from the repository root:
 
-```powershell
-Set-Location recipes/recurring-ai-watch/python
-py -m venv .venv
-$Python = (Resolve-Path '.venv/Scripts/python.exe').Path
-& $Python -m pip install -e .
+```bash
+cd recipes/recurring-ai-watch/python
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e .
 ```
 
 The sample pins Cadence Python SDK 0.4.0 and Google ADK 2.1.0.
@@ -26,17 +26,17 @@ The sample pins Cadence Python SDK 0.4.0 and Google ADK 2.1.0.
 
 Terminal 1 (leave the Worker running):
 
-```powershell
-& $Python .\main.py --task-list recurring-ai-watch-mock worker
+```bash
+python main.py --task-list recurring-ai-watch-mock worker
 ```
 
 Terminal 2 (same directory and interpreter selection):
 
-```powershell
-& $Python .\main.py --task-list recurring-ai-watch-mock start
-& $Python .\main.py status
-& $Python .\main.py check-now
-& $Python .\main.py stop
+```bash
+python main.py --task-list recurring-ai-watch-mock start
+python main.py status
+python main.py check-now
+python main.py stop
 ```
 
 The default Workflow ID is `recurring-ai-watch-demo`. Supply `--workflow-id`
@@ -50,20 +50,24 @@ In Terminal 1, set `MODEL_AI_KEY` to a valid Google Gemini API key and
 These variables belong only in the Worker session. Do not put their values in
 commands saved to the repository, catalog files, or Workflow inputs.
 
-```powershell
-& $Python .\main.py --domain cadence-ai-samples `
-    --task-list recurring-ai-watch-live `
-    --agent-id google-adk --model-id gemini-flash-lite --classifier-id jev-default `
+```bash
+export MODEL_AI_KEY='your-google-gemini-key'
+export CLASSIFIER_AI_KEY='your-typesafe-jev-key'
+python main.py --domain cadence-ai-samples \
+    --task-list recurring-ai-watch-live \
+    --agent-id google-adk --model-id gemini-flash-lite --classifier-id jev-default \
     worker --mode live --confirm-live
 ```
 
 Terminal 2:
 
-```powershell
-& $Python .\main.py --task-list recurring-ai-watch-live start --mode live
-& $Python .\main.py status
-& $Python .\main.py check-now
-& $Python .\main.py stop
+```bash
+python main.py --task-list recurring-ai-watch-live \
+    --agent-id google-adk --model-id gemini-flash-lite --classifier-id jev-default \
+    start --mode live
+python main.py status
+python main.py check-now
+python main.py stop
 ```
 
 Worker/start resolve command-line IDs through `agents.yaml`, `models.yaml`, and
@@ -75,11 +79,14 @@ gateway endpoints are rejected. Keep mock and live Workers on separate task list
 For an automated CLI smoke, keep the matching Worker running and execute this
 **as a script file** in Terminal 2:
 
-```powershell
-& .\smoke.ps1 -Python $Python -Mode live -TaskList recurring-ai-watch-live
+```bash
+MODE=live TASK_LIST=recurring-ai-watch-live ./smoke.sh
 # Or, with the mock Worker:
-& .\smoke.ps1 -Python $Python -Mode mock -TaskList recurring-ai-watch-mock
+MODE=mock TASK_LIST=recurring-ai-watch-mock ./smoke.sh
 ```
+
+Set `PYTHON=/path/to/python` to use a different Python executable. On Windows,
+run these commands from WSL or another Bash environment.
 
 It uses a unique Workflow ID, waits for a report, sends check-now, stops while
 waiting, and checks the count stays fixed. Command errors and assertion failures
@@ -110,11 +117,11 @@ terminal status/history to determine success or failure.
 
 ## Validation
 
-```powershell
-& $Python -m unittest discover -s tests -v
-& $Python -m py_compile config.py workflow.py live.py main.py
+```bash
+python -m unittest discover -s tests -v
+python -m py_compile config.py workflow.py live.py main.py
 # Optional: existing local Cadence server; isolated mock Worker, no AI calls.
-& $Python .\tests\local_cadence_checks.py
+python tests/local_cadence_checks.py
 ```
 
 The released SDK's in-memory tests auto-fire timers, so they cannot faithfully
