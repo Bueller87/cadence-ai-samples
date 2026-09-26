@@ -5,7 +5,8 @@ Start a contribution with a specific problem or use case, not a library feature.
 Before implementation:
 
 1. Describe the proposed use case and why durable workflow orchestration helps.
-2. Create a `SPEC.md` using the recipe template.
+2. Run `./scripts/new-recipe.sh your-recipe-name` to create the Python starter,
+   then tailor its `SPEC.md`.
 3. Define how the recipe can be exercised with mock or synthetic data without paid AI API access.
 
 When implementing a recipe:
