@@ -1,4 +1,4 @@
-"""Durable recurring watch: release note -> Jev -> optional Gemini report."""
+"""Durable recurring watch: release note -> Jev -> optional impact report."""
 
 from __future__ import annotations
 
@@ -61,6 +61,8 @@ class WatchInput:
     check_count: int = 0
     wait_before_first_check: bool = False
     max_checks: int | None = None  # Test-only finite run support.
+    agent_framework: str = "google-adk"
+    model_provider: str = "google"
 
 
 @dataclass(frozen=True)
@@ -113,6 +115,8 @@ class RecurringAIWatchWorkflow:
         self._stop_requested = False
         self._mode = "mock"
         self._model_name: str | None = None
+        self._agent_framework = "google-adk"
+        self._model_provider = "google"
 
     @workflow.run
     async def run(self, watch_input: WatchInput) -> WatchStatus:
@@ -123,6 +127,8 @@ class RecurringAIWatchWorkflow:
         self._latest_report = watch_input.latest_report
         self._mode = watch_input.mode
         self._model_name = watch_input.model_name
+        self._agent_framework = watch_input.agent_framework
+        self._model_provider = watch_input.model_provider
         wait_before_check = watch_input.wait_before_first_check
         checks_this_run = 0
 
@@ -181,9 +187,11 @@ class RecurringAIWatchWorkflow:
 
     async def _report(self, update: ReleaseNote) -> str:
         if self._mode == "live":
-            from live import generate_live_report
+            from inference import generate_live_report
 
-            return await generate_live_report(update, self._model_name)
+            return await generate_live_report(
+                update, self._model_name, self._agent_framework, self._model_provider
+            )
         return await workflow.execute_activity(
             MOCK_REPORT_ACTIVITY,
             str,
@@ -215,6 +223,8 @@ class RecurringAIWatchWorkflow:
             check_count=self._check_count,
             wait_before_first_check=True,
             max_checks=watch_input.max_checks,
+            agent_framework=self._agent_framework,
+            model_provider=self._model_provider,
         )
 
     def _finish(self, state: str) -> WatchStatus:

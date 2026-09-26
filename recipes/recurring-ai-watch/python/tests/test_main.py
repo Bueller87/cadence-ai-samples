@@ -3,10 +3,11 @@ from __future__ import annotations
 import asyncio
 import tempfile
 import unittest
+import os
 from contextlib import redirect_stderr
 from io import StringIO
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from main import (
     DEFAULT_TASK_LIST,
@@ -120,6 +121,39 @@ class MainTests(unittest.TestCase):
         load.assert_not_called()
         show_status.assert_awaited_once()
         self.assertEqual(send_signal.await_count, 2)
+
+    def test_worker_and_start_load_catalogs_and_mock_needs_no_credentials(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            for filename, contents in CATALOGS.items():
+                (directory / filename).write_text(contents, encoding="utf-8")
+            with (
+                patch.dict(os.environ, {}, clear=True),
+                patch("main.load_selection", wraps=load_selection) as load,
+                patch("main.run_worker", new=AsyncMock()) as worker,
+                patch("main.start", new=AsyncMock()) as start,
+            ):
+                asyncio.run(main(["--catalog-dir", str(directory), "worker"]))
+                asyncio.run(main(["--catalog-dir", str(directory), "start"]))
+            self.assertEqual(load.call_count, 2)
+            worker.assert_awaited_once()
+            start.assert_awaited_once()
+            selection = worker.call_args.args[1]
+            with (
+                patch.dict(os.environ, {}, clear=True),
+                patch("main.Worker", return_value=MagicMock()),
+                patch("main.client"),
+                patch("main.asyncio.Event") as event,
+                patch("live.live_activities", side_effect=AssertionError("mock selected AI")),
+            ):
+                event.return_value.wait = AsyncMock()
+                asyncio.run(run_worker(parser().parse_args(["worker"]), selection))
+
+    def test_catalog_candidate_classifier_is_rejected_before_worker_or_start(self) -> None:
+        for command in ("worker", "start"):
+            with redirect_stderr(StringIO()) as errors, self.assertRaises(SystemExit):
+                asyncio.run(main(["--classifier-id", "kev-local", command]))
+            self.assertIn("only jev-default", errors.getvalue())
 
 
 if __name__ == "__main__":

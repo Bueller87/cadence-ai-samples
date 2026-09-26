@@ -1,4 +1,4 @@
-"""The one supported live path: TypeSafe Jev then Google ADK/Gemini."""
+"""TypeSafe Jev classification and the Cadence Google ADK report path."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from collections.abc import AsyncGenerator, Callable, MutableMapping
 from typing import Any
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
+from urllib.parse import urlsplit
 
 from cadence import activity, workflow
 from cadence.contrib.google_adk import CadenceAgentRunner, GoogleADKActivities
@@ -35,7 +36,7 @@ class LiveAuthenticationError(Exception):
     pass
 
 
-class LiveConfigurationError(Exception):
+class LiveConfigurationError(ValueError):
     pass
 
 
@@ -48,41 +49,42 @@ def retryable(status: int) -> bool:
 
 
 def validate_live(selection: CatalogSelection) -> None:
-    supported = (
-        selection.agent.id == "google-adk"
-        and selection.agent.framework == "google-adk"
-        and selection.model.id == "gemini-flash-lite"
-        and selection.model.provider == "google"
-        and selection.classifier.id == "jev-default"
-        and selection.classifier.provider == "typesafe"
-    )
-    if not supported:
-        raise LiveConfigurationError(
-            "live mode supports only google-adk + gemini-flash-lite + jev-default"
-        )
-    if selection.model.endpoint.rstrip("/") != GOOGLE_ENDPOINT:
+    if selection.classifier.id != "jev-default" or selection.classifier.provider != "typesafe":
+        raise LiveConfigurationError("only jev-default is implemented; other classifiers are catalog candidates")
+    if selection.agent.framework not in {"google-adk", "openai-agents"}:
+        raise LiveConfigurationError("unsupported agent framework")
+    if selection.model.provider not in {"google", "ollama", "openai"}:
+        raise LiveConfigurationError("unsupported model provider")
+    endpoint = urlsplit(selection.model.endpoint)
+    if (endpoint.scheme not in {"http", "https"} or not endpoint.hostname
+            or endpoint.username or endpoint.password or endpoint.query or endpoint.fragment):
+        raise LiveConfigurationError("model endpoint must be an HTTP URL without credentials, query, or fragment")
+    if selection.model.provider == "google" and selection.model.endpoint.rstrip("/") != GOOGLE_ENDPOINT:
         raise LiveConfigurationError("live mode requires Google's official endpoint")
+    if selection.model.provider == "ollama" and endpoint.hostname not in {"localhost", "127.0.0.1", "::1"}:
+        raise LiveConfigurationError("Ollama requires a loopback endpoint")
 
 
 def live_activities(
     selection: CatalogSelection,
     environ: MutableMapping[str, str] = os.environ,
-) -> tuple["JevClassifier", "GeminiActivities"]:
+) -> tuple["JevClassifier", object]:
     validate_live(selection)
     model_key = environ.get("MODEL_AI_KEY", "").strip()
     classifier_key = environ.get("CLASSIFIER_AI_KEY", "").strip()
-    if not model_key or not classifier_key:
+    if (selection.model.provider != "ollama" and not model_key) or not classifier_key:
         raise LiveConfigurationError(
             "live worker requires MODEL_AI_KEY and CLASSIFIER_AI_KEY"
         )
-    environ["GOOGLE_API_KEY"] = model_key
+    from inference import build_model_activities
+
     return (
         JevClassifier(
             classifier_key,
             selection.classifier.endpoint,
             selection.classifier.model,
         ),
-        GeminiActivities(),
+        build_model_activities(selection, environ),
     )
 
 
@@ -153,7 +155,7 @@ class JevClassifier:
         )
 
 
-class GeminiActivities(GoogleADKActivities):
+class ADKActivities(GoogleADKActivities):
     @activity.override(GoogleADKActivities.generate_content_async)
     async def generate_content_async(
         self, model_name: str, llm_request: LlmRequest
@@ -176,6 +178,20 @@ class GeminiActivities(GoogleADKActivities):
             raise LiveSchemaError(f"Gemini rejected the request: HTTP {error.code}") from None
         except (TypeError, ValueError):
             raise LiveSchemaError("Gemini configuration or schema is invalid") from None
+        except Exception as error:
+            raise_model_error(error)
+
+
+def raise_model_error(error: Exception) -> None:
+    """Keep provider bodies (which may echo headers) out of Activity failures."""
+    status = getattr(error, "status_code", None)
+    if status in {401, 403}:
+        raise LiveAuthenticationError("model rejected MODEL_AI_KEY") from None
+    if isinstance(status, int) and not retryable(status):
+        raise LiveSchemaError(f"model rejected request: HTTP {status}") from None
+    if isinstance(error, (TypeError, ValueError)):
+        raise LiveSchemaError("model configuration or schema is invalid") from None
+    raise RuntimeError("temporary model request failure") from None
 
 
 class RetryingCadenceModel(CadenceModel):
@@ -191,7 +207,7 @@ class RetryingCadenceModel(CadenceModel):
             yield response
 
 
-async def generate_live_report(update: ReleaseNote, model_name: str | None) -> str:
+async def generate_adk_report(update: ReleaseNote, model_name: str) -> str:
     if not model_name:
         raise LiveConfigurationError("live mode requires a model name")
     agent = LlmAgent(
