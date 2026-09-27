@@ -155,8 +155,12 @@ async def main(argv: Sequence[str] | None = None) -> None:
                 model_id=args.model_id,
                 classifier_id=args.classifier_id,
             )
-            if selection.classifier.id != "jev-default" or selection.classifier.provider != "typesafe":
-                raise ValueError("only jev-default is implemented; other classifiers are catalog candidates")
+            classifier = (selection.classifier.id, selection.classifier.provider)
+            if classifier not in {("jev-default", "typesafe"), ("laya-local", "laya")}:
+                raise ValueError(
+                    "supported classifiers are jev-default and laya-local; "
+                    "other classifiers are catalog candidates"
+                )
         if args.command == "worker":
             await run_worker(args, selection)
         elif args.command == "start":

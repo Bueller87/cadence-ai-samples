@@ -150,10 +150,21 @@ class MainTests(unittest.TestCase):
                 asyncio.run(run_worker(parser().parse_args(["worker"]), selection))
 
     def test_catalog_candidate_classifier_is_rejected_before_worker_or_start(self) -> None:
-        for command in ("worker", "start"):
-            with redirect_stderr(StringIO()) as errors, self.assertRaises(SystemExit):
-                asyncio.run(main(["--classifier-id", "kev-local", command]))
-            self.assertIn("only jev-default", errors.getvalue())
+        for classifier in ("von-local", "reflex-local", "kev-local"):
+            for command in ("worker", "start"):
+                with redirect_stderr(StringIO()) as errors, self.assertRaises(SystemExit):
+                    asyncio.run(main(["--classifier-id", classifier, command]))
+                self.assertIn("catalog candidates", errors.getvalue())
+
+    def test_laya_classifier_is_accepted_for_worker_and_start(self) -> None:
+        with (
+            patch("main.run_worker", new=AsyncMock()) as worker,
+            patch("main.start", new=AsyncMock()) as start,
+        ):
+            asyncio.run(main(["--classifier-id", "laya-local", "worker"]))
+            asyncio.run(main(["--classifier-id", "laya-local", "start"]))
+        worker.assert_awaited_once()
+        start.assert_awaited_once()
 
 
 if __name__ == "__main__":
