@@ -7,7 +7,7 @@ classifiers:
   - id: laya-local
     provider: laya
     model: convaiinnovations/laya
-    endpoint: http://localhost:8000/v1/systemone
+    endpoint: http://localhost:9000/v1/systemone
 
   - id: von-local
     provider: von

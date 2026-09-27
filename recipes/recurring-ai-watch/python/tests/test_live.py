@@ -11,11 +11,11 @@ from urllib.error import HTTPError
 
 from config import AgentConfig, CatalogSelection, ClassifierConfig, ModelConfig
 from live import (
-    JevClassifier,
     ADKActivities,
     LiveAuthenticationError,
     LiveConfigurationError,
     LiveSchemaError,
+    SystemOneClassifier,
     live_activities,
     retryable,
     validate_live,
@@ -23,7 +23,14 @@ from live import (
 from workflow import ClassificationDecision, ReleaseNote
 
 
-def selection(*, model_endpoint: str = "https://generativelanguage.googleapis.com"):
+def selection(
+    *,
+    model_endpoint: str = "https://generativelanguage.googleapis.com",
+    classifier_id: str = "jev-default",
+    classifier_provider: str = "typesafe",
+    classifier_model: str = "jev-latest",
+    classifier_endpoint: str = "https://api.typesafe.ai/v1/systemone",
+):
     return CatalogSelection(
         agent=AgentConfig(id="google-adk", framework="google-adk"),
         model=ModelConfig(
@@ -33,10 +40,10 @@ def selection(*, model_endpoint: str = "https://generativelanguage.googleapis.co
             endpoint=model_endpoint,
         ),
         classifier=ClassifierConfig(
-            id="jev-default",
-            provider="typesafe",
-            model="jev-latest",
-            endpoint="https://api.typesafe.ai/v1/systemone",
+            id=classifier_id,
+            provider=classifier_provider,
+            model=classifier_model,
+            endpoint=classifier_endpoint,
         ),
     )
 
@@ -68,7 +75,7 @@ class LiveConfigurationTests(unittest.TestCase):
         with self.assertRaisesRegex(LiveConfigurationError, "official endpoint"):
             validate_live(selection(model_endpoint="https://gateway.example/v1"))
 
-    def test_worker_requires_both_application_credentials(self) -> None:
+    def test_jev_worker_requires_both_application_credentials(self) -> None:
         with self.assertRaisesRegex(LiveConfigurationError, "MODEL_AI_KEY"):
             live_activities(selection(), {})
         with self.assertRaisesRegex(LiveConfigurationError, "CLASSIFIER_AI_KEY"):
@@ -89,8 +96,26 @@ class LiveConfigurationTests(unittest.TestCase):
         )
         self.assertNotIn("secret", repr(classifier).lower())
 
+    def test_laya_needs_no_classifier_key_and_requires_loopback(self) -> None:
+        laya = selection(
+            classifier_id="laya-local",
+            classifier_provider="laya",
+            classifier_model="convaiinnovations/laya",
+            classifier_endpoint="http://localhost:8000/v1/systemone",
+        )
+        classifier, _ = live_activities(laya, {"MODEL_AI_KEY": "model-secret"})
+        self.assertIsInstance(classifier, SystemOneClassifier)
 
-class LiveJevClassifierTests(unittest.TestCase):
+        with self.assertRaisesRegex(LiveConfigurationError, "loopback"):
+            validate_live(selection(
+                classifier_id="laya-local",
+                classifier_provider="laya",
+                classifier_model="convaiinnovations/laya",
+                classifier_endpoint="https://laya.example/v1/systemone",
+            ))
+
+
+class SystemOneClassifierTests(unittest.TestCase):
     def test_uses_proven_one_question_contract(self) -> None:
         requests: list[tuple[object, int]] = []
 
@@ -110,7 +135,7 @@ class LiveJevClassifierTests(unittest.TestCase):
                 }
             )
 
-        classifier = JevClassifier(
+        classifier = SystemOneClassifier(
             "classifier-secret",
             "https://api.typesafe.ai/v1/systemone",
             "jev-latest",
@@ -126,13 +151,40 @@ class LiveJevClassifierTests(unittest.TestCase):
         self.assertEqual(timeout, 20)
         self.assertEqual(payload["model"], "jev-latest")
         self.assertEqual(list(payload["questions"]), ["relevant"])
-        self.assertEqual(result, ClassificationDecision(True, "Jev selected yes (0.97)"))
+        self.assertEqual(request.get_header("Authorization"), "Bearer classifier-secret")
+        self.assertEqual(
+            result, ClassificationDecision(True, "System One selected yes (0.97)")
+        )
+
+    def test_laya_uses_catalog_endpoint_and_model_without_authorization(self) -> None:
+        requests = []
+
+        def open_request(request: object, timeout: int):
+            requests.append(request)
+            return FakeResponse({
+                "answers": {"relevant": {
+                    "type": "choice", "choice": "no", "confidence": 0.88,
+                }}
+            })
+
+        classifier = SystemOneClassifier(
+            None,
+            "http://localhost:8000/v1/systemone",
+            "convaiinnovations/laya",
+            opener=open_request,
+        )
+        classifier.classify(ReleaseNote("2.4.0", "Documentation update."))
+
+        request = requests[0]
+        self.assertEqual(request.full_url, "http://localhost:8000/v1/systemone")
+        self.assertEqual(json.loads(request.data)["model"], "convaiinnovations/laya")
+        self.assertIsNone(request.get_header("Authorization"))
 
     def test_authentication_failure_is_non_retryable(self) -> None:
         def reject(*args: object, **kwargs: object):
             raise HTTPError("https://jev.invalid", 401, "Unauthorized", {}, None)
 
-        classifier = JevClassifier(
+        classifier = SystemOneClassifier(
             "classifier-secret",
             "https://api.typesafe.ai/v1/systemone",
             "jev-latest",
@@ -143,7 +195,7 @@ class LiveJevClassifierTests(unittest.TestCase):
             classifier.classify(ReleaseNote("2.5.0", "Retry change."))
 
     def test_malformed_relevant_answer_is_a_schema_error(self) -> None:
-        classifier = JevClassifier(
+        classifier = SystemOneClassifier(
             "classifier-secret",
             "https://api.typesafe.ai/v1/systemone",
             "jev-latest",

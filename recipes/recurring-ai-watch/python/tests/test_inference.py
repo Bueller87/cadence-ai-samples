@@ -98,8 +98,9 @@ class InferenceTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(LLMRegistry.resolve(actual).__name__, cls)
 
     def test_unsupported_classifiers_and_unknown_ids(self):
-        for classifier in ("laya-local", "von-local", "reflex-local", "kev-local"):
-            with self.assertRaisesRegex(LiveConfigurationError, "only jev-default"):
+        validate_live(selected("google-adk", "gemini-flash-lite", "laya-local"))
+        for classifier in ("von-local", "reflex-local", "kev-local"):
+            with self.assertRaisesRegex(LiveConfigurationError, "catalog candidates"):
                 validate_live(selected("google-adk", "gemini-flash-lite", classifier))
         with self.assertRaises(CatalogError):
             selected("unknown", "gemini-flash-lite")

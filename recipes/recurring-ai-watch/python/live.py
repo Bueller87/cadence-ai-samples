@@ -1,4 +1,4 @@
-"""TypeSafe Jev classification and the Cadence Google ADK report path."""
+"""System One classification and the Cadence Google ADK report path."""
 
 from __future__ import annotations
 
@@ -49,8 +49,23 @@ def retryable(status: int) -> bool:
 
 
 def validate_live(selection: CatalogSelection) -> None:
-    if selection.classifier.id != "jev-default" or selection.classifier.provider != "typesafe":
-        raise LiveConfigurationError("only jev-default is implemented; other classifiers are catalog candidates")
+    classifier = (selection.classifier.id, selection.classifier.provider)
+    if classifier not in {("jev-default", "typesafe"), ("laya-local", "laya")}:
+        raise LiveConfigurationError(
+            "supported classifiers are jev-default and laya-local; "
+            "other classifiers are catalog candidates"
+        )
+    if selection.classifier.id == "laya-local":
+        endpoint = urlsplit(selection.classifier.endpoint)
+        if (
+            endpoint.scheme not in {"http", "https"}
+            or endpoint.hostname not in {"localhost", "127.0.0.1", "::1"}
+            or endpoint.username
+            or endpoint.password
+            or endpoint.query
+            or endpoint.fragment
+        ):
+            raise LiveConfigurationError("laya-local requires a loopback HTTP endpoint")
     if selection.agent.framework not in {"google-adk", "openai-agents"}:
         raise LiveConfigurationError("unsupported agent framework")
     if selection.model.provider not in {"google", "ollama", "openai"}:
@@ -68,19 +83,19 @@ def validate_live(selection: CatalogSelection) -> None:
 def live_activities(
     selection: CatalogSelection,
     environ: MutableMapping[str, str] = os.environ,
-) -> tuple["JevClassifier", object]:
+) -> tuple["SystemOneClassifier", object]:
     validate_live(selection)
     model_key = environ.get("MODEL_AI_KEY", "").strip()
     classifier_key = environ.get("CLASSIFIER_AI_KEY", "").strip()
-    if (selection.model.provider != "ollama" and not model_key) or not classifier_key:
-        raise LiveConfigurationError(
-            "live worker requires MODEL_AI_KEY and CLASSIFIER_AI_KEY"
-        )
+    if selection.model.provider != "ollama" and not model_key:
+        raise LiveConfigurationError("live worker requires MODEL_AI_KEY")
+    if selection.classifier.id == "jev-default" and not classifier_key:
+        raise LiveConfigurationError("jev-default requires CLASSIFIER_AI_KEY")
     from inference import build_model_activities
 
     return (
-        JevClassifier(
-            classifier_key,
+        SystemOneClassifier(
+            classifier_key or None,
             selection.classifier.endpoint,
             selection.classifier.model,
         ),
@@ -88,10 +103,10 @@ def live_activities(
     )
 
 
-class JevClassifier:
+class SystemOneClassifier:
     def __init__(
         self,
-        api_key: str,
+        api_key: str | None,
         endpoint: str,
         model: str,
         opener: Callable[..., Any] = urlopen,
@@ -114,6 +129,9 @@ class JevClassifier:
                 "no": "It does not affect background-job behavior.",
             },
         }
+        headers = {"Content-Type": "application/json"}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
         request = Request(
             self._endpoint,
             data=json.dumps(
@@ -123,10 +141,7 @@ class JevClassifier:
                     "questions": {"relevant": question},
                 }
             ).encode(),
-            headers={
-                "Authorization": f"Bearer {self._api_key}",
-                "Content-Type": "application/json",
-            },
+            headers=headers,
             method="POST",
         )
         try:
@@ -136,22 +151,24 @@ class JevClassifier:
             if retryable(error.code):
                 raise
             if error.code in {401, 403}:
-                raise LiveAuthenticationError("Jev authentication failed") from error
-            raise LiveSchemaError(f"Jev rejected the request: HTTP {error.code}") from error
+                raise LiveAuthenticationError("classifier authentication failed") from error
+            raise LiveSchemaError(
+                f"System One rejected the request: HTTP {error.code}"
+            ) from error
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
-            raise LiveSchemaError("Jev returned an invalid response") from error
+            raise LiveSchemaError("System One returned an invalid response") from error
 
         if not isinstance(answer, dict):
-            raise LiveSchemaError("Jev returned an invalid response")
+            raise LiveSchemaError("System One returned an invalid response")
 
         choice = answer.get("choice")
         confidence = answer.get("confidence")
         if answer.get("type") != "choice" or choice not in ("yes", "no"):
-            raise LiveSchemaError("Jev returned an invalid choice")
+            raise LiveSchemaError("System One returned an invalid choice")
         if not isinstance(confidence, (int, float)) or not 0 <= confidence <= 1:
-            raise LiveSchemaError("Jev returned an invalid confidence")
+            raise LiveSchemaError("System One returned an invalid confidence")
         return ClassificationDecision(
-            choice == "yes", f"Jev selected {choice} ({confidence:.2f})"
+            choice == "yes", f"System One selected {choice} ({confidence:.2f})"
         )
 
 
