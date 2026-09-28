@@ -46,7 +46,9 @@ func main() {
 	batchCount := flag.Int("count", defaultBatchCount, "number of synthetic tickets to execute in batch mode")
 	batchConcurrency := flag.Int("concurrency", defaultBatchConcurrency, "maximum in-flight workflow executions in batch mode")
 	batchSLA := flag.Duration("batch-sla", defaultBatchSLA, "acknowledgment SLA for every routed ticket in batch mode")
-	confirmLive := flag.Bool("confirm-live", false, "confirm that live-batch may consume real Jev API usage")
+	classifierID := flag.String("classifier-id", mockClassifierID, "classifier: mock, or a classifiers.yaml ID such as jev-default or laya-local")
+	catalogDir := flag.String("catalog-dir", defaultCatalogDir, "directory containing classifiers.yaml")
+	confirmLive := flag.Bool("confirm-live", false, "confirm that live-batch may call a live classifier and consume its API usage")
 	liveSample := flag.String("sample", liveSampleSequential, "live-batch dataset selection: sequential or balanced")
 	showClassifications := flag.Bool("show-classifications", false, "print ordered per-ticket classifications in live-batch mode")
 	inputTokenPrice := flag.Float64("input-token-price-per-million", 0, "optional input-token price per million tokens for illustrative live-batch cost")
@@ -57,14 +59,13 @@ func main() {
 	})
 	slaConfig := SLAConfig{Critical: *criticalSLA, High: *highSLA, Normal: *normalSLA, Low: *lowSLA}
 	batchConfig := BatchConfig{Count: *batchCount, Concurrency: *batchConcurrency, SLA: *batchSLA}
-	providerSetting := configuredProvider()
 	var inputTokenPricePointer *float64
 	if explicitFlags["input-token-price-per-million"] {
 		inputTokenPricePointer = inputTokenPrice
 	}
 	liveBatchConfig := LiveBatchConfig{
 		BatchConfig:               batchConfig,
-		Provider:                  providerSetting,
+		ClassifierID:              *classifierID,
 		CountExplicit:             explicitFlags["count"],
 		ConcurrencyExplicit:       explicitFlags["concurrency"],
 		ConfirmLive:               *confirmLive,
@@ -80,17 +81,17 @@ func main() {
 		}
 	}
 	if *mode == "live-batch" {
-		fmt.Printf("Requested live Jev batch: count=%d concurrency=%d sample=%s task-list=%s\n", *batchCount, *batchConcurrency, *liveSample, *taskList)
+		fmt.Printf("Requested live classifier batch: classifier-id=%s count=%d concurrency=%d sample=%s task-list=%s\n", *classifierID, *batchCount, *batchConcurrency, *liveSample, *taskList)
 		if err := liveBatchConfig.Validate(); err != nil {
 			log.Fatal(err)
 		}
 	}
 
-	provider, classifierActivity, err := configuredClassifier(*mode)
+	selectedClassifier, classifierActivity, err := configuredClassifier(*mode, *classifierID, *catalogDir)
 	if err != nil {
 		log.Fatal(err)
 	}
-	if err := validateLiveTaskList(*mode, provider, *taskList, explicitFlags["task-list"]); err != nil {
+	if err := validateLiveTaskList(*mode, selectedClassifier, *taskList, explicitFlags["task-list"]); err != nil {
 		log.Fatal(err)
 	}
 
@@ -102,7 +103,7 @@ func main() {
 
 	switch *mode {
 	case "worker":
-		if err := runWorker(service, *domain, *taskList, provider, classifierActivity); err != nil {
+		if err := runWorker(service, *domain, *taskList, selectedClassifier, classifierActivity); err != nil {
 			log.Fatal(err)
 		}
 	case "demo":
@@ -122,7 +123,7 @@ func main() {
 		}
 	case "live-demo":
 		cadenceClient := client.NewClient(service, *domain, nil)
-		if err := runLiveDemo(context.Background(), cadenceClient, *taskList, slaConfig); err != nil {
+		if err := runLiveDemo(context.Background(), cadenceClient, *taskList, selectedClassifier, slaConfig); err != nil {
 			log.Fatal(err)
 		}
 	case "batch":
@@ -141,7 +142,7 @@ func main() {
 	}
 }
 
-func runWorker(service workflowserviceclient.Interface, domain, taskList, provider string, classifierActivity interface{}) error {
+func runWorker(service workflowserviceclient.Interface, domain, taskList, classifierID string, classifierActivity interface{}) error {
 	w, err := worker.NewV2(service, domain, taskList, worker.Options{})
 	if err != nil {
 		return fmt.Errorf("create worker: %w", err)
@@ -154,7 +155,7 @@ func runWorker(service workflowserviceclient.Interface, domain, taskList, provid
 	w.RegisterWorkflow(ContentWorkflow)
 	w.RegisterActivityWithOptions(classifierActivity, activity.RegisterOptions{Name: classificationActivityName()})
 
-	log.Printf("ticket-routing worker polling domain=%s task-list=%s AI_PROVIDER=%s", domain, taskList, provider)
+	log.Printf("ticket-routing worker polling domain=%s task-list=%s classifier-id=%s", domain, taskList, classifierID)
 	return w.Run()
 }
 
@@ -169,14 +170,14 @@ func runDemo(ctx context.Context, cadenceClient client.Client, taskList string, 
 	return runTickets(ctx, cadenceClient, taskList, "mock", tickets)
 }
 
-func runLiveDemo(ctx context.Context, cadenceClient client.Client, taskList string, slaConfig SLAConfig) error {
-	ticketID := "live-jev-" + time.Now().UTC().Format("20060102T150405.000000000")
+func runLiveDemo(ctx context.Context, cadenceClient client.Client, taskList, classifierID string, slaConfig SLAConfig) error {
+	ticketID := "live-" + classifierID + "-" + time.Now().UTC().Format("20060102T150405.000000000")
 	tickets := []Ticket{{
 		TicketID: ticketID,
 		Message:  "I was charged twice for my StreamWave subscription and need help before my next billing date.",
 		SLA:      slaConfig,
 	}}
-	return runTickets(ctx, cadenceClient, taskList, "real Jev", tickets)
+	return runTickets(ctx, cadenceClient, taskList, "live "+classifierID, tickets)
 }
 
 func startManualTicket(ctx context.Context, cadenceClient client.Client, taskList, ticketID string, sla time.Duration, output io.Writer) error {
@@ -309,46 +310,49 @@ func ticketResultSummary(result TicketResult) string {
 		result.TicketID, department, employeeID, result.Status, slaMetLabel(result.Status, result.SLAMet))
 }
 
-func configuredClassifier(mode string) (string, interface{}, error) {
-	provider := configuredProvider()
+// configuredClassifier returns the selected classifier ID and, for the worker,
+// the Activity implementation to register. Starters never construct a live client.
+func configuredClassifier(mode, classifierID, catalogDir string) (string, interface{}, error) {
+	classifierID = strings.TrimSpace(classifierID)
+	if classifierID == "" {
+		classifierID = mockClassifierID
+	}
+	live := classifierID != mockClassifierID
 
-	if mode == "live-demo" && provider != "jev" {
-		return "", nil, fmt.Errorf("live-demo requires explicit AI_PROVIDER=jev opt-in")
+	if (mode == "live-demo" || mode == "live-batch") && !live {
+		return "", nil, fmt.Errorf("%s requires an explicit live -classifier-id such as jev-default or laya-local", mode)
 	}
-	if mode == "live-batch" && provider != "jev" {
-		return "", nil, fmt.Errorf("live-batch requires explicit AI_PROVIDER=jev opt-in")
+	if (mode == "demo" || mode == "start-ticket" || mode == "batch") && live {
+		return "", nil, fmt.Errorf("%s is mock-only; use live-demo for one ticket with a live classifier", mode)
 	}
-	if (mode == "demo" || mode == "start-ticket" || mode == "batch") && provider != "mock" {
-		return "", nil, fmt.Errorf("%s is mock-only; use live-demo for one explicitly opted-in Jev ticket", mode)
+	if !live {
+		return classifierID, ClassifyTicket, nil
 	}
 
-	switch provider {
-	case "mock":
-		return provider, ClassifyTicket, nil
-	case "jev":
-		if mode != "worker" {
-			return provider, nil, nil
-		}
-		classifier, err := newJevClassifier(os.Getenv("TYPESAFE_API_KEY"), jevEndpoint, jevModel, &http.Client{Timeout: 20 * time.Second})
-		if err != nil {
-			return "", nil, err
-		}
-		return provider, classifier.ClassifyTicket, nil
-	default:
-		return "", nil, fmt.Errorf("unsupported AI_PROVIDER %q; use mock or jev", provider)
+	config, err := loadClassifier(catalogDir, classifierID)
+	if err != nil {
+		return "", nil, err
 	}
+	if mode != "worker" {
+		return classifierID, nil, nil
+	}
+
+	apiKey := ""
+	if config.Provider == classifierProviderTypeSafe {
+		apiKey = strings.TrimSpace(os.Getenv("CLASSIFIER_AI_KEY"))
+		if apiKey == "" {
+			return "", nil, fmt.Errorf("classifier %q requires CLASSIFIER_AI_KEY", classifierID)
+		}
+	}
+	classifier, err := newSystemOneClassifier(apiKey, config.Endpoint, config.Model, &http.Client{Timeout: 20 * time.Second})
+	if err != nil {
+		return "", nil, err
+	}
+	return classifierID, classifier.ClassifyTicket, nil
 }
 
-func configuredProvider() string {
-	provider := strings.ToLower(strings.TrimSpace(os.Getenv("AI_PROVIDER")))
-	if provider == "" {
-		return "mock"
-	}
-	return provider
-}
-
-func validateLiveTaskList(mode, provider, taskList string, taskListExplicit bool) error {
-	if provider == "jev" && (mode == "worker" || mode == "live-demo") {
+func validateLiveTaskList(mode, classifierID, taskList string, taskListExplicit bool) error {
+	if classifierID != mockClassifierID && (mode == "worker" || mode == "live-demo") {
 		if !taskListExplicit || strings.TrimSpace(taskList) == "" || taskList == TaskList {
 			return fmt.Errorf("%s requires an explicit non-default -task-list dedicated to live classification", mode)
 		}

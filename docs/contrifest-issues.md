@@ -1,10 +1,25 @@
 # Contribfest sample issues
 
-Each issue is a focused 60-minute contribution to either StreamWave ticket routing or Recurring AI Watch. The list prioritizes problems repeatedly raised in 2025 and 2026 guidance for production AI workflows: bounded retries and cost, idempotency, prompt and identity controls, evaluations, observability, and safe` Workflow evolution.
+Each issue is a focused 60-minute contribution to either StreamWave ticket routing or Recurring AI Watch. The list prioritizes problems repeatedly raised in 2025 and 2026 guidance for production AI workflows: bounded retries and cost, idempotency, prompt and identity controls, evaluations, observability, and safe Workflow evolution.
 
 ## Beginner
 
-### 1. Add local inference readiness checks
+### 1. Add a confidence gate to the Watch classifier
+
+**Sample:** Recurring AI Watch
+
+**Task:** Treat a "yes" below a configurable confidence threshold as not
+relevant, so a near-zero-confidence answer never triggers the model Activity.
+
+**Done when:**
+
+- The threshold defaults to `0.65`, matching the Go ticket router.
+- Low-confidence "yes" answers skip report generation and say why in the reason.
+- Tests cover answers above, at, and below the threshold.
+
+
+
+### 2. Add local inference readiness checks
 
 **Sample:** Recurring AI Watch
 
@@ -19,7 +34,7 @@ without sending an inference request.
 
 
 
-### 2. Show the selected inference configuration in status
+### 3. Show the selected inference configuration in status
 
 **Sample:** Recurring AI Watch
 
@@ -34,7 +49,7 @@ Workflow status Query and CLI output.
 
 
 
-### 3. Stop logging raw ticket messages
+### 4. Stop logging raw ticket messages
 
 **Sample:** StreamWave ticket routing
 
@@ -49,7 +64,7 @@ such as ticket ID and message length.
 
 
 
-### 4. Reject oversized classifier input
+### 5. Reject oversized classifier input
 
 **Sample:** StreamWave ticket routing
 
@@ -64,7 +79,7 @@ classification.
 
 
 
-### 5. Complete provider error classification
+### 6. Complete provider error classification
 
 **Sample:** StreamWave ticket routing
 
@@ -83,7 +98,7 @@ responses consistently in the Jev Activity.
 
 
 
-### 6. Stop recurring retries after a cycle-level budget
+### 7. Stop recurring retries after a cycle-level budget
 
 **Sample:** Recurring AI Watch
 
@@ -98,7 +113,7 @@ after a configurable limit.
 
 
 
-### 7. Treat release notes as untrusted prompt data
+### 8. Treat release notes as untrusted prompt data
 
 **Sample:** Recurring AI Watch
 
@@ -113,7 +128,7 @@ instructions found inside it.
 
 
 
-### 8. Add an offline routing evaluation report
+### 9. Add an offline routing evaluation report
 
 **Sample:** StreamWave ticket routing
 
@@ -128,7 +143,7 @@ report coverage, abstentions, and per-field agreement.
 
 
 
-### 9. Escalate unroutable tickets to a review Workflow
+### 10. Escalate unroutable tickets to a review Workflow
 
 **Sample:** StreamWave ticket routing
 
@@ -143,7 +158,7 @@ Workflow that waits for a routing Signal or expires.
 
 
 
-### 10. Emit structured inference observations
+### 11. Emit structured inference observations
 
 **Sample:** Recurring AI Watch
 
@@ -162,7 +177,7 @@ field names aligned with OpenTelemetry GenAI conventions where applicable.
 
 
 
-### 11. Bind Workflow inference selection to the Worker
+### 12. Bind Workflow inference selection to the Worker
 
 **Sample:** Recurring AI Watch
 
@@ -177,7 +192,7 @@ make Activities reject a Worker whose configuration does not match.
 
 
 
-### 12. Add stable operation IDs to provider Activities
+### 13. Add stable operation IDs to provider Activities
 
 **Sample:** Recurring AI Watch
 
@@ -192,7 +207,7 @@ operation type for classifier and report calls.
 
 
 
-### 13. Load the Go classifier from the shared catalog
+### 14. Load the Go classifier from the shared catalog
 
 **Sample:** StreamWave ticket routing
 
@@ -207,7 +222,7 @@ from `classifiers.yaml`.
 
 
 
-### 14. Make acknowledgment tokens run-specific
+### 15. Make acknowledgment tokens run-specific
 
 **Sample:** StreamWave ticket routing
 
@@ -222,7 +237,7 @@ command cannot acknowledge a later assignment with reused business IDs.
 
 
 
-### 15. Add a versioned routing change with replay coverage
+### 16. Add a versioned routing change with replay coverage
 
 **Sample:** StreamWave ticket routing
 

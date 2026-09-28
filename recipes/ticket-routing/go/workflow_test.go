@@ -528,8 +528,6 @@ func TestMockClassifierProducesTypedDecision(t *testing.T) {
 }
 
 func TestJevClassifierSendsAndParsesDocumentedContract(t *testing.T) {
-	require.Equal(t, "https://api.typesafe.ai/v1/systemone", jevEndpoint)
-
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		require.Equal(t, "/v1/systemone", request.URL.Path)
 		require.Equal(t, http.MethodPost, request.Method)
@@ -539,7 +537,7 @@ func TestJevClassifierSendsAndParsesDocumentedContract(t *testing.T) {
 		var payload jevRequest
 		require.NoError(t, json.NewDecoder(request.Body).Decode(&payload))
 		require.Equal(t, "A synthetic billing request.", payload.State)
-		require.Equal(t, jevModel, payload.Model)
+		require.Equal(t, testJevModel, payload.Model)
 		require.Len(t, payload.Questions, 3)
 		requireChoiceQuestion(t, payload.Questions["department"], []string{"billing", "technical", "account", "content"})
 		requireChoiceQuestion(t, payload.Questions["priority"], []string{"low", "normal", "high", "critical"})
@@ -551,7 +549,7 @@ func TestJevClassifierSendsAndParsesDocumentedContract(t *testing.T) {
 	}))
 	defer server.Close()
 
-	classifier, err := newJevClassifier("test-api-key", server.URL+"/v1/systemone", jevModel, server.Client())
+	classifier, err := newSystemOneClassifier("test-api-key", server.URL+"/v1/systemone", testJevModel, server.Client())
 	require.NoError(t, err)
 	decision, err := classifier.ClassifyTicket(t.Context(), Ticket{TicketID: "jev-001", Message: "A synthetic billing request."})
 
@@ -572,72 +570,138 @@ func TestJevClassifierSendsAndParsesDocumentedContract(t *testing.T) {
 	require.False(t, decision.ComplexityUncertain)
 }
 
-func TestJevClassifierRequiresAPIKey(t *testing.T) {
-	_, err := newJevClassifier("", jevEndpoint, jevModel, nil)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "TYPESAFE_API_KEY")
+func TestLayaClassifierSendsNoAuthorizationHeader(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		require.Empty(t, request.Header.Get("Authorization"))
+		var payload jevRequest
+		require.NoError(t, json.NewDecoder(request.Body).Decode(&payload))
+		require.Equal(t, "convaiinnovations/laya", payload.Model)
+		_, err := io.WriteString(writer, validJevResponse)
+		require.NoError(t, err)
+	}))
+	defer server.Close()
 
-	t.Setenv("AI_PROVIDER", "jev")
-	t.Setenv("TYPESAFE_API_KEY", "")
-	_, _, err = configuredClassifier("worker")
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "TYPESAFE_API_KEY")
-}
-
-func TestLiveDemoRequiresExplicitJevOptIn(t *testing.T) {
-	t.Setenv("AI_PROVIDER", "")
-	_, _, err := configuredClassifier("live-demo")
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "AI_PROVIDER=jev")
-}
-
-func TestLiveBatchRequiresExplicitJevOptInWithoutCallingProvider(t *testing.T) {
-	t.Setenv("AI_PROVIDER", "")
-	_, _, err := configuredClassifier("live-batch")
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "AI_PROVIDER=jev")
-
-	t.Setenv("AI_PROVIDER", "jev")
-	provider, classifier, err := configuredClassifier("live-batch")
+	classifier, err := newSystemOneClassifier("", server.URL, "convaiinnovations/laya", server.Client())
 	require.NoError(t, err)
-	require.Equal(t, "jev", provider)
-	require.Nil(t, classifier, "the starter must not construct or invoke a Jev HTTP client")
-}
-
-func TestJevModesRequireDedicatedExplicitTaskList(t *testing.T) {
-	require.Error(t, validateLiveTaskList("worker", "jev", TaskList, true))
-	require.Error(t, validateLiveTaskList("worker", "jev", "ticket-routing-jev", false))
-	require.NoError(t, validateLiveTaskList("worker", "jev", "ticket-routing-jev", true))
-	require.Error(t, validateLiveTaskList("live-demo", "jev", TaskList, true))
-	require.NoError(t, validateLiveTaskList("live-demo", "jev", "ticket-routing-jev", true))
-	require.NoError(t, validateLiveTaskList("worker", "mock", TaskList, false))
-}
-
-func TestFourTicketDemoRejectsJevProvider(t *testing.T) {
-	t.Setenv("AI_PROVIDER", "jev")
-	_, _, err := configuredClassifier("demo")
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "mock-only")
-}
-
-func TestManualTicketStarterRejectsJevProvider(t *testing.T) {
-	t.Setenv("AI_PROVIDER", "jev")
-	_, _, err := configuredClassifier("start-ticket")
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "mock-only")
-}
-
-func TestMockBatchRemainsMockOnly(t *testing.T) {
-	t.Setenv("AI_PROVIDER", "mock")
-	provider, classifier, err := configuredClassifier("batch")
+	decision, err := classifier.ClassifyTicket(t.Context(), Ticket{TicketID: "laya-001", Message: "A synthetic billing request."})
 	require.NoError(t, err)
-	require.Equal(t, "mock", provider)
+	require.Equal(t, DepartmentBilling, decision.Department)
+}
+
+func TestConfiguredClassifierRequiresKeyOnlyForTypeSafe(t *testing.T) {
+	catalogDir := writeTestCatalog(t, testCatalog)
+
+	t.Setenv("CLASSIFIER_AI_KEY", "")
+	_, _, err := configuredClassifier("worker", "jev-default", catalogDir)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "CLASSIFIER_AI_KEY")
+
+	selected, classifier, err := configuredClassifier("worker", "laya-local", catalogDir)
+	require.NoError(t, err)
+	require.Equal(t, "laya-local", selected)
 	require.NotNil(t, classifier)
 
-	t.Setenv("AI_PROVIDER", "jev")
-	_, _, err = configuredClassifier("batch")
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "mock-only")
+	t.Setenv("CLASSIFIER_AI_KEY", "test-api-key")
+	_, classifier, err = configuredClassifier("worker", "jev-default", catalogDir)
+	require.NoError(t, err)
+	require.NotNil(t, classifier)
+}
+
+func TestLiveStartersRequireExplicitClassifierWithoutCallingProvider(t *testing.T) {
+	catalogDir := writeTestCatalog(t, testCatalog)
+	for _, mode := range []string{"live-demo", "live-batch"} {
+		_, _, err := configuredClassifier(mode, mockClassifierID, catalogDir)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "-classifier-id")
+
+		selected, classifier, err := configuredClassifier(mode, "jev-default", catalogDir)
+		require.NoError(t, err)
+		require.Equal(t, "jev-default", selected)
+		require.Nil(t, classifier, "the starter must not construct or invoke a live HTTP client")
+	}
+}
+
+func TestLiveClassifierModesRequireDedicatedExplicitTaskList(t *testing.T) {
+	require.Error(t, validateLiveTaskList("worker", "jev-default", TaskList, true))
+	require.Error(t, validateLiveTaskList("worker", "laya-local", "ticket-routing-laya", false))
+	require.NoError(t, validateLiveTaskList("worker", "laya-local", "ticket-routing-laya", true))
+	require.Error(t, validateLiveTaskList("live-demo", "jev-default", TaskList, true))
+	require.NoError(t, validateLiveTaskList("live-demo", "jev-default", "ticket-routing-jev", true))
+	require.NoError(t, validateLiveTaskList("worker", mockClassifierID, TaskList, false))
+}
+
+func TestMockOnlyModesRejectLiveClassifiers(t *testing.T) {
+	catalogDir := writeTestCatalog(t, testCatalog)
+	for _, mode := range []string{"demo", "start-ticket", "batch"} {
+		selected, classifier, err := configuredClassifier(mode, mockClassifierID, catalogDir)
+		require.NoError(t, err)
+		require.Equal(t, mockClassifierID, selected)
+		require.NotNil(t, classifier)
+
+		_, _, err = configuredClassifier(mode, "laya-local", catalogDir)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "mock-only")
+	}
+}
+
+func TestLoadClassifierFromRepositoryCatalog(t *testing.T) {
+	jev, err := loadClassifier(defaultCatalogDir, "jev-default")
+	require.NoError(t, err)
+	require.Equal(t, classifierProviderTypeSafe, jev.Provider)
+
+	laya, err := loadClassifier(defaultCatalogDir, "laya-local")
+	require.NoError(t, err)
+	require.Equal(t, classifierProviderLaya, laya.Provider)
+	require.Equal(t, "convaiinnovations/laya", laya.Model)
+}
+
+func TestLoadClassifierRejectsInvalidCatalogs(t *testing.T) {
+	tests := []struct {
+		name     string
+		catalog  string
+		id       string
+		contains string
+	}{
+		{name: "unknown ID", catalog: testCatalog, id: "missing", contains: "unknown classifier ID"},
+		{name: "candidate provider", catalog: testCatalog, id: "kev-local", contains: "catalog candidates"},
+		{name: "missing field", catalog: "classifiers:\n  - id: laya-local\n    provider: laya\n    model: m\n", id: "laya-local", contains: `missing "endpoint"`},
+		{name: "duplicate ID", catalog: testCatalog + "  - id: laya-local\n    provider: laya\n    model: m\n    endpoint: http://localhost:8008/v1/systemone\n", id: "laya-local", contains: "duplicate"},
+		{name: "remote Laya", catalog: "classifiers:\n  - id: laya-remote\n    provider: laya\n    model: m\n    endpoint: https://laya.example/v1/systemone\n", id: "laya-remote", contains: "loopback"},
+		{name: "plain HTTP TypeSafe", catalog: "classifiers:\n  - id: jev-http\n    provider: typesafe\n    model: m\n    endpoint: http://api.typesafe.ai/v1/systemone\n", id: "jev-http", contains: "HTTPS"},
+		{name: "endpoint credentials", catalog: "classifiers:\n  - id: laya-creds\n    provider: laya\n    model: m\n    endpoint: http://user:pass@localhost:8008/v1/systemone\n", id: "laya-creds", contains: "without credentials"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := loadClassifier(writeTestCatalog(t, test.catalog), test.id)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), test.contains)
+		})
+	}
+}
+
+const testJevModel = "jev-latest"
+
+const testCatalog = `classifiers:
+  - id: jev-default
+    provider: typesafe
+    model: jev-latest
+    endpoint: https://api.typesafe.ai/v1/systemone
+  - id: laya-local
+    provider: laya
+    model: convaiinnovations/laya
+    endpoint: http://localhost:8008/v1/systemone
+  - id: kev-local
+    provider: kev
+    model: kev-latest
+    endpoint: http://localhost:8008/v1/systemone
+`
+
+func writeTestCatalog(t *testing.T, contents string) string {
+	t.Helper()
+	directory := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(directory, "classifiers.yaml"), []byte(contents), 0o600))
+	return directory
 }
 
 func TestJevClassifierRecordsTimingWhenUsageIsMissing(t *testing.T) {
@@ -655,7 +719,7 @@ func TestJevClassifierRecordsTimingWhenUsageIsMissing(t *testing.T) {
 	}))
 	defer server.Close()
 
-	classifier, err := newJevClassifier("test-api-key", server.URL, jevModel, server.Client())
+	classifier, err := newSystemOneClassifier("test-api-key", server.URL, testJevModel, server.Client())
 	require.NoError(t, err)
 	decision, err := classifier.ClassifyTicket(t.Context(), Ticket{TicketID: "missing-usage-001", Message: "Synthetic request."})
 	require.NoError(t, err)
@@ -673,7 +737,7 @@ func TestJevClassifierMarksInformationalLowConfidenceAsUncertain(t *testing.T) {
 	}))
 	defer server.Close()
 
-	classifier, err := newJevClassifier("test-api-key", server.URL, jevModel, server.Client())
+	classifier, err := newSystemOneClassifier("test-api-key", server.URL, testJevModel, server.Client())
 	require.NoError(t, err)
 	decision, err := classifier.ClassifyTicket(t.Context(), Ticket{TicketID: "uncertain-002", Message: "Synthetic request."})
 	require.NoError(t, err)
@@ -704,7 +768,7 @@ func TestJevClassifierHTTPErrorRetryClassification(t *testing.T) {
 			}))
 			defer server.Close()
 
-			classifier, err := newJevClassifier("test-api-key", server.URL, jevModel, server.Client())
+			classifier, err := newSystemOneClassifier("test-api-key", server.URL, testJevModel, server.Client())
 			require.NoError(t, err)
 			_, err = classifier.ClassifyTicket(t.Context(), Ticket{TicketID: "error-001", Message: "Synthetic request."})
 			require.Error(t, err)
@@ -725,7 +789,7 @@ func TestJevClassifierTreatsNetworkFailureAsRetryable(t *testing.T) {
 	endpoint := server.URL
 	server.Close()
 
-	classifier, err := newJevClassifier("test-api-key", endpoint, jevModel, &http.Client{Timeout: 100 * time.Millisecond})
+	classifier, err := newSystemOneClassifier("test-api-key", endpoint, testJevModel, &http.Client{Timeout: 100 * time.Millisecond})
 	require.NoError(t, err)
 	_, err = classifier.ClassifyTicket(t.Context(), Ticket{TicketID: "network-001", Message: "Synthetic request."})
 	require.Error(t, err)
@@ -755,7 +819,7 @@ func TestJevClassifierRejectsMalformedSuccessfulResponses(t *testing.T) {
 			}))
 			defer server.Close()
 
-			classifier, err := newJevClassifier("test-api-key", server.URL, jevModel, server.Client())
+			classifier, err := newSystemOneClassifier("test-api-key", server.URL, testJevModel, server.Client())
 			require.NoError(t, err)
 			_, err = classifier.ClassifyTicket(t.Context(), Ticket{TicketID: "malformed-001", Message: "Synthetic request."})
 			require.Error(t, err)

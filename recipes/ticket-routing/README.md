@@ -2,10 +2,12 @@
 
 This recipe uses Cadence to route fictional customer-support tickets for StreamWave, a fictional streaming service. A classifier assigns a department, priority, and complexity; the parent Workflow then starts the matching department Child Workflow, which assigns a fixed fictional employee.
 
-The recipe supports two classifier modes:
+Select the classifier with `-classifier-id`:
 
 - `mock` is the default. It uses repeatable keyword rules, makes no network calls, and needs no credentials. Its confidence values are examples. They do not measure model quality, accuracy, token usage, or cost.
-- `jev` is an explicit opt-in for TypeSafe System One. It sends one request containing three independent Choice questions and records the returned choices, probability distributions, confidence values, model identifier, and token usage.
+- Any implemented entry in the repository-root [`classifiers.yaml`](../../classifiers.yaml) is an explicit live opt-in. `jev-default` calls TypeSafe System One and needs `CLASSIFIER_AI_KEY`. `laya-local` calls a local [Laya](../../README.md#local-ai-services) server with no key. Both receive one request containing three independent Choice questions and return choices, probability distributions, confidence values, a model identifier, and token usage.
+
+`-catalog-dir` points at the directory containing `classifiers.yaml` and defaults to the repository root.
 
 ## Architecture
 
@@ -13,7 +15,7 @@ Cadence Web provides a Custom Workflow Control (CWC) for acknowledging an assign
 
 ```text
 TicketIntakeWorkflow
-  → ClassifyTicket Activity (mock or real Jev)
+  → ClassifyTicket Activity (mock, Jev, or local Laya)
   → Billing | Technical | Account | Content Child Workflow
   → fixed fictional employee assignment
   → `ticket-assignment` CWC query in Cadence Web
@@ -50,10 +52,9 @@ From the repository root, change into the Go module directory in two terminals:
 cd recipes/ticket-routing/go
 ```
 
-The mock is selected when `AI_PROVIDER` is unset or set to `mock`. Start the worker in the first terminal:
+The mock is selected when `-classifier-id` is omitted or set to `mock`. Start the worker in the first terminal:
 
 ```bash
-export AI_PROVIDER=mock
 go run . -mode worker
 ```
 
@@ -76,14 +77,12 @@ cd recipes/ticket-routing/go
 In terminal 1, start the worker with mock classification:
 
 ```bash
-export AI_PROVIDER=mock
 go run . -mode worker
 ```
 
 In terminal 2, start one synthetic billing ticket with a two-minute acknowledgment SLA:
 
 ```bash
-export AI_PROVIDER=mock
 go run . -mode start-ticket -ticket-id manual-billing-001 -manual-sla 2m
 ```
 
@@ -111,7 +110,6 @@ Use two terminals. In terminal 1, start the mock worker:
 
 ```bash
 cd recipes/ticket-routing/go
-export AI_PROVIDER=mock
 go run . -mode worker
 ```
 
@@ -119,7 +117,6 @@ In terminal 2, start one ticket with enough time to use Cadence Web:
 
 ```bash
 cd recipes/ticket-routing/go
-export AI_PROVIDER=mock
 go run . -mode start-ticket -ticket-id cwc-billing-001 -manual-sla 2m
 ```
 
@@ -148,37 +145,48 @@ go run . -mode start-ticket -ticket-id cwc-timeout-001 -manual-sla 20s
 
 Terminal 2 reports `Business status: SLA_TIMEOUT` and `SLA met: NO`. A timeout still completes the workflow execution successfully. CWC rendering and clicking require live Cadence Web. Automated tests cover the response envelope, Markdown action, payload, shared Signal path, terminal no-action state, and workflow results. Browser rendering requires a manual check.
 
-## Run one ticket with real Jev
+## Run one ticket with a live classifier
 
-Live inference consumes TypeSafe API usage. Start with the single synthetic ticket provided by `live-demo`; it never submits the four-ticket mock demonstration automatically.
+Start with the single synthetic ticket provided by `live-demo`; it never submits the four-ticket mock demonstration automatically. Use the same `-classifier-id` and a dedicated non-default `-task-list` for the worker and the starter.
 
-In the worker terminal, set temporary process environment variables and start the worker:
+### Fully local with Laya
 
-```bash
-cd recipes/ticket-routing/go
-export AI_PROVIDER=jev
-export TYPESAFE_API_KEY='paste-your-personal-key-here'
-go run . -mode worker -task-list ticket-routing-jev
-```
-
-The worker fails during startup if `TYPESAFE_API_KEY` is missing. The key is read only by the worker and is not printed, written to files, or placed in workflow history.
-
-In a second terminal, explicitly opt into the one-ticket live starter. This terminal does not need the API key:
+No API key or usage cost. Start Laya on port 8008 and warm it up first; see [Local AI services](../../README.md#local-ai-services).
 
 ```bash
 cd recipes/ticket-routing/go
-export AI_PROVIDER=jev
-go run . -mode live-demo -task-list ticket-routing-jev
+go run . -mode worker -classifier-id laya-local -task-list ticket-routing-laya
 ```
 
-The output identifies the result as real Jev classification and displays department, priority, complexity, all three confidence values, the returned model, reported token usage, selected Child Workflow, fictional employee, business status, and whether the SLA was met.
-
-Remove the temporary worker-terminal variables when finished:
+In a second terminal:
 
 ```bash
-unset AI_PROVIDER
-unset TYPESAFE_API_KEY
+cd recipes/ticket-routing/go
+go run . -mode live-demo -classifier-id laya-local -task-list ticket-routing-laya
 ```
+
+### TypeSafe Jev
+
+Live inference consumes TypeSafe API usage. In the worker terminal, set a temporary key and start the worker:
+
+```bash
+cd recipes/ticket-routing/go
+export CLASSIFIER_AI_KEY='paste-your-personal-key-here'
+go run . -mode worker -classifier-id jev-default -task-list ticket-routing-jev
+```
+
+The worker fails during startup if `CLASSIFIER_AI_KEY` is missing. The key is read only by the worker and is not printed, written to files, or placed in workflow history.
+
+In a second terminal, which does not need the key:
+
+```bash
+cd recipes/ticket-routing/go
+go run . -mode live-demo -classifier-id jev-default -task-list ticket-routing-jev
+```
+
+Remove the key when finished with `unset CLASSIFIER_AI_KEY`.
+
+The output identifies the selected classifier and displays department, priority, complexity, all three confidence values, the returned model, reported token usage, selected Child Workflow, fictional employee, business status, and whether the SLA was met.
 
 ## First Live Jev Test
 
@@ -203,11 +211,11 @@ The Billing Child Workflow completed successfully, with an observed duration of 
 
 ## Reliability and result interpretation
 
-The Jev HTTP call has a finite client timeout and runs inside an Activity with bounded exponential-backoff retries. Network failures, HTTP `429`, HTTP `529`, and retryable `5xx` responses can cause another Activity attempt. Authentication failures, request-schema failures, other client errors, and malformed successful responses are nonretryable.
+The live classifier HTTP call has a finite client timeout and runs inside an Activity with bounded exponential-backoff retries. Network failures, HTTP `429`, HTTP `529`, and retryable `5xx` responses can cause another Activity attempt. Authentication failures, request-schema failures, other client errors, and malformed successful responses are nonretryable.
 
-A failed or timed-out Activity attempt may have reached Jev and can consume additional API usage when Cadence retries it. Only a successfully completed Activity result recorded in workflow history is reused without another inference request during replay.
+A failed or timed-out Activity attempt may have reached the classifier and can consume additional API usage when Cadence retries it. Only a successfully completed Activity result recorded in workflow history is reused without another inference request during replay.
 
-`UNROUTABLE` is a successful business result. Jev returned a response, but the department label was unsupported or its confidence was below `0.65`, so no department Child Workflow started. A workflow execution fails when classification cannot produce a valid result because of authentication, HTTP, timeout, or malformed-response errors. Low-confidence priority or complexity values remain informational and are marked uncertain instead of failing the Activity.
+`UNROUTABLE` is a successful business result. The classifier returned a response, but the department label was unsupported or its confidence was below `0.65`, so no department Child Workflow started. A workflow execution fails when classification cannot produce a valid result because of authentication, HTTP, timeout, or malformed-response errors. Low-confidence priority or complexity values remain informational and are marked uncertain instead of failing the Activity.
 
 For a routed ticket, `ACKNOWLEDGED` means the Child Workflow received a valid matching Signal before its SLA timer fired and returns `sla_met: true`. `SLA_TIMEOUT` means the durable timer won and returns `sla_met: false`, after which the workflow completes without reassignment or escalation. Both are completed workflow executions. If a Signal and timer are both ready on the same Workflow task, timeout wins deterministically.
 
@@ -233,7 +241,6 @@ Start the mock worker in one terminal, from the repository root:
 
 ```bash
 cd recipes/ticket-routing/go
-export AI_PROVIDER=mock
 go run . -mode worker
 ```
 
@@ -253,44 +260,41 @@ go run . -mode batch -count 1000 -concurrency 25 -batch-sla 1s
 
 No acknowledgment Signals are sent in batch mode. Routed tickets therefore complete with `SLA_TIMEOUT`; workflow-engine failures are counted separately. The terminal summary reports submitted, completed, failed, `UNROUTABLE`, `ACKNOWLEDGED`, and `SLA_TIMEOUT` totals. It also reports department totals, peak in-flight executions, wall-clock duration, per-execution client wait times, and completed workflows per second. Every failed execution includes its workflow ID, ticket ID, start time, elapsed time, and Cadence error. The one-second business SLA does not impose a one-second workflow execution timeout. Bounded parent and Child Workflow timeouts include scheduling and execution overhead so delayed workflow tasks can still process the durable SLA timer. Use this batch to try the flow. It does not measure performance, classification accuracy, provider cost, or latency.
 
-## Explicit live Jev batch
+## Explicit live classifier batch
 
-`live-batch` reuses the same bounded worker pool and synthetic dataset, but classification runs through the real Jev Activity. It requires `AI_PROVIDER=jev`, explicit `-count` and `-concurrency` flags, a dedicated non-default task list, and `-confirm-live`. One invocation is limited in code to 10 tickets and five concurrent workflows. The mock `batch` mode remains mock-only and retains its existing defaults.
+`live-batch` reuses the same bounded worker pool and synthetic dataset, but classification runs through the selected live classifier Activity. It requires a live `-classifier-id`, explicit `-count` and `-concurrency` flags, a dedicated non-default task list, and `-confirm-live`. One invocation is limited in code to 10 tickets and five concurrent workflows. The mock `batch` mode remains mock-only and retains its existing defaults.
 
-Start the live worker in terminal 1. The API key stays in this worker process and is sent only in the authorized Jev HTTP request. Public command examples use Bash:
+Start the live worker in terminal 1. For `jev-default`, the API key stays in this worker process and is sent only in the authorized HTTP request. For a keyless local run, use `-classifier-id laya-local -task-list ticket-routing-laya` in both terminals instead. Public command examples use Bash:
 
 ```bash
 cd recipes/ticket-routing/go
-export AI_PROVIDER=jev
-export TYPESAFE_API_KEY='paste-your-personal-key-here'
-go run . -mode worker -task-list ticket-routing-jev
+export CLASSIFIER_AI_KEY='paste-your-personal-key-here'
+go run . -mode worker -classifier-id jev-default -task-list ticket-routing-jev
 ```
 
 For the first controlled live test, start three tickets at concurrency one in terminal 2:
 
 ```bash
 cd recipes/ticket-routing/go
-export AI_PROVIDER=jev
-go run . -mode live-batch -count 3 -concurrency 1 -batch-sla 1s -task-list ticket-routing-jev -confirm-live
+go run . -mode live-batch -classifier-id jev-default -count 3 -concurrency 1 -batch-sla 1s -task-list ticket-routing-jev -confirm-live
 ```
 
-Dataset selection is sequential by default, preserving file order. Because the fixture is grouped by provisional department label, use `-sample balanced` for a small representative live run. Balanced selection deterministically takes the first unused fixture for billing, technical, account, and content, in that order, then repeats that department order if more tickets are requested. The provisional labels are used only to choose fixture records; they are not included in the workflow input, sent to Jev, used as routing instructions, or treated as validated ground truth.
+Dataset selection is sequential by default, preserving file order. Because the fixture is grouped by provisional department label, use `-sample balanced` for a small representative live run. Balanced selection deterministically takes the first unused fixture for billing, technical, account, and content, in that order, then repeats that department order if more tickets are requested. The provisional labels are used only to choose fixture records; they are not included in the workflow input, sent to the classifier, used as routing instructions, or treated as validated ground truth.
 
 For one fixture from each provisional department group and an ordered classification report:
 
 ```bash
 cd recipes/ticket-routing/go
-export AI_PROVIDER=jev
-go run . -mode live-batch -count 4 -concurrency 1 -batch-sla 1s -task-list ticket-routing-jev -sample balanced -show-classifications -confirm-live
+go run . -mode live-batch -classifier-id jev-default -count 4 -concurrency 1 -batch-sla 1s -task-list ticket-routing-jev -sample balanced -show-classifications -confirm-live
 ```
 
-`-show-classifications` prints completed tickets in dataset submission order with the classified department, priority, complexity, their confidences, model, business outcome, and Jev request/response latency. Technical failures show only the ticket ID and failure status. It never prints API keys or full ticket messages. Without the flag, the existing live summary is unchanged.
+`-show-classifications` prints completed tickets in dataset submission order with the classified department, priority, complexity, their confidences, model, business outcome, and classifier request/response latency. Technical failures show only the ticket ID and failure status. It never prints API keys or full ticket messages. Without the flag, the existing live summary is unchanged.
 
 The optional `-input-token-price-per-million` flag accepts a user-supplied input-token price for an illustrative successful-response estimate. For example, append `-input-token-price-per-million 0.042` only after checking the price you intend to use. No price is built into the sample.
 
 The live report keeps three measurements distinct:
 
-- **Jev HTTP inference latency** measures the successful HTTP attempt inside the classification Activity, including response receipt and parsing.
+- **Classifier HTTP inference latency** measures the successful HTTP attempt inside the classification Activity, including response receipt and parsing.
 - **Per-ticket end-to-end client wait** runs from client submission through terminal parent Workflow completion.
 - **Business SLA duration** is the Child Workflow acknowledgment timer.
 
@@ -320,7 +324,7 @@ This is a small local functional test, not a production throughput benchmark or 
 From `recipes/ticket-routing/go`:
 
 ```bash
-gofmt -w main.go workflow.go workflow_test.go batch.go batch_test.go
+gofmt -w .
 go build ./...
 go test ./...
 ```
@@ -330,13 +334,13 @@ Tests cover:
 - CWC responses, acknowledgment commands, timer cancellation, SLA results, and the signal/deadline race.
 - Parent and Child Workflows, all four routes, `UNROUTABLE` results, acknowledgment, timeout, and invalid or duplicate Signals.
 - Mock classification, dataset validation, repeated fixtures, bounded concurrency, invalid batch configuration, aggregation, and failures.
-- Jev requests, response parsing, token usage, missing keys, HTTP errors, network failures, and malformed responses.
+- Classifier catalog selection and validation, keyless Laya requests, Jev requests, response parsing, token usage, missing keys, HTTP errors, network failures, and malformed responses.
 
 Automated tests never contact Cadence or TypeSafe.
 
 ## Copying the recipe
 
-Start with `go/workflow.go` and `go/main.go`. `workflow.go` contains the Workflow, Activities, typed data, mock rules, and small Jev HTTP implementation; `main.go` selects and registers the Activity implementation. No shared repository package or third-party AI client library is required.
+Start with `go/workflow.go`, `go/main.go`, and `go/catalog.go`. `workflow.go` contains the Workflow, Activities, typed data, mock rules, and small System One HTTP client; `catalog.go` loads `classifiers.yaml`; `main.go` selects and registers the Activity implementation. No shared repository package or third-party AI client library is required.
 
 ## Deferred features
 

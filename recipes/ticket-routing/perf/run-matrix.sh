@@ -8,12 +8,8 @@ if [[ "$PHASE" != "phase-a" && "$PHASE" != "phase-b" ]]; then
   exit 2
 fi
 
-if [[ "${AI_PROVIDER:-mock}" != "mock" ]]; then
-  echo "refusing to run: AI_PROVIDER must be unset or mock" >&2
-  exit 1
-fi
-if [[ -n "${TYPESAFE_API_KEY+x}" ]]; then
-  echo "refusing to run: TYPESAFE_API_KEY must be unset" >&2
+if [[ -n "${CLASSIFIER_AI_KEY+x}" ]]; then
+  echo "refusing to run: CLASSIFIER_AI_KEY must be unset" >&2
   exit 1
 fi
 
@@ -112,8 +108,9 @@ run_batch() {
   echo "running $label: count=$COUNT concurrency=$concurrency"
   (
     cd "$GO_DIR"
-    env -u TYPESAFE_API_KEY AI_PROVIDER=mock "$BINARY" \
+    env -u CLASSIFIER_AI_KEY "$BINARY" \
       -mode batch \
+      -classifier-id mock \
       -task-list "$TASK_LIST" \
       -count "$COUNT" \
       -concurrency "$concurrency" \

@@ -183,7 +183,7 @@ func TestRunBoundedBatchAggregatesFailuresAndResults(t *testing.T) {
 	require.Contains(t, summary.String(), "Peak in-flight executions:")
 }
 
-func TestRunBoundedBatchAggregatesJevMetricsAndMissingUsage(t *testing.T) {
+func TestRunBoundedBatchAggregatesClassifierMetricsAndMissingUsage(t *testing.T) {
 	jobs := []batchJob{
 		{WorkflowID: "workflow-1", Ticket: Ticket{TicketID: "ticket-1"}},
 		{WorkflowID: "workflow-2", Ticket: Ticket{TicketID: "ticket-2"}},
@@ -216,11 +216,11 @@ func TestRunBoundedBatchAggregatesJevMetricsAndMissingUsage(t *testing.T) {
 
 	require.Equal(t, 2, summary.Completed)
 	require.Equal(t, 1, summary.Failed)
-	require.Equal(t, 2, summary.JevResponses)
-	require.Equal(t, 300*time.Millisecond, summary.JevInferenceTotal)
-	require.Equal(t, 100*time.Millisecond, summary.JevInferenceMin)
-	require.Equal(t, 200*time.Millisecond, summary.JevInferenceMax)
-	require.Equal(t, 150*time.Millisecond, summary.averageJevInferenceLatency())
+	require.Equal(t, 2, summary.ClassifierResponses)
+	require.Equal(t, 300*time.Millisecond, summary.ClassifierInferenceTotal)
+	require.Equal(t, 100*time.Millisecond, summary.ClassifierInferenceMin)
+	require.Equal(t, 200*time.Millisecond, summary.ClassifierInferenceMax)
+	require.Equal(t, 150*time.Millisecond, summary.averageClassifierInferenceLatency())
 	require.Equal(t, int64(600), summary.InputTokens)
 	require.Equal(t, int64(120), summary.OutputTokens)
 	require.Equal(t, 1, summary.MissingTokenUsage)
@@ -229,7 +229,7 @@ func TestRunBoundedBatchAggregatesJevMetricsAndMissingUsage(t *testing.T) {
 	price := 0.042
 	report := summary.LiveString(time.Second, &price)
 	require.Contains(t, report, "Technically failed executions: 1")
-	require.Contains(t, report, "Successful Jev HTTP inference latency")
+	require.Contains(t, report, "Successful classifier HTTP inference latency")
 	require.Contains(t, report, "Provider-reported input tokens: 600")
 	require.Contains(t, report, "Successful responses missing complete token usage: 1")
 	require.Contains(t, report, "Illustrative successful-response input cost: $0.00002520")
@@ -278,7 +278,7 @@ func TestClassificationDetailsIncludesFieldsInSubmissionOrder(t *testing.T) {
 	require.Contains(t, report, "department=billing department-confidence=0.99")
 	require.Contains(t, report, "priority=high priority-confidence=0.97")
 	require.Contains(t, report, "complexity=tier2 complexity-confidence=0.88")
-	require.Contains(t, report, "model=jev-test outcome=SLA_TIMEOUT jev-request-response-latency=20ms")
+	require.Contains(t, report, "model=jev-test outcome=SLA_TIMEOUT classifier-request-response-latency=20ms")
 	require.Contains(t, report, "ticket=ticket-3 department=unknown")
 
 	failureLine := "ticket=ticket-2 outcome=TECHNICAL_FAILURE"
@@ -318,7 +318,7 @@ func TestLiveBatchConfigRequiresExplicitBoundedOptIn(t *testing.T) {
 	price := 0.042
 	valid := LiveBatchConfig{
 		BatchConfig:               BatchConfig{Count: 3, Concurrency: 1, SLA: time.Second},
-		Provider:                  "jev",
+		ClassifierID:              "jev-default",
 		CountExplicit:             true,
 		ConcurrencyExplicit:       true,
 		ConfirmLive:               true,
@@ -333,7 +333,8 @@ func TestLiveBatchConfigRequiresExplicitBoundedOptIn(t *testing.T) {
 		name   string
 		mutate func(*LiveBatchConfig)
 	}{
-		{name: "mock provider", mutate: func(config *LiveBatchConfig) { config.Provider = "mock" }},
+		{name: "mock classifier", mutate: func(config *LiveBatchConfig) { config.ClassifierID = mockClassifierID }},
+		{name: "missing classifier", mutate: func(config *LiveBatchConfig) { config.ClassifierID = "" }},
 		{name: "implicit count", mutate: func(config *LiveBatchConfig) { config.CountExplicit = false }},
 		{name: "implicit concurrency", mutate: func(config *LiveBatchConfig) { config.ConcurrencyExplicit = false }},
 		{name: "zero count", mutate: func(config *LiveBatchConfig) { config.Count = 0 }},
@@ -363,7 +364,7 @@ func TestLiveBatchConfigRequiresExplicitBoundedOptIn(t *testing.T) {
 func TestRunLiveBatchRejectsBeforeWorkflowSubmission(t *testing.T) {
 	config := LiveBatchConfig{
 		BatchConfig:         BatchConfig{Count: 3, Concurrency: 1, SLA: time.Second},
-		Provider:            "jev",
+		ClassifierID:        "jev-default",
 		CountExplicit:       true,
 		ConcurrencyExplicit: true,
 		ConfirmLive:         false,
