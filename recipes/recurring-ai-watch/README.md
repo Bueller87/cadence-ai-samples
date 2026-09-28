@@ -6,8 +6,8 @@ release notes. Cadence checks immediately, then every 15 seconds:
 `scripted update → Jev: relevant? → optional impact report → durable wait → repeat`
 
 Mock mode is the default and needs no credentials. The live path supports only
-the framework/model paths below, with TypeSafe Jev classification. There is no real
-release polling or agent tool use.
+the framework/model paths below, with TypeSafe Jev or local Laya classification.
+There is no real release polling or agent tool use.
 
 ## Setup
 
@@ -77,8 +77,9 @@ python main.py stop
 
 Worker/start resolve command-line IDs through `agents.yaml`, `models.yaml`, and
 `classifiers.yaml`; `--catalog-dir` supports a copied sample. The selected entries
-provide endpoints, while credentials remain Worker-local. Only `jev-default` is
-implemented; other classifier catalog entries are candidates and are rejected.
+provide endpoints, while credentials remain Worker-local. The `jev-default` and
+`laya-local` classifiers are implemented; other classifier catalog entries are
+candidates and are rejected.
 Keep mock and live Workers on separate task lists, and use a separate task list
 for each live pair. Use the same IDs and task list for its Worker and `start`.
 
@@ -103,7 +104,9 @@ Chat Completions URLs from their native catalog endpoints. Native Google require
 the official endpoint, and Ollama requires a loopback endpoint. The OpenAI endpoint
 is used as supplied, including its `/v1` path. Ollama needs no `MODEL_AI_KEY`;
 `CLASSIFIER_AI_KEY` is still required for Jev. Start the local Ollama server and
-make `llama3.2:latest` available before starting either Ollama Worker.
+make `llama3.2:latest` available before starting either Ollama Worker. The
+`laya-local` classifier needs no key. See [Local AI services](../../README.md#local-ai-services)
+for Laya and Ollama installation and warm-up commands.
 
 The selected framework, provider, and model name travel with the Workflow across
 Continue-As-New. Replay does not reread YAML. Endpoints and credential aliases

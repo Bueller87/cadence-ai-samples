@@ -25,6 +25,63 @@ All samples use the Cadence domain `cadence-ai-samples`.
 
 Browse recipe directories by problem or use case. The first recipe, [StreamWave ticket routing](recipes/ticket-routing/), demonstrates typed AI-assisted classification with durable Cadence routing. Each recipe README explains how to run it, what to expect, and how it handles failures.
 
+## Local AI services
+
+Some recipes can run without API keys by using [Laya](https://github.com/NandhaKishorM/laya) for local classification and [Ollama](https://ollama.com/) for local models. The [Recurring AI Watch](recipes/recurring-ai-watch/) recipe selects them with `--classifier-id laya-local` and `--model-id llama3.2-local`.
+
+### Install Laya
+
+Clone Laya and start its HTTP server with Docker Compose:
+
+```bash
+git clone https://github.com/NandhaKishorM/laya.git
+cd laya
+LAYA_PORT=8008 docker compose -f compose.yaml -f compose.http.yaml up -d --build laya-serve
+curl -s http://localhost:8008/health
+```
+
+Port 8008 matches `laya-local` in [`classifiers.yaml`](classifiers.yaml). Laya defaults to port 8000, which the local Cadence server already publishes. Laya downloads its model weights on the first classification request and stores them in a named Docker volume for reuse. The first download can take several minutes. You can set `HF_TOKEN` to get higher Hugging Face download rate limits.
+
+### Install Ollama and llama3.2
+
+On macOS, install Ollama with Homebrew, start its service, and download the model:
+
+```bash
+brew install ollama
+brew services start ollama
+ollama pull llama3.2
+ollama run llama3.2 "Say ok."
+```
+
+Ollama listens on `localhost:11434`, which matches `llama3.2-local` in [`models.yaml`](models.yaml). Run `ollama ps` to see whether the model is loaded.
+
+### Warm up the local services
+
+AI Activities in Recurring AI Watch have a 30-second execution budget. A cold Laya or Ollama request can take longer, so warm up both services before starting a Workflow.
+
+1. Check that Laya is ready:
+
+   ```bash
+   curl -s http://localhost:8008/health
+   ```
+
+2. Send a Laya classification request. The 10-minute client timeout allows an initial model download to finish:
+
+   ```bash
+   curl -sS --max-time 600 -X POST http://localhost:8008/v1/systemone \
+     -H 'Content-Type: application/json' \
+     -d '{"state":"Version: 0.0.1\nRelease notes: warmup","model":"convaiinnovations/laya","questions":{"relevant":{"type":"choice","instructions":"Is this a warmup request?","criteria":{"yes":"It is a warmup.","no":"It is not a warmup."}}}}'
+   ```
+
+   The response should contain `"answers"`. A second request should return quickly.
+
+3. Load llama3.2 into Ollama and keep it loaded for 30 minutes:
+
+   ```bash
+   curl -sS --max-time 300 http://localhost:11434/api/generate \
+     -d '{"model":"llama3.2:latest","prompt":"Say ok.","stream":false,"keep_alive":"30m"}'
+   ```
+
 ## Contributing
 
 Contributions are welcome. Start with a concrete real-world problem, write an implementation specification, and keep the resulting recipe focused and portable. See [CONTRIBUTING.md](CONTRIBUTING.md) and the reusable files in [`templates/recipe`](templates/recipe/).
