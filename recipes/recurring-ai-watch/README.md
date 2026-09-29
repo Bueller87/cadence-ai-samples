@@ -25,7 +25,7 @@ The sample pins the Cadence Python SDK to PR #176 commit
 `2bc1af4207d20cd99ae64fa1ef82d803905af947` (an experimental build), Google ADK
 2.1.0, OpenAI Agents 0.12.5, OpenAI 2.30.0, and LiteLLM 1.83.7. The SDK pin fixes
 native OpenAI Activity argument decoding; released 0.4.0 cannot run that path.
-Use this sample's virtual environment so the Phase 5 spike stays unchanged.
+Use this sample's own virtual environment so the pinned SDK doesn't affect other projects.
 
 ## Mock run
 
@@ -94,9 +94,8 @@ for each live pair. Use the same IDs and task list for its Worker and `start`.
 
 All six combinations completed Watch runs with live Jev and the selected model,
 including report generation, check-now, and graceful stop. See
-[matrix evidence](MATRIX_RESULTS.md) for execution IDs and limits. Earlier restart
-replay tests in the [Phase 5 findings](../../spikes/cadence-python-agent-compat/FINDINGS.md)
-are separate evidence; this matrix did not repeat those restart tests.
+[matrix evidence](MATRIX_RESULTS.md) for execution IDs and limits. This matrix
+did not test Worker restart replay.
 
 `inference.py` translates the logical catalog model only at the framework boundary.
 For OpenAI Agents, it derives Google's `/v1beta/openai/` and Ollama's `/v1/`

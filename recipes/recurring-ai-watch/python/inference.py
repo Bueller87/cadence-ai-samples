@@ -92,7 +92,7 @@ class NativeOpenAIActivities(OpenAIActivities):
 
 
 class ChatCompletionsActivities:
-    """The Phase 5 JSON-safe Activity bridge, restricted to no-tool reports."""
+    """A JSON-safe Activity bridge, restricted to no-tool reports."""
 
     def __init__(self, provider):
         self._provider = provider
