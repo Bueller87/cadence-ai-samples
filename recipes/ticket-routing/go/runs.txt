@@ -1,0 +1,82 @@
+/recipes/ticket-routing/go(kevin/batch-wip) > env -u TYPESAFE_API_KEY AI_PROVIDER=mock \
+  ./ticket-router -mode batch \
+  -task-list ticket-routing-mock-perf \
+  -count 10 -concurrency 1 -batch-sla 1s
+Starting mock batch: count=10 concurrency=1 batch-sla=1s
+
+Batch summary
+Total submitted: 10
+Completed executions: 10
+Failed executions: 0
+UNROUTABLE: 0
+ACKNOWLEDGED: 0
+SLA_TIMEOUT: 0
+Results by department: billing=6 technical=4 account=0 content=0
+Peak in-flight executions: 1
+Batch wall-clock duration: 1.077s
+Per-execution client wait: min=93ms average=108ms max=184ms
+Average completed workflows per second: 9.29
+/recipes/ticket-routing/go(kevin/batch-wip) > env -u TYPESAFE_API_KEY AI_PROVIDER=mock \
+  ./ticket-router -mode batch \
+  -task-list ticket-routing-mock-perf \
+  -count 10 -concurrency 10 -batch-sla 1s
+Starting mock batch: count=10 concurrency=10 batch-sla=1s
+
+Batch summary
+Total submitted: 10
+Completed executions: 10
+Failed executions: 0
+UNROUTABLE: 0
+ACKNOWLEDGED: 0
+SLA_TIMEOUT: 0
+Results by department: billing=6 technical=4 account=0 content=0
+Peak in-flight executions: 10
+Batch wall-clock duration: 494ms
+Per-execution client wait: min=179ms average=329ms max=494ms
+Average completed workflows per second: 20.24
+/recipes/ticket-routing/go(kevin/batch-wip) > # Change concurrency among 1, 5, 10, and 25
+env -u TYPESAFE_API_KEY AI_PROVIDER=mock \
+  ./ticket-router -mode batch \
+  -task-list ticket-routing-mock-perf \
+  -count 100 -concurrency 25 -batch-sla 1s
+zsh: command not found: #
+Starting mock batch: count=100 concurrency=25 batch-sla=1s
+
+
+Batch summary
+Total submitted: 100
+Completed executions: 100
+Failed executions: 0
+UNROUTABLE: 0
+ACKNOWLEDGED: 0
+SLA_TIMEOUT: 0
+Results by department: billing=20 technical=40 account=15 content=25
+Peak in-flight executions: 25
+Batch wall-clock duration: 1m9.698s
+Per-execution client wait: min=424ms average=17.195s max=1m2.68s
+Average completed workflows per second: 1.43
+
+
+Findings from 3 runs:
+Main conclusion: concurrency helps at small scale, but the 100-ticket run exposed a local Cadence dispatch bottleneck.
+
+10 × concurrency 1: 9.29 workflows/sec.
+10 × concurrency 10: 20.24 workflows/sec, about 2.2× faster overall, although average ticket latency rose from 108 ms to 329 ms.
+100 × concurrency 25: throughput collapsed to 1.43 workflows/sec, with 17.2 seconds average and 62.7 seconds maximum wait.
+The 100-ticket run is not directly comparable because both count and concurrency changed. Still, the slowdown is real:
+
+Cadence logged 20 Async task dispatch timed out warnings.
+One immediate diagnostic Child Workflow took 61 seconds to receive its task.
+The Cadence container uses ubercadence/server:master-auto-setup with LOG_LEVEL=debug.
+It generated about 66 MB of logs during the 90-second diagnostic window, including 1,174 large stack-trace debug entries.
+Cassandra showed no warnings or errors.
+So the likely bottleneck is the development Cadence server configuration and workflow-task dispatch, not batch.go submission logic. The 25 batch slots stayed saturated: 1.43 workflows/sec × 17.2 sec ≈ 24.6 average in flight.
+
+Other observations:
+
+All 100 workflows completed, with no execution failures.
+Zero SLA statuses are expected because this branch’s Child Workflows return DIAGNOSTIC_ONLY.
+-batch-sla 1s is currently irrelevant, so this does not benchmark timers.
+The zsh: command not found: # message is harmless. Your shell interpreted the pasted comment as a command.
+The runs stayed on the isolated mock task list. No Jev call was made.
+Before drawing scaling conclusions, switch Cadence logging to info, preferably use a versioned server image, then run a fixed count such as 100 at concurrency 1, 5, 10, and 25, repeated at least three times.
