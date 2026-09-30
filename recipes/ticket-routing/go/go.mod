@@ -1,4 +1,4 @@
-module github.com/Bueller87/cadence-ai-samples/recipes/ticket-routing/go
+module github.com/cadence-workflow/cadence-ai-samples/recipes/ticket-routing/go
 
 go 1.23
 

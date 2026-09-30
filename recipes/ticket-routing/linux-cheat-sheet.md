@@ -17,7 +17,7 @@ Run the same 10-ticket, concurrency-10 mock test on macOS to compare it with the
 Open Terminal:
 
 ```bash
-git clone https://github.com/Bueller87/cadence-ai-samples.git
+git clone https://github.com/cadence-workflow/cadence-ai-samples.git
 cd cadence-ai-samples
 git switch --track origin/kevin/batch-wip
 ```

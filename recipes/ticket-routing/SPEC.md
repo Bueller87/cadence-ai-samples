@@ -1,6 +1,6 @@
 # High-volume support ticket router: implementation specification
 
-**Repository:** `Bueller87/cadence-ai-samples`  
+**Repository:** `cadence-workflow/cadence-ai-samples`
 **Recipe path:** `recipes/ticket-routing/`  
 **Status:** Implemented through Phase 4C; owner review pending. Automatic acknowledgment simulation and classification-accuracy benchmarking remain deferred.
 **Language:** Go  
