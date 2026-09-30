@@ -1,4 +1,4 @@
-"""Six explicit framework/provider combinations; clients exist only on Workers."""
+"""OpenAI Agents report path for three model providers; clients exist only on Workers."""
 
 from typing import Any
 
@@ -12,7 +12,7 @@ from openai import AsyncOpenAI
 from pydantic import TypeAdapter
 
 from config import CatalogSelection
-from live import ADKActivities, LiveConfigurationError, LiveSchemaError, generate_adk_report, raise_model_error
+from live import LiveConfigurationError, LiveSchemaError, raise_model_error
 from workflow import AI_ACTIVITY_OPTIONS, ReleaseNote
 
 
@@ -25,46 +25,23 @@ INSTRUCTION = (
 )
 
 
-def runtime_model(framework: str, provider: str, model: str) -> str:
-    if framework == "google-adk":
-        if provider == "google":
-            return model
-        if provider == "ollama":
-            return f"ollama_chat/{model}"
-        if provider == "openai":
-            return f"openai/{model}"
-    elif framework == "openai-agents" and provider in {"google", "ollama", "openai"}:
-        return model
-    raise LiveConfigurationError("unsupported agent/model combination")
-
-
 def build_model_activities(selection: CatalogSelection, environ):
     """Called by Worker startup only; never serialize this configuration."""
-    framework, provider = selection.agent.framework, selection.model.provider
+    provider = selection.model.provider
     endpoint = selection.model.endpoint.rstrip("/")
     key = environ.get("MODEL_AI_KEY", "").strip()
-    # Disable optional tracing/telemetry; model requests are the only AI traffic.
+    # Disable optional tracing; model requests are the only AI traffic.
     environ["OPENAI_AGENTS_DISABLE_TRACING"] = "1"
-    environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
-    environ["LITELLM_TELEMETRY"] = "False"
     if provider == "google":
         environ["GOOGLE_API_KEY"] = key
-        environ["GOOGLE_GENAI_USE_VERTEXAI"] = "FALSE"
     elif provider == "openai":
         environ["OPENAI_API_KEY"] = key
         environ["OPENAI_BASE_URL"] = endpoint
-    else:
+    elif provider == "ollama":
         environ["OLLAMA_API_BASE"] = endpoint
+    else:
+        raise LiveConfigurationError("unsupported model provider")
 
-    if framework == "google-adk":
-        # Cadence's Activity resolves native Gemini or ADK's LiteLLM registry.
-        if provider != "google":
-            import litellm
-
-            litellm.num_retries = 0
-            litellm.telemetry = False
-            litellm.suppress_debug_info = True
-        return ADKActivities()
     if provider == "openai":
         return NativeOpenAIActivities(OpenAIProvider(openai_client=AsyncOpenAI(
             api_key=key, base_url=endpoint, max_retries=0,
@@ -92,7 +69,7 @@ class NativeOpenAIActivities(OpenAIActivities):
 
 
 class ChatCompletionsActivities:
-    """The Phase 5 JSON-safe Activity bridge, restricted to no-tool reports."""
+    """A JSON-safe Activity bridge, restricted to no-tool reports."""
 
     def __init__(self, provider):
         self._provider = provider
@@ -146,14 +123,13 @@ class WatchOpenAIModel(CadenceModel):
 
 
 async def generate_live_report(update: ReleaseNote, model_name: str | None,
-                               framework: str, provider: str) -> str:
+                               provider: str) -> str:
     if not model_name:
         raise LiveConfigurationError("live mode requires a model name")
-    model = runtime_model(framework, provider, model_name)
-    if framework == "google-adk":
-        return await generate_adk_report(update, model)
+    if provider not in {"google", "ollama", "openai"}:
+        raise LiveConfigurationError("unsupported model provider")
     result = await Runner.run(
-        Agent(name="recurring_ai_watch", model=WatchOpenAIModel(model, provider),
+        Agent(name="recurring_ai_watch", model=WatchOpenAIModel(model_name, provider),
               instructions=INSTRUCTION),
         f"{update.version}: {update.notes}",
         run_config=RunConfig(tracing_disabled=True),

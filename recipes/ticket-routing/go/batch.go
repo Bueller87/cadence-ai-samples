@@ -55,11 +55,11 @@ func (config BatchConfig) Validate() error {
 	return nil
 }
 
-// LiveBatchConfig requires deliberate opt-in before any real Jev workflows
-// can be submitted.
+// LiveBatchConfig requires deliberate opt-in before any live classifier
+// workflows can be submitted.
 type LiveBatchConfig struct {
 	BatchConfig
-	Provider                  string
+	ClassifierID              string
 	CountExplicit             bool
 	ConcurrencyExplicit       bool
 	ConfirmLive               bool
@@ -71,8 +71,8 @@ type LiveBatchConfig struct {
 }
 
 func (config LiveBatchConfig) Validate() error {
-	if !strings.EqualFold(strings.TrimSpace(config.Provider), "jev") {
-		return fmt.Errorf("live-batch requires AI_PROVIDER=jev")
+	if classifierID := strings.TrimSpace(config.ClassifierID); classifierID == "" || classifierID == mockClassifierID {
+		return fmt.Errorf("live-batch requires a live -classifier-id such as jev-default or laya-local")
 	}
 	if !config.CountExplicit {
 		return fmt.Errorf("live-batch requires an explicit -count")
@@ -93,7 +93,7 @@ func (config LiveBatchConfig) Validate() error {
 		return fmt.Errorf("live-batch SLA must be greater than zero and no more than %s", maximumBatchSLA)
 	}
 	if !config.TaskListExplicit || strings.TrimSpace(config.TaskList) == "" || config.TaskList == TaskList {
-		return fmt.Errorf("live-batch requires an explicit non-default -task-list dedicated to Jev")
+		return fmt.Errorf("live-batch requires an explicit non-default -task-list dedicated to live classification")
 	}
 	if !config.ConfirmLive {
 		return fmt.Errorf("live-batch requires -confirm-live")
@@ -257,27 +257,27 @@ func newBatchJobs(tickets []Ticket, runToken string) []batchJob {
 type batchExecutor func(context.Context, batchJob) (TicketResult, error)
 
 type batchSummary struct {
-	TotalSubmitted         int
-	Completed              int
-	Failed                 int
-	Unroutable             int
-	Acknowledged           int
-	SLATimeout             int
-	ByDepartment           map[Department]int
-	Duration               time.Duration
-	PeakInFlight           int
-	ExecutionDurationTotal time.Duration
-	ExecutionDurationMin   time.Duration
-	ExecutionDurationMax   time.Duration
-	Failures               []batchFailure
-	ExecutionTimings       []batchExecutionTiming
-	JevResponses           int
-	JevInferenceTotal      time.Duration
-	JevInferenceMin        time.Duration
-	JevInferenceMax        time.Duration
-	InputTokens            int64
-	OutputTokens           int64
-	MissingTokenUsage      int
+	TotalSubmitted           int
+	Completed                int
+	Failed                   int
+	Unroutable               int
+	Acknowledged             int
+	SLATimeout               int
+	ByDepartment             map[Department]int
+	Duration                 time.Duration
+	PeakInFlight             int
+	ExecutionDurationTotal   time.Duration
+	ExecutionDurationMin     time.Duration
+	ExecutionDurationMax     time.Duration
+	Failures                 []batchFailure
+	ExecutionTimings         []batchExecutionTiming
+	ClassifierResponses      int
+	ClassifierInferenceTotal time.Duration
+	ClassifierInferenceMin   time.Duration
+	ClassifierInferenceMax   time.Duration
+	InputTokens              int64
+	OutputTokens             int64
+	MissingTokenUsage        int
 }
 
 type batchFailure struct {
@@ -407,13 +407,13 @@ func (summary *batchSummary) addResult(result TicketResult) {
 		summary.ByDepartment[result.Department]++
 	}
 	if result.Classification.InferenceLatency > 0 {
-		summary.JevResponses++
-		summary.JevInferenceTotal += result.Classification.InferenceLatency
-		if summary.JevInferenceMin == 0 || result.Classification.InferenceLatency < summary.JevInferenceMin {
-			summary.JevInferenceMin = result.Classification.InferenceLatency
+		summary.ClassifierResponses++
+		summary.ClassifierInferenceTotal += result.Classification.InferenceLatency
+		if summary.ClassifierInferenceMin == 0 || result.Classification.InferenceLatency < summary.ClassifierInferenceMin {
+			summary.ClassifierInferenceMin = result.Classification.InferenceLatency
 		}
-		if result.Classification.InferenceLatency > summary.JevInferenceMax {
-			summary.JevInferenceMax = result.Classification.InferenceLatency
+		if result.Classification.InferenceLatency > summary.ClassifierInferenceMax {
+			summary.ClassifierInferenceMax = result.Classification.InferenceLatency
 		}
 		summary.InputTokens += int64(result.Classification.InputTokens)
 		summary.OutputTokens += int64(result.Classification.OutputTokens)
@@ -430,25 +430,26 @@ func (summary batchSummary) completedPerSecond() float64 {
 	return float64(summary.Completed) / summary.Duration.Seconds()
 }
 
-func (summary batchSummary) averageJevInferenceLatency() time.Duration {
-	if summary.JevResponses == 0 {
+func (summary batchSummary) averageClassifierInferenceLatency() time.Duration {
+	if summary.ClassifierResponses == 0 {
 		return 0
 	}
-	return summary.JevInferenceTotal / time.Duration(summary.JevResponses)
+	return summary.ClassifierInferenceTotal / time.Duration(summary.ClassifierResponses)
 }
 
 func runBatch(ctx context.Context, cadenceClient client.Client, taskList string, config BatchConfig, output io.Writer) error {
-	return runConfiguredBatch(ctx, cadenceClient, taskList, config, output, false, liveSampleSequential, false, nil)
+	return runConfiguredBatch(ctx, cadenceClient, taskList, config, output, mockClassifierID, liveSampleSequential, false, nil)
 }
 
 func runLiveBatch(ctx context.Context, cadenceClient client.Client, config LiveBatchConfig, output io.Writer) error {
 	if err := config.Validate(); err != nil {
 		return err
 	}
-	return runConfiguredBatch(ctx, cadenceClient, config.TaskList, config.BatchConfig, output, true, config.Sample, config.ShowClassifications, config.InputTokenPricePerMillion)
+	return runConfiguredBatch(ctx, cadenceClient, config.TaskList, config.BatchConfig, output, config.ClassifierID, config.Sample, config.ShowClassifications, config.InputTokenPricePerMillion)
 }
 
-func runConfiguredBatch(ctx context.Context, cadenceClient client.Client, taskList string, config BatchConfig, output io.Writer, live bool, sample string, showClassifications bool, inputTokenPricePerMillion *float64) error {
+func runConfiguredBatch(ctx context.Context, cadenceClient client.Client, taskList string, config BatchConfig, output io.Writer, classifierID string, sample string, showClassifications bool, inputTokenPricePerMillion *float64) error {
+	live := classifierID != mockClassifierID
 	tickets, err := loadBatchTicketsWithSample(batchDatasetPath, config.Count, config.SLA, sample)
 	if err != nil {
 		return err
@@ -457,7 +458,7 @@ func runConfiguredBatch(ctx context.Context, cadenceClient client.Client, taskLi
 	jobs := newBatchJobs(tickets, runToken)
 	batchKind := "mock"
 	if live {
-		batchKind = "live Jev"
+		batchKind = "live " + classifierID
 	}
 	if _, err := fmt.Fprintf(output, "Starting %s batch: count=%d concurrency=%d batch-sla=%s task-list=%s\n", batchKind, config.Count, config.Concurrency, config.SLA, taskList); err != nil {
 		return fmt.Errorf("write batch start: %w", err)
@@ -511,7 +512,7 @@ func classificationDetails(timings []batchExecutionTiming) string {
 		if timing.InferenceLatency > 0 {
 			latency = timing.InferenceLatency.Round(time.Millisecond).String()
 		}
-		lines = append(lines, fmt.Sprintf("ticket=%s department=%s department-confidence=%.2f priority=%s priority-confidence=%.2f complexity=%s complexity-confidence=%.2f model=%s outcome=%s jev-request-response-latency=%s",
+		lines = append(lines, fmt.Sprintf("ticket=%s department=%s department-confidence=%.2f priority=%s priority-confidence=%.2f complexity=%s complexity-confidence=%.2f model=%s outcome=%s classifier-request-response-latency=%s",
 			timing.TicketID,
 			decision.Department,
 			decision.DepartmentConfidence,
@@ -551,11 +552,11 @@ func (summary batchSummary) String() string {
 
 func (summary batchSummary) LiveString(businessSLA time.Duration, inputTokenPricePerMillion *float64) string {
 	workflowSummary := strings.Replace(summary.String(), "\nFailed executions:", "\nTechnically failed executions:", 1)
-	providerMetrics := fmt.Sprintf("Successful recorded Jev responses: %d\nSuccessful Jev HTTP inference latency: min=%s average=%s max=%s\nProvider-reported input tokens: %d\nProvider-reported output tokens: %d\nSuccessful responses missing complete token usage: %d\nBusiness acknowledgment SLA: %s\n",
-		summary.JevResponses,
-		summary.JevInferenceMin.Round(time.Millisecond),
-		summary.averageJevInferenceLatency().Round(time.Millisecond),
-		summary.JevInferenceMax.Round(time.Millisecond),
+	providerMetrics := fmt.Sprintf("Successful recorded classifier responses: %d\nSuccessful classifier HTTP inference latency: min=%s average=%s max=%s\nProvider-reported input tokens: %d\nProvider-reported output tokens: %d\nSuccessful responses missing complete token usage: %d\nBusiness acknowledgment SLA: %s\n",
+		summary.ClassifierResponses,
+		summary.ClassifierInferenceMin.Round(time.Millisecond),
+		summary.averageClassifierInferenceLatency().Round(time.Millisecond),
+		summary.ClassifierInferenceMax.Round(time.Millisecond),
 		summary.InputTokens,
 		summary.OutputTokens,
 		summary.MissingTokenUsage,
@@ -568,7 +569,7 @@ func (summary batchSummary) LiveString(businessSLA time.Duration, inputTokenPric
 		providerMetrics += "Illustrative successful-response input cost: not requested\n"
 	}
 	return workflowSummary + providerMetrics + executionTimingDetails(summary.ExecutionTimings) +
-		"Jev latency measures the successful HTTP attempt recorded by the Activity; per-ticket wait is end-to-end from client submission through parent completion; the business SLA is the Child Workflow acknowledgment timer.\n" +
+		"Classifier latency measures the successful HTTP attempt recorded by the Activity; per-ticket wait is end-to-end from client submission through parent completion; the business SLA is the Child Workflow acknowledgment timer.\n" +
 		"Token and cost totals cover successful recorded responses only. Failed or retried requests may consume additional API usage, so this estimate may be lower than billed usage. Cadence infrastructure costs are excluded.\n"
 }
 
@@ -578,16 +579,16 @@ func executionTimingDetails(timings []batchExecutionTiming) string {
 	}
 	var lines []string
 	for _, timing := range timings {
-		jevLatency := "N/A"
+		classifierLatency := "N/A"
 		if timing.InferenceLatency > 0 {
-			jevLatency = timing.InferenceLatency.Round(time.Millisecond).String()
+			classifierLatency = timing.InferenceLatency.Round(time.Millisecond).String()
 		}
-		lines = append(lines, fmt.Sprintf("workflow=%s ticket=%s outcome=%s end-to-end-wait=%s jev-http-inference=%s",
+		lines = append(lines, fmt.Sprintf("workflow=%s ticket=%s outcome=%s end-to-end-wait=%s classifier-http-inference=%s",
 			timing.WorkflowID,
 			timing.TicketID,
 			timing.Outcome,
 			timing.Elapsed.Round(time.Millisecond),
-			jevLatency,
+			classifierLatency,
 		))
 	}
 	return "Per-ticket timing details:\n- " + strings.Join(lines, "\n- ") + "\n"

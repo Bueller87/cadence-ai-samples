@@ -1,4 +1,4 @@
-module github.com/Bueller87/cadence-ai-samples/recipes/ticket-routing/go
+module github.com/cadence-workflow/cadence-ai-samples/recipes/ticket-routing/go
 
 go 1.23
 
@@ -6,6 +6,7 @@ require (
 	github.com/stretchr/testify v1.9.0
 	go.uber.org/cadence v1.3.1
 	go.uber.org/yarpc v1.55.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -58,6 +59,5 @@ require (
 	google.golang.org/grpc v1.28.0 // indirect
 	google.golang.org/protobuf v1.31.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 	honnef.co/go/tools v0.3.2 // indirect
 )

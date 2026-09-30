@@ -1,4 +1,4 @@
-"""Portable loader for the three root YAML catalogs."""
+"""Portable loader for the root model and classifier YAML catalogs."""
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -8,12 +8,6 @@ import yaml
 
 class CatalogError(ValueError):
     pass
-
-
-@dataclass(frozen=True)
-class AgentConfig:
-    id: str
-    framework: str
 
 
 @dataclass(frozen=True)
@@ -34,7 +28,6 @@ class ClassifierConfig:
 
 @dataclass(frozen=True)
 class CatalogSelection:
-    agent: AgentConfig
     model: ModelConfig
     classifier: ClassifierConfig
 
@@ -42,12 +35,10 @@ class CatalogSelection:
 def load_selection(
     catalog_dir: str | Path,
     *,
-    agent_id: str,
     model_id: str,
     classifier_id: str,
 ) -> CatalogSelection:
     directory = Path(catalog_dir)
-    agent = _select(directory / "agents.yaml", "agents", ("id", "framework"), agent_id)
     model = _select(
         directory / "models.yaml",
         "models",
@@ -61,7 +52,6 @@ def load_selection(
         classifier_id,
     )
     return CatalogSelection(
-        agent=AgentConfig(**agent),
         model=ModelConfig(**model),
         classifier=ClassifierConfig(**classifier),
     )

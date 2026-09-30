@@ -25,7 +25,6 @@ AI_OPTIONS = {
 class RecipeInput:
     text: str
     mode: str = "mock"
-    agent_framework: str = "google-adk"
     model_provider: str = "google"
     model_name: str | None = None
 
@@ -69,8 +68,7 @@ class __RECIPE_CLASS__Workflow:
             from inference import generate_live_output
 
             output = await generate_live_output(
-                recipe_input.text, recipe_input.model_name,
-                recipe_input.agent_framework, recipe_input.model_provider,
+                recipe_input.text, recipe_input.model_name, recipe_input.model_provider,
             )
         return RecipeResult(decision, output)
 

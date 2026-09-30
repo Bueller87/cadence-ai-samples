@@ -1,5 +1,0 @@
-agents:
-  - id: google-adk
-    framework: google-adk
-  - id: openai-agents
-    framework: openai-agents

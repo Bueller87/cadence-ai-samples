@@ -14,9 +14,11 @@ Google ADK 2.1.0, OpenAI Agents 0.12.5, OpenAI 2.30.0, LiteLLM 1.83.7.
 | OpenAI Agents | OpenAI nano | PROVEN live OpenAI model and Jev classification |
 
 The offline suite exercises all six agent loops through Cadence's testing
-environment. That is separate from provider execution evidence. Earlier
-[Phase 5 evidence](../../spikes/cadence-python-agent-compat/FINDINGS.md) is also
-separate from validation of the expanded Watch.
+environment. That is separate from provider execution evidence.
+
+These runs were recorded before the sample split into one folder per framework.
+The `google-adk` and `openai-agents` agent IDs below now name the
+`python/google-adk/` and `python/openai-agents/` folders.
 
 ## Local Ollama executions
 
@@ -143,4 +145,4 @@ independently establish HTTP request counts or restart replay.
 All six framework/model combinations now have Watch execution evidence with
 live Jev. The two earlier mock-classifier runs remain separate evidence. These
 checks establish model Activity completion and Watch controls; they do not test
-tools, independently count provider requests, or repeat Phase 5's restart replay.
+tools, independently count provider requests, or test Worker restart replay.

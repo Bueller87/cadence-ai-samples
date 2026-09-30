@@ -36,9 +36,6 @@ const (
 	childWorkflowSchedulingOverhead  = 2 * time.Minute
 	parentWorkflowSchedulingOverhead = time.Minute
 
-	jevEndpoint = "https://api.typesafe.ai/v1/systemone"
-	jevModel    = "jev-latest"
-
 	errReasonJevConfiguration     = "JevConfigurationError"
 	errReasonJevAuthentication    = "JevAuthenticationError"
 	errReasonJevRequestValidation = "JevRequestValidationError"
@@ -259,9 +256,10 @@ func ClassifyTicket(_ context.Context, ticket Ticket) (RoutingDecision, error) {
 	return decision, nil
 }
 
-// JevClassifier implements the same Activity contract as ClassifyTicket using
-// TypeSafe's System One HTTP API. It is registered only when explicitly enabled.
-type JevClassifier struct {
+// SystemOneClassifier implements the same Activity contract as ClassifyTicket
+// using a System One HTTP API, such as TypeSafe Jev or local Laya. It is
+// registered only when a live classifier ID is selected.
+type SystemOneClassifier struct {
 	apiKey     string
 	endpoint   string
 	model      string
@@ -298,22 +296,21 @@ type jevUsage struct {
 	OutputTokens *int `json:"output_tokens"`
 }
 
-func newJevClassifier(apiKey, endpoint, model string, httpClient *http.Client) (*JevClassifier, error) {
-	if strings.TrimSpace(apiKey) == "" {
-		return nil, fmt.Errorf("TYPESAFE_API_KEY is required when AI_PROVIDER=jev")
-	}
+// newSystemOneClassifier creates a live classifier. An empty apiKey sends no
+// Authorization header, which keyless local servers such as Laya require.
+func newSystemOneClassifier(apiKey, endpoint, model string, httpClient *http.Client) (*SystemOneClassifier, error) {
 	if strings.TrimSpace(endpoint) == "" {
-		return nil, fmt.Errorf("Jev endpoint is required")
+		return nil, fmt.Errorf("classifier endpoint is required")
 	}
 	if strings.TrimSpace(model) == "" {
-		return nil, fmt.Errorf("Jev model is required")
+		return nil, fmt.Errorf("classifier model is required")
 	}
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 20 * time.Second}
 	}
 
-	return &JevClassifier{
-		apiKey:     apiKey,
+	return &SystemOneClassifier{
+		apiKey:     strings.TrimSpace(apiKey),
 		endpoint:   endpoint,
 		model:      model,
 		httpClient: httpClient,
@@ -321,9 +318,9 @@ func newJevClassifier(apiKey, endpoint, model string, httpClient *http.Client) (
 }
 
 // ClassifyTicket sends one request containing three independent Choice questions.
-func (classifier *JevClassifier) ClassifyTicket(ctx context.Context, ticket Ticket) (RoutingDecision, error) {
-	if classifier == nil || strings.TrimSpace(classifier.apiKey) == "" {
-		return RoutingDecision{}, cadence.NewCustomError(errReasonJevConfiguration, "TYPESAFE_API_KEY is not configured")
+func (classifier *SystemOneClassifier) ClassifyTicket(ctx context.Context, ticket Ticket) (RoutingDecision, error) {
+	if classifier == nil {
+		return RoutingDecision{}, cadence.NewCustomError(errReasonJevConfiguration, "classifier is not configured")
 	}
 	if strings.TrimSpace(ticket.TicketID) == "" {
 		return RoutingDecision{}, cadence.NewCustomError(errReasonJevRequestValidation, "ticket ID is required")
@@ -370,32 +367,34 @@ func (classifier *JevClassifier) ClassifyTicket(ctx context.Context, ticket Tick
 
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return RoutingDecision{}, cadence.NewCustomError(errReasonJevRequestValidation, "encode Jev request")
+		return RoutingDecision{}, cadence.NewCustomError(errReasonJevRequestValidation, "encode classifier request")
 	}
 
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, classifier.endpoint, bytes.NewReader(body))
 	if err != nil {
-		return RoutingDecision{}, cadence.NewCustomError(errReasonJevConfiguration, "create Jev request")
+		return RoutingDecision{}, cadence.NewCustomError(errReasonJevConfiguration, "create classifier request")
 	}
-	request.Header.Set("Authorization", "Bearer "+classifier.apiKey)
+	if classifier.apiKey != "" {
+		request.Header.Set("Authorization", "Bearer "+classifier.apiKey)
+	}
 	request.Header.Set("Content-Type", "application/json")
 
 	inferenceStarted := time.Now()
 	response, err := classifier.httpClient.Do(request)
 	if err != nil {
-		return RoutingDecision{}, fmt.Errorf("Jev request failed: %w", err)
+		return RoutingDecision{}, fmt.Errorf("classifier request failed: %w", err)
 	}
 	defer response.Body.Close()
 
 	switch {
 	case response.StatusCode == http.StatusUnauthorized:
-		return RoutingDecision{}, cadence.NewCustomError(errReasonJevAuthentication, "Jev rejected the configured API key")
+		return RoutingDecision{}, cadence.NewCustomError(errReasonJevAuthentication, "classifier rejected the configured API key")
 	case response.StatusCode == http.StatusUnprocessableEntity:
-		return RoutingDecision{}, cadence.NewCustomError(errReasonJevRequestValidation, "Jev rejected the request schema")
+		return RoutingDecision{}, cadence.NewCustomError(errReasonJevRequestValidation, "classifier rejected the request schema")
 	case response.StatusCode == http.StatusTooManyRequests || response.StatusCode == 529 || response.StatusCode >= 500:
-		return RoutingDecision{}, fmt.Errorf("Jev temporary HTTP failure: %d", response.StatusCode)
+		return RoutingDecision{}, fmt.Errorf("classifier temporary HTTP failure: %d", response.StatusCode)
 	case response.StatusCode < 200 || response.StatusCode >= 300:
-		return RoutingDecision{}, cadence.NewCustomError(errReasonJevClientRequest, fmt.Sprintf("Jev returned HTTP %d", response.StatusCode))
+		return RoutingDecision{}, cadence.NewCustomError(errReasonJevClientRequest, fmt.Sprintf("classifier returned HTTP %d", response.StatusCode))
 	}
 
 	var decoded jevResponse

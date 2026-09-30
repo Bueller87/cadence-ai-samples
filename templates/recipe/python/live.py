@@ -1,25 +1,17 @@
-"""Worker-side Jev classification and Google ADK model Activities."""
+"""Worker-side Jev classification, live validation, and provider error mapping."""
 
 import json
 import os
-from collections.abc import AsyncGenerator, Callable, MutableMapping
+from collections.abc import Callable, MutableMapping
 from typing import Any
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
-from cadence import activity, workflow
-from cadence.contrib.google_adk import CadenceAgentRunner, GoogleADKActivities
-from cadence.contrib.google_adk.cadence_model import CadenceModel
-from google.adk.agents import LlmAgent
-from google.adk.models.llm_request import LlmRequest
-from google.adk.models.llm_response import LlmResponse
-from google.adk.sessions import InMemorySessionService
-from google.genai import errors as genai_errors
-from google.genai import types
+from cadence import activity
 
 from config import CatalogSelection
-from workflow import AI_OPTIONS, CLASSIFY_ACTIVITY, ClassificationDecision
+from workflow import CLASSIFY_ACTIVITY, ClassificationDecision
 
 
 GOOGLE_ENDPOINT = "https://generativelanguage.googleapis.com"
@@ -46,8 +38,6 @@ def validate_live(selection: CatalogSelection) -> None:
         raise LiveConfigurationError(
             "only jev-default is implemented; other classifiers are catalog candidates"
         )
-    if selection.agent.framework not in {"google-adk", "openai-agents"}:
-        raise LiveConfigurationError("unsupported agent framework")
     if selection.model.provider not in {"google", "ollama", "openai"}:
         raise LiveConfigurationError("unsupported model provider")
     endpoint = urlsplit(selection.model.endpoint)
@@ -136,55 +126,3 @@ def raise_model_error(error: Exception) -> None:
     if isinstance(error, (TypeError, ValueError)):
         raise LiveSchemaError("model configuration or schema is invalid") from None
     raise RuntimeError("temporary model request failure") from None
-
-
-class ADKActivities(GoogleADKActivities):
-    @activity.override(GoogleADKActivities.generate_content_async)
-    async def generate_content_async(self, model_name: str,
-                                     llm_request: LlmRequest) -> list[LlmResponse]:
-        try:
-            return await super().generate_content_async(model_name, llm_request)
-        except genai_errors.APIError as error:
-            details = error.details if isinstance(error.details, dict) else {}
-            details = details.get("error", details)
-            details = details.get("details", []) if isinstance(details, dict) else []
-            invalid_key = any(isinstance(item, dict) and item.get("reason") == "API_KEY_INVALID"
-                              for item in (details if isinstance(details, list) else []))
-            if error.code in {401, 403} or invalid_key:
-                raise LiveAuthenticationError("Gemini rejected MODEL_AI_KEY") from None
-            if retryable(error.code):
-                raise RuntimeError(f"temporary model failure: HTTP {error.code}") from None
-            raise LiveSchemaError(f"model rejected request: HTTP {error.code}") from None
-        except Exception as error:
-            raise_model_error(error)
-
-
-class RetryingCadenceModel(CadenceModel):
-    async def generate_content_async(self, llm_request: LlmRequest,
-                                     stream: bool = False) -> AsyncGenerator[LlmResponse, None]:
-        if stream:
-            raise RuntimeError("streaming is not supported")
-        call = self._google_adk_activities.generate_content_async.with_options(**AI_OPTIONS)
-        for response in await call(model_name=self.model, llm_request=llm_request):
-            yield response
-
-
-async def generate_adk_output(text: str, model_name: str) -> str:
-    agent = LlmAgent(name="__PYTHON_PACKAGE__", model=RetryingCadenceModel(model=model_name),
-                     instruction="Analyze the input and return a concise useful result.")
-    sessions = InMemorySessionService()
-    runner = CadenceAgentRunner(app_name="__RECIPE_SLUG__", agent=agent,
-                                session_service=sessions)
-    session_id = workflow.WorkflowContext.get().info().workflow_id
-    await sessions.create_session(app_name=runner.app_name, user_id="recipe",
-                                  session_id=session_id)
-    output = ""
-    async for event in runner.run_async(
-        user_id="recipe", session_id=session_id,
-        new_message=types.Content(role="user", parts=[types.Part.from_text(text=text)]),
-    ):
-        if event.is_final_response() and event.content and event.content.parts:
-            output = "".join(part.text or "" for part in event.content.parts).strip()
-    if not output:
-        raise LiveSchemaError("model returned no output")
-    return output

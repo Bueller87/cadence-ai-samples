@@ -27,15 +27,16 @@ from workflow import (
 )
 
 
+FRAMEWORK = "google-adk"
+
+
 async def run(args):
-    selection = load_selection(Path(__file__).resolve().parents[4],
-        agent_id=args.agent_id, model_id=args.model_id, classifier_id="jev-default")
+    selection = load_selection(Path(__file__).resolve().parents[5],
+        model_id=args.model_id, classifier_id="jev-default")
     suffix = uuid4().hex
     task_list = args.task_list or f"watch-local-ollama-{suffix}"
-    workflow_id = f"watch-matrix-{args.agent_id}-{args.model_id}-{suffix}"
-    expected = ("GoogleADKActivities.generate_content_async" if args.agent_id == "google-adk"
-                else "OpenAIActivities.invoke_model" if selection.model.provider == "openai"
-                else "OpenAICompatibleChatCompletions.invoke_model")
+    workflow_id = f"watch-matrix-{FRAMEWORK}-{args.model_id}-{suffix}"
+    expected = "GoogleADKActivities.generate_content_async"
     async with AsyncExitStack() as stack:
         client = await stack.enter_async_context(Client(domain="cadence-ai-samples",
             target="localhost:7833", data_converter=PydanticDataConverter()))
@@ -55,7 +56,7 @@ async def run(args):
             raise ValueError("--task-list must identify the human-started live Worker")
         execution = await client.start_workflow(WATCH_WORKFLOW, WatchInput(
             mode="live", model_name=selection.model.model,
-            agent_framework=selection.agent.framework, model_provider=selection.model.provider,
+            model_provider=selection.model.provider,
         ), task_list=task_list, workflow_id=workflow_id,
             execution_start_to_close_timeout=timedelta(minutes=5),
             task_start_to_close_timeout=timedelta(seconds=30))
@@ -98,7 +99,7 @@ async def run(args):
             result = client.data_converter.from_data(final.workflow_execution_completed_event_attributes.result,
                                                      [WatchStatus])[0]
             assert result.state == "STOPPED" and result.latest_report
-            print(json.dumps({"result": "PASS", "agent": args.agent_id, "model": args.model_id,
+            print(json.dumps({"result": "PASS", "framework": FRAMEWORK, "model": args.model_id,
                 "classifier": "mock" if args.local_ollama else "jev-default",
                 "workflow_id": workflow_id, "run_id": execution.run_id,
                 "scheduled": list(scheduled.values()), "completed": completed,
@@ -116,7 +117,6 @@ async def run(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--agent-id", choices=("google-adk", "openai-agents"), required=True)
     parser.add_argument("--model-id", required=True)
     parser.add_argument("--task-list")
     parser.add_argument("--local-ollama", action="store_true")

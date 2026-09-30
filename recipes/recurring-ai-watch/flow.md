@@ -1,14 +1,12 @@
 #Worker Startup
 
-**Cmd Line Args**
---agent-id google-adk
+**Cmd Line Args** (run from `python/google-adk/`)
 --model-id gemini-flash-lite
 --classifier-id jev-default
         │
         ▼
 load_selection()
         │
-        ├── agents.yaml      → google-adk
         ├── models.yaml      → gemini-3.5-flash-lite + endpoint
         └── classifiers.yaml → jev-latest + endpoint
         │
@@ -20,11 +18,11 @@ Worker startup
         │
         ├── validate supported combination
         ├── MODEL_AI_KEY → GOOGLE_API_KEY
-        ├── create JevClassifier(endpoint, model)
-        └── create GeminiActivities()
+        ├── create SystemOneClassifier(endpoint, model)
+        └── create ADKActivities()
         │
         ▼
 build_registry()
         │
-        ├── recurring-watch.classify-update → JevClassifier.classify
-        └── GoogleADKActivities.generate_content_async → GeminiActivities
+        ├── recurring-watch.classify-update → SystemOneClassifier.classify
+        └── GoogleADKActivities.generate_content_async → ADKActivities

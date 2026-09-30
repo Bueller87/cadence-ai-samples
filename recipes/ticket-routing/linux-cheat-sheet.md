@@ -17,7 +17,7 @@ Run the same 10-ticket, concurrency-10 mock test on macOS to compare it with the
 Open Terminal:
 
 ```bash
-git clone https://github.com/Bueller87/cadence-ai-samples.git
+git clone https://github.com/cadence-workflow/cadence-ai-samples.git
 cd cadence-ai-samples
 git switch --track origin/kevin/batch-wip
 ```
@@ -86,7 +86,7 @@ The resulting `ticket-router` is a **macOS executable**. Do not copy or attempt 
 From `recipes/ticket-routing/go`:
 
 ```bash
-AI_PROVIDER=mock ./ticket-router -mode worker
+./ticket-router -mode worker -classifier-id mock
 ```
 
 Leave this terminal running.
@@ -104,7 +104,7 @@ Adjust the path if your Terminal starts in a different directory.
 Run:
 
 ```bash
-AI_PROVIDER=mock ./ticket-router -mode batch -count 10 -concurrency 10 -batch-sla 1s
+./ticket-router -mode batch -classifier-id mock -count 10 -concurrency 10 -batch-sla 1s
 ```
 
 Record:
@@ -121,7 +121,7 @@ The batch runner does not send acknowledgment Signals, so all routed tickets sho
 If the concurrent batch is slow, run the same batch with concurrency 1:
 
 ```bash
-AI_PROVIDER=mock ./ticket-router -mode batch -count 10 -concurrency 1 -batch-sla 1s
+./ticket-router -mode batch -classifier-id mock -count 10 -concurrency 1 -batch-sla 1s
 ```
 
 Windows reference: **22.845 seconds**.
