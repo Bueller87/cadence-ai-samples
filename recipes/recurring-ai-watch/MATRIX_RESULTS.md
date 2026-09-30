@@ -16,6 +16,10 @@ Google ADK 2.1.0, OpenAI Agents 0.12.5, OpenAI 2.30.0, LiteLLM 1.83.7.
 The offline suite exercises all six agent loops through Cadence's testing
 environment. That is separate from provider execution evidence.
 
+These runs were recorded before the sample split into one folder per framework.
+The `google-adk` and `openai-agents` agent IDs below now name the
+`python/google-adk/` and `python/openai-agents/` folders.
+
 ## Local Ollama executions
 
 Domain: `cadence-ai-samples`. Both used the catalog's `llama3.2:latest`, an isolated

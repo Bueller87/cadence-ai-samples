@@ -1,32 +1,19 @@
-"""System One classification and the Cadence Google ADK report path."""
+"""System One classification, live validation, and provider error mapping."""
 
 from __future__ import annotations
 
 import json
 import os
-from collections.abc import AsyncGenerator, Callable, MutableMapping
+from collections.abc import Callable, MutableMapping
 from typing import Any
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from urllib.parse import urlsplit
 
-from cadence import activity, workflow
-from cadence.contrib.google_adk import CadenceAgentRunner, GoogleADKActivities
-from cadence.contrib.google_adk.cadence_model import CadenceModel
-from google.adk.agents import LlmAgent
-from google.adk.models.llm_request import LlmRequest
-from google.adk.models.llm_response import LlmResponse
-from google.adk.sessions import InMemorySessionService
-from google.genai import errors as genai_errors
-from google.genai import types
+from cadence import activity
 
 from config import CatalogSelection
-from workflow import (
-    AI_ACTIVITY_OPTIONS,
-    CLASSIFY_ACTIVITY,
-    ClassificationDecision,
-    ReleaseNote,
-)
+from workflow import CLASSIFY_ACTIVITY, ClassificationDecision, ReleaseNote
 
 
 GOOGLE_ENDPOINT = "https://generativelanguage.googleapis.com"
@@ -66,8 +53,6 @@ def validate_live(selection: CatalogSelection) -> None:
             or endpoint.fragment
         ):
             raise LiveConfigurationError("laya-local requires a loopback HTTP endpoint")
-    if selection.agent.framework not in {"google-adk", "openai-agents"}:
-        raise LiveConfigurationError("unsupported agent framework")
     if selection.model.provider not in {"google", "ollama", "openai"}:
         raise LiveConfigurationError("unsupported model provider")
     endpoint = urlsplit(selection.model.endpoint)
@@ -172,33 +157,6 @@ class SystemOneClassifier:
         )
 
 
-class ADKActivities(GoogleADKActivities):
-    @activity.override(GoogleADKActivities.generate_content_async)
-    async def generate_content_async(
-        self, model_name: str, llm_request: LlmRequest
-    ) -> list[LlmResponse]:
-        try:
-            return await super().generate_content_async(model_name, llm_request)
-        except genai_errors.APIError as error:
-            # Google reports invalid API keys as HTTP 400, not necessarily 401.
-            body = error.details if isinstance(error.details, dict) else {}
-            body = body.get("error", body)
-            details = body.get("details", []) if isinstance(body, dict) else []
-            invalid_key = any(
-                isinstance(detail, dict) and detail.get("reason") == "API_KEY_INVALID"
-                for detail in (details if isinstance(details, list) else [])
-            )
-            if error.code in {401, 403} or invalid_key:
-                raise LiveAuthenticationError("Gemini rejected MODEL_AI_KEY") from None
-            if retryable(error.code):
-                raise RuntimeError(f"Gemini temporary failure: HTTP {error.code}") from None
-            raise LiveSchemaError(f"Gemini rejected the request: HTTP {error.code}") from None
-        except (TypeError, ValueError):
-            raise LiveSchemaError("Gemini configuration or schema is invalid") from None
-        except Exception as error:
-            raise_model_error(error)
-
-
 def raise_model_error(error: Exception) -> None:
     """Keep provider bodies (which may echo headers) out of Activity failures."""
     status = getattr(error, "status_code", None)
@@ -209,51 +167,3 @@ def raise_model_error(error: Exception) -> None:
     if isinstance(error, (TypeError, ValueError)):
         raise LiveSchemaError("model configuration or schema is invalid") from None
     raise RuntimeError("temporary model request failure") from None
-
-
-class RetryingCadenceModel(CadenceModel):
-    async def generate_content_async(
-        self, llm_request: LlmRequest, stream: bool = False
-    ) -> AsyncGenerator[LlmResponse, None]:
-        if stream:
-            raise RuntimeError("Streaming is not supported")
-        call = self._google_adk_activities.generate_content_async.with_options(
-            **AI_ACTIVITY_OPTIONS
-        )
-        for response in await call(model_name=self.model, llm_request=llm_request):
-            yield response
-
-
-async def generate_adk_report(update: ReleaseNote, model_name: str) -> str:
-    if not model_name:
-        raise LiveConfigurationError("live mode requires a model name")
-    agent = LlmAgent(
-        name="recurring_ai_watch",
-        model=RetryingCadenceModel(model=model_name),
-        instruction=(
-            "Briefly explain what changed, why it may affect this application's "
-            "background jobs, and what a developer should examine next. No tools."
-        ),
-    )
-    sessions = InMemorySessionService()
-    runner = CadenceAgentRunner(
-        app_name="recurring-ai-watch", agent=agent, session_service=sessions
-    )
-    workflow_id = workflow.WorkflowContext.get().info().workflow_id
-    await sessions.create_session(
-        app_name=runner.app_name, user_id="watch", session_id=workflow_id
-    )
-    report = ""
-    async for event in runner.run_async(
-        user_id="watch",
-        session_id=workflow_id,
-        new_message=types.Content(
-            role="user",
-            parts=[types.Part.from_text(text=f"{update.version}: {update.notes}")],
-        ),
-    ):
-        if event.is_final_response() and event.content and event.content.parts:
-            report = "".join(part.text or "" for part in event.content.parts).strip()
-    if not report:
-        raise LiveSchemaError("Gemini returned no report")
-    return report

@@ -8,10 +8,6 @@ from config import CatalogError, load_selection
 
 
 VALID_CATALOGS = {
-    "agents.yaml": """agents:
-  - id: google-adk
-    framework: google-adk
-""",
     "models.yaml": """models:
   - id: gemini-flash-lite
     provider: google
@@ -32,12 +28,10 @@ class CatalogLoaderTests(unittest.TestCase):
         with _CatalogDirectory() as directory:
             selection = load_selection(
                 directory,
-                agent_id="google-adk",
                 model_id="gemini-flash-lite",
                 classifier_id="jev-default",
             )
 
-        self.assertEqual(selection.agent.framework, "google-adk")
         self.assertEqual(
             selection.model.endpoint, "https://generativelanguage.googleapis.com/v1"
         )
@@ -50,24 +44,26 @@ class CatalogLoaderTests(unittest.TestCase):
             with self.assertRaisesRegex(CatalogError, "unknown models ID 'missing'"):
                 load_selection(
                     directory,
-                    agent_id="google-adk",
-                    model_id="missing",
+                        model_id="missing",
                     classifier_id="jev-default",
                 )
 
     def test_rejects_duplicate_id(self) -> None:
-        duplicate_agents = """agents:
-  - id: google-adk
-    framework: google-adk
-  - id: google-adk
-    framework: another-framework
+        duplicate_models = """models:
+  - id: gemini-flash-lite
+    provider: google
+    model: gemini-3.5-flash-lite
+    endpoint: https://generativelanguage.googleapis.com
+  - id: gemini-flash-lite
+    provider: ollama
+    model: llama3.2:latest
+    endpoint: http://localhost:11434
 """
-        with _CatalogDirectory({"agents.yaml": duplicate_agents}) as directory:
-            with self.assertRaisesRegex(CatalogError, "duplicate agents ID 'google-adk'"):
+        with _CatalogDirectory({"models.yaml": duplicate_models}) as directory:
+            with self.assertRaisesRegex(CatalogError, "duplicate models ID 'gemini-flash-lite'"):
                 load_selection(
                     directory,
-                    agent_id="google-adk",
-                    model_id="gemini-flash-lite",
+                        model_id="gemini-flash-lite",
                     classifier_id="jev-default",
                 )
 
@@ -81,8 +77,7 @@ class CatalogLoaderTests(unittest.TestCase):
             with self.assertRaisesRegex(CatalogError, "required non-empty string field 'endpoint'"):
                 load_selection(
                     directory,
-                    agent_id="google-adk",
-                    model_id="gemini-flash-lite",
+                        model_id="gemini-flash-lite",
                     classifier_id="jev-default",
                 )
 

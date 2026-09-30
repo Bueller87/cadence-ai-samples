@@ -90,14 +90,13 @@ class WatchWorkflowTests(unittest.IsolatedAsyncioTestCase):
         with patch("workflow.workflow.continue_as_new", capture_continuation):
             with self.assertRaises(Continued):
                 await watch.run(WatchInput(interval=timedelta(seconds=1), mode="live",
-                                           agent_framework="openai-agents", model_provider="ollama",
+                                           model_provider="ollama",
                                            model_name="llama3.2:latest"))
 
         self.assertEqual(len(continued), 1)
         self.assertEqual(continued[0].check_count, CHECKS_PER_RUN)
         self.assertEqual(continued[0].next_update_index, CHECKS_PER_RUN)
         self.assertTrue(continued[0].wait_before_first_check)
-        self.assertEqual(continued[0].agent_framework, "openai-agents")
         self.assertEqual(continued[0].model_provider, "ollama")
         self.assertEqual(continued[0].model_name, "llama3.2:latest")
 

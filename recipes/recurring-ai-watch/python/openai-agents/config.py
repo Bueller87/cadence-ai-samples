@@ -1,4 +1,4 @@
-"""Portable loader for the repository model and classifier YAML catalogs."""
+"""Portable loader for the root model and classifier YAML catalogs."""
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,18 +32,34 @@ class CatalogSelection:
     classifier: ClassifierConfig
 
 
-def load_selection(catalog_dir: str | Path, *, model_id: str,
-                   classifier_id: str) -> CatalogSelection:
+def load_selection(
+    catalog_dir: str | Path,
+    *,
+    model_id: str,
+    classifier_id: str,
+) -> CatalogSelection:
     directory = Path(catalog_dir)
-    model = _select(directory / "models.yaml", "models",
-                    ("id", "provider", "model", "endpoint"), model_id)
-    classifier = _select(directory / "classifiers.yaml", "classifiers",
-                         ("id", "provider", "model", "endpoint"), classifier_id)
-    return CatalogSelection(ModelConfig(**model), ClassifierConfig(**classifier))
+    model = _select(
+        directory / "models.yaml",
+        "models",
+        ("id", "provider", "model", "endpoint"),
+        model_id,
+    )
+    classifier = _select(
+        directory / "classifiers.yaml",
+        "classifiers",
+        ("id", "provider", "model", "endpoint"),
+        classifier_id,
+    )
+    return CatalogSelection(
+        model=ModelConfig(**model),
+        classifier=ClassifierConfig(**classifier),
+    )
 
 
-def _select(path: Path, section: str, required: tuple[str, ...],
-            selected_id: str) -> dict[str, str]:
+def _select(
+    path: Path, section: str, required: tuple[str, ...], selected_id: str
+) -> dict[str, str]:
     try:
         document = yaml.safe_load(path.read_text(encoding="utf-8"))
     except FileNotFoundError as error:
@@ -54,21 +70,26 @@ def _select(path: Path, section: str, required: tuple[str, ...],
         raise CatalogError(f"{path.name}: expected a {section!r} list")
 
     seen: set[str] = set()
-    selected = None
+    selected: dict[str, str] | None = None
     for index, raw in enumerate(document[section]):
         if not isinstance(raw, dict):
             raise CatalogError(f"{path.name}: {section}[{index}] must be a mapping")
         entry = {field: raw.get(field) for field in required}
-        missing = next((field for field, value in entry.items()
-                        if not isinstance(value, str) or not value), None)
+        missing = next(
+            (field for field, value in entry.items() if not isinstance(value, str) or not value),
+            None,
+        )
         if missing:
-            raise CatalogError(f"{path.name}: {section}[{index}] is missing required "
-                               f"non-empty string field {missing!r}")
+            raise CatalogError(
+                f"{path.name}: {section}[{index}] is missing required "
+                f"non-empty string field {missing!r}"
+            )
         if entry["id"] in seen:
             raise CatalogError(f"{path.name}: duplicate {section} ID {entry['id']!r}")
         seen.add(entry["id"])
         if entry["id"] == selected_id:
-            selected = entry
+            selected = entry  # type: ignore[assignment]
+
     if selected is None:
         raise CatalogError(f"{path.name}: unknown {section} ID {selected_id!r}")
-    return selected  # type: ignore[return-value]
+    return selected

@@ -22,10 +22,6 @@ from workflow import ReleaseNote, WatchStatus
 
 
 CATALOGS = {
-    "agents.yaml": """agents:
-  - id: google-adk
-    framework: google-adk
-""",
     "models.yaml": """models:
   - id: gemini-flash-lite
     provider: google
@@ -61,7 +57,6 @@ class MainTests(unittest.TestCase):
             )
             selected = load_selection(
                 directory,
-                agent_id=args.agent_id,
                 model_id=args.model_id,
                 classifier_id=args.classifier_id,
             )
@@ -83,12 +78,10 @@ class MainTests(unittest.TestCase):
             args = parser().parse_args(["--catalog-dir", str(directory), "worker"])
             selection = load_selection(
                 directory,
-                agent_id=args.agent_id,
                 model_id=args.model_id,
                 classifier_id=args.classifier_id,
             )
 
-        self.assertEqual(selection.agent.id, "google-adk")
         self.assertEqual(selection.model.model, "gemini-3.5-flash-lite")
         self.assertEqual(selection.classifier.endpoint, "https://api.typesafe.ai/v1/systemone")
 

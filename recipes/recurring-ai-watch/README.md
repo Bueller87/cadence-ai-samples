@@ -9,42 +9,58 @@ Mock mode is the default and needs no credentials. The live path supports only
 the framework/model paths below, with TypeSafe Jev or local Laya classification.
 There is no real release polling or agent tool use.
 
+## Pick a framework
+
+The same Watch is implemented once per agent framework. Each folder runs on its
+own and can be copied without the other.
+
+| Folder | Agent framework | Default task list |
+|---|---|---|
+| [`python/google-adk/`](python/google-adk/) | Google ADK | `recurring-ai-watch-google-adk` |
+| [`python/openai-agents/`](python/openai-agents/) | OpenAI Agents | `recurring-ai-watch-openai-agents` |
+
+The folders differ only in `inference.py`, `pyproject.toml`, the `main.py`
+defaults, and the framework-specific tests. The commands below use `google-adk`; swap in `openai-agents` for
+the other framework.
+
 ## Setup
 
 Use Python 3.12 or newer and a running Cadence server at `localhost:7833`, with
 the existing domain `cadence-ai-samples`. Run from the repository root:
 
 ```bash
-cd recipes/recurring-ai-watch/python
+cd recipes/recurring-ai-watch/python/google-adk
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e .
 ```
 
-The sample pins the Cadence Python SDK to PR #176 commit
-`2bc1af4207d20cd99ae64fa1ef82d803905af947` (an experimental build), Google ADK
-2.1.0, OpenAI Agents 0.12.5, OpenAI 2.30.0, and LiteLLM 1.83.7. The SDK pin fixes
-native OpenAI Activity argument decoding; released 0.4.0 cannot run that path.
-Use this sample's own virtual environment so the pinned SDK doesn't affect other projects.
+Both folders pin the Cadence Python SDK to PR #176 commit
+`2bc1af4207d20cd99ae64fa1ef82d803905af947` (an experimental build). The
+`google-adk` folder adds Google ADK 2.1.0 and LiteLLM 1.83.7. The
+`openai-agents` folder adds OpenAI Agents 0.12.5 and OpenAI 2.30.0. The SDK pin
+fixes native OpenAI Activity argument decoding; released 0.4.0 cannot run that path.
+Give each folder its own virtual environment so the pinned SDK doesn't affect other projects.
 
 ## Mock run
 
 Terminal 1 (leave the Worker running):
 
 ```bash
-python main.py --task-list recurring-ai-watch-mock worker
+python main.py worker
 ```
 
 Terminal 2 (same directory and interpreter selection):
 
 ```bash
-python main.py --task-list recurring-ai-watch-mock start
+python main.py start
 python main.py status
 python main.py check-now
 python main.py stop
 ```
 
-The default Workflow ID is `recurring-ai-watch-demo`. Supply `--workflow-id`
+The default Workflow ID is `recurring-ai-watch-google-adk-demo` (or
+`recurring-ai-watch-openai-agents-demo`). Supply `--workflow-id`
 before the command to operate on another Watch. `start --interval 15` sets the
 interval in seconds. `start` submits the Workflow and returns immediately.
 
@@ -60,7 +76,7 @@ export MODEL_AI_KEY='your-google-gemini-key'
 export CLASSIFIER_AI_KEY='your-typesafe-jev-key'
 python main.py --domain cadence-ai-samples \
     --task-list recurring-ai-watch-live \
-    --agent-id google-adk --model-id gemini-flash-lite --classifier-id jev-default \
+    --model-id gemini-flash-lite --classifier-id jev-default \
     worker --mode live --confirm-live
 ```
 
@@ -68,14 +84,14 @@ Terminal 2:
 
 ```bash
 python main.py --task-list recurring-ai-watch-live \
-    --agent-id google-adk --model-id gemini-flash-lite --classifier-id jev-default \
+    --model-id gemini-flash-lite --classifier-id jev-default \
     start --mode live
 python main.py status
 python main.py check-now
 python main.py stop
 ```
 
-Worker/start resolve command-line IDs through `agents.yaml`, `models.yaml`, and
+Worker/start resolve command-line IDs through `models.yaml` and
 `classifiers.yaml`; `--catalog-dir` supports a copied sample. The selected entries
 provide endpoints, while credentials remain Worker-local. The `jev-default` and
 `laya-local` classifiers are implemented; other classifier catalog entries are
@@ -83,7 +99,7 @@ candidates and are rejected.
 Keep mock and live Workers on separate task lists, and use a separate task list
 for each live pair. Use the same IDs and task list for its Worker and `start`.
 
-| Agent ID | Model ID | Model Activity and transport |
+| Folder | Model ID | Model Activity and transport |
 |---|---|---|
 | `google-adk` | `gemini-flash-lite` | `GoogleADKActivities.generate_content_async`, native Gemini |
 | `google-adk` | `llama3.2-local` | Same ADK Activity, LiteLLM `ollama_chat/llama3.2:latest` |
@@ -107,7 +123,7 @@ make `llama3.2:latest` available before starting either Ollama Worker. The
 `laya-local` classifier needs no key. See [Local AI services](../../README.md#local-ai-services)
 for Laya and Ollama installation and warm-up commands.
 
-The selected framework, provider, and model name travel with the Workflow across
+The selected provider and model name travel with the Workflow across
 Continue-As-New. Replay does not reread YAML. Endpoints and credential aliases
 are configured only in the Worker. All model requests use Cadence Activities.
 
@@ -117,7 +133,7 @@ For an automated CLI smoke, keep the matching Worker running and execute this
 ```bash
 MODE=live TASK_LIST=recurring-ai-watch-live ./smoke.sh
 # Or, with the mock Worker:
-MODE=mock TASK_LIST=recurring-ai-watch-mock ./smoke.sh
+MODE=mock TASK_LIST=recurring-ai-watch-google-adk ./smoke.sh
 ```
 
 Set `PYTHON=/path/to/python` to use a different Python executable. On Windows,
@@ -159,16 +175,17 @@ python -m py_compile config.py workflow.py live.py inference.py main.py
 python tests/local_cadence_checks.py
 ```
 
+Run these from either framework folder.
+
 For an explicit local Ollama check with mock classification and an isolated Worker:
 
 ```bash
-python tests/live_matrix_check.py --agent-id google-adk --model-id llama3.2-local --local-ollama
-python tests/live_matrix_check.py --agent-id openai-agents --model-id llama3.2-local --local-ollama
+python tests/live_matrix_check.py --model-id llama3.2-local --local-ollama
 ```
 
 For a full live check, first start the matching live Worker with credentials in a
-separate terminal, then run `tests/live_matrix_check.py` with matching `--agent-id`,
-`--model-id`, and `--task-list` (omit `--local-ollama`). The checker starts a unique
+separate terminal, then run `tests/live_matrix_check.py` from the same folder with
+matching `--model-id` and `--task-list` (omit `--local-ollama`). The checker starts a unique
 Watch, verifies model Activity completion and Signals, and stops that Watch.
 
 The released SDK's in-memory tests auto-fire timers, so they cannot faithfully

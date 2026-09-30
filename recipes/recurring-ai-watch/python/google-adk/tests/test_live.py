@@ -2,16 +2,10 @@ from __future__ import annotations
 
 import json
 import unittest
-import traceback
-from unittest.mock import AsyncMock, patch
-from cadence.contrib.google_adk import GoogleADKActivities
-from google.adk.models.llm_request import LlmRequest
-from google.genai.errors import ClientError
 from urllib.error import HTTPError
 
-from config import AgentConfig, CatalogSelection, ClassifierConfig, ModelConfig
+from config import CatalogSelection, ClassifierConfig, ModelConfig
 from live import (
-    ADKActivities,
     LiveAuthenticationError,
     LiveConfigurationError,
     LiveSchemaError,
@@ -32,7 +26,6 @@ def selection(
     classifier_endpoint: str = "https://api.typesafe.ai/v1/systemone",
 ):
     return CatalogSelection(
-        agent=AgentConfig(id="google-adk", framework="google-adk"),
         model=ModelConfig(
             id="gemini-flash-lite",
             provider="google",
@@ -87,13 +80,9 @@ class LiveConfigurationTests(unittest.TestCase):
             "CLASSIFIER_AI_KEY": "classifier-secret",
         }
 
-        classifier, model_activities = live_activities(selection(), environment)
+        classifier, _ = live_activities(selection(), environment)
 
         self.assertEqual(environment["GOOGLE_API_KEY"], "model-secret")
-        self.assertEqual(
-            model_activities.generate_content_async.name,
-            "GoogleADKActivities.generate_content_async",
-        )
         self.assertNotIn("secret", repr(classifier).lower())
 
     def test_laya_needs_no_classifier_key_and_requires_loopback(self) -> None:
@@ -204,36 +193,6 @@ class SystemOneClassifierTests(unittest.TestCase):
 
         with self.assertRaises(LiveSchemaError):
             classifier.classify(ReleaseNote("2.5.0", "Retry change."))
-
-
-class GeminiFailureTests(unittest.IsolatedAsyncioTestCase):
-    async def test_google_invalid_key_is_fatal_and_provider_details_are_hidden(self):
-        error = ClientError(400, {"error": {
-            "message": "provider detail must not be logged",
-            "details": [{"reason": "API_KEY_INVALID"}],
-        }})
-        with patch.object(GoogleADKActivities, "generate_content_async",
-                          new=AsyncMock(side_effect=error)):
-            try:
-                await ADKActivities().generate_content_async("gemini-3.5-flash-lite", LlmRequest())
-            except LiveAuthenticationError as failure:
-                from workflow import AI_ACTIVITY_OPTIONS, _fatal
-                self.assertTrue(_fatal(failure))
-                self.assertIn("LiveAuthenticationError",
-                              AI_ACTIVITY_OPTIONS["retry_policy"]["non_retryable_error_reasons"])
-                self.assertNotIn("provider detail", "".join(traceback.format_exception(failure)))
-            else:
-                self.fail("invalid key was not surfaced as an authentication failure")
-
-    async def test_other_google_errors_keep_their_failure_category(self):
-        for status, expected in ((400, LiveSchemaError), (401, LiveAuthenticationError),
-                                 (429, RuntimeError), (503, RuntimeError)):
-            with self.subTest(status=status), patch.object(
-                GoogleADKActivities, "generate_content_async",
-                new=AsyncMock(side_effect=ClientError(status, {})),
-            ):
-                with self.assertRaises(expected):
-                    await ADKActivities().generate_content_async("gemini-3.5-flash-lite", LlmRequest())
 
 
 if __name__ == "__main__":

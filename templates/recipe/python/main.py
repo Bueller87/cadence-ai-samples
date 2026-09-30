@@ -27,7 +27,6 @@ def parser() -> argparse.ArgumentParser:
     cli.add_argument("--task-list", default=DEFAULT_TASK_LIST)
     cli.add_argument("--workflow-id", default=DEFAULT_WORKFLOW_ID)
     cli.add_argument("--catalog-dir", type=Path, default=Path(__file__).parents[3])
-    cli.add_argument("--agent-id", default="google-adk")
     cli.add_argument("--model-id", default="gemini-flash-lite")
     cli.add_argument("--classifier-id", default="jev-default")
 
@@ -79,7 +78,6 @@ async def start(args: argparse.Namespace, selection: CatalogSelection) -> None:
             RecipeInput(
                 text=args.text,
                 mode=args.mode,
-                agent_framework=selection.agent.framework,
                 model_provider=selection.model.provider,
                 model_name=selection.model.model if args.mode == "live" else None,
             ),
@@ -99,7 +97,6 @@ async def main(argv: Sequence[str] | None = None) -> None:
     try:
         selection = load_selection(
             args.catalog_dir,
-            agent_id=args.agent_id,
             model_id=args.model_id,
             classifier_id=args.classifier_id,
         )

@@ -1,4 +1,4 @@
-"""Small CLI for the Recurring AI Watch sample."""
+"""Small CLI for the Recurring AI Watch sample (Google ADK)."""
 
 from __future__ import annotations
 
@@ -26,8 +26,8 @@ from workflow import (
 )
 
 
-DEFAULT_TASK_LIST = "recurring-ai-watch"
-DEFAULT_WORKFLOW_ID = "recurring-ai-watch-demo"
+DEFAULT_TASK_LIST = "recurring-ai-watch-google-adk"
+DEFAULT_WORKFLOW_ID = "recurring-ai-watch-google-adk-demo"
 
 
 def parser() -> argparse.ArgumentParser:
@@ -36,8 +36,7 @@ def parser() -> argparse.ArgumentParser:
     cli.add_argument("--domain", default="cadence-ai-samples")
     cli.add_argument("--task-list", default=DEFAULT_TASK_LIST)
     cli.add_argument("--workflow-id", default=DEFAULT_WORKFLOW_ID)
-    cli.add_argument("--catalog-dir", type=Path, default=Path(__file__).parents[3])
-    cli.add_argument("--agent-id", default="google-adk")
+    cli.add_argument("--catalog-dir", type=Path, default=Path(__file__).parents[4])
     cli.add_argument("--model-id", default="gemini-flash-lite")
     cli.add_argument("--classifier-id", default="jev-default")
 
@@ -94,7 +93,7 @@ async def run_worker(args: argparse.Namespace, selection: CatalogSelection) -> N
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     async with worker:
         print(f"{args.mode} worker polling task-list={args.task_list} "
-              f"agent={selection.agent.id} model={selection.model.id}")
+              f"model={selection.model.id} classifier={selection.classifier.id}")
         await asyncio.Event().wait()
 
 
@@ -111,7 +110,6 @@ async def start(args: argparse.Namespace, selection: CatalogSelection) -> None:
                 interval=timedelta(seconds=args.interval),
                 mode=args.mode,
                 model_name=selection.model.model if args.mode == "live" else None,
-                agent_framework=selection.agent.framework,
                 model_provider=selection.model.provider,
             ),
             task_list=args.task_list,
@@ -151,7 +149,6 @@ async def main(argv: Sequence[str] | None = None) -> None:
         if args.command in {"worker", "start"}:
             selection = load_selection(
                 args.catalog_dir,
-                agent_id=args.agent_id,
                 model_id=args.model_id,
                 classifier_id=args.classifier_id,
             )

@@ -49,16 +49,15 @@ The default task list is `__RECIPE_SLUG__` and the default Workflow ID is
 
 ## Configuration
 
-Worker and starter select entries from the repository-root `agents.yaml`,
-`models.yaml`, and `classifiers.yaml` by ID. Mock mode is the default. Live mode
-requires `--mode live --confirm-live` on the Worker and `--mode live` on `start`.
-Use the same catalog IDs and task list in both terminals.
+The starter uses Google ADK. Worker and starter select entries from the
+repository-root `models.yaml` and `classifiers.yaml` by ID. Mock mode is the
+default. Live mode requires `--mode live --confirm-live` on the Worker and
+`--mode live` on `start`. Use the same catalog IDs and task list in both terminals.
 
 ```bash
 export MODEL_AI_KEY='your-model-key'
 export CLASSIFIER_AI_KEY='your-jev-key'
 python main.py \
-  --agent-id google-adk \
   --model-id gemini-flash-lite \
   --classifier-id jev-default \
   worker --mode live --confirm-live
@@ -76,7 +75,7 @@ Activity followed by the mock or selected model Activity when analysis is needed
 ## Why this approach?
 
 Use deterministic Workflow code for orchestration, Jev for the narrow decision,
-and the selected agent/model only when flexible output is required.
+and the Google ADK agent with the selected model only when flexible output is required.
 
 ## Reliability and failure handling
 
