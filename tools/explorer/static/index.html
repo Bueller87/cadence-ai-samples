@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Choose a Cadence AI recipe and generate matching Linux commands from your local checkout.">
+  <title>Cadence AI Samples Explorer</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="style.css"><script defer src="app.js"></script>
+</head>
+<body>
+<header><div class="header-inner"><div><span class="eyebrow">CADENCE / DEVELOPER RECIPES</span><h1>AI Samples Explorer</h1></div><span class="local-badge">Local checkout</span></div></header>
+<main>
+  <div class="intro"><div><h2>Select. Inspect. Copy.</h2><p>Matching commands from the recipes on this machine.</p></div><button type="button" id="refresh" class="secondary">Refresh checkout</button></div>
+  <div id="load-status" role="status" aria-live="polite">Reading recipes…</div>
+  <div class="workspace">
+    <section class="panel picker" aria-labelledby="selection-title">
+      <h3 id="selection-title">Choose a combination</h3>
+      <label for="sample">Sample</label><select id="sample"></select>
+      <div id="language-field" hidden><label for="language">Language</label><select id="language"></select></div>
+      <div id="framework-field" hidden><label for="framework">Agent framework</label><select id="framework"></select></div>
+      <div id="mode-field" hidden><label for="mode" id="mode-label">Execution mode</label><select id="mode"></select></div>
+      <div id="model-field" hidden><label for="model">Model ID <a href="/source?path=models.yaml">models.yaml</a></label><select id="model"></select></div>
+      <div id="classifier-field" hidden><label for="classifier">Classifier ID <a href="/source?path=classifiers.yaml">classifiers.yaml</a></label><select id="classifier"></select></div>
+      <div id="batch-fields" hidden><p class="small">Live batch requires explicit values within the recipe’s limits.</p><label for="count">Ticket count</label><input id="count" type="number" min="1" inputmode="numeric"><label for="concurrency">Concurrency</label><input id="concurrency" type="number" min="1" inputmode="numeric"><p id="batch-limits" class="small"></p></div>
+      <p id="implementation" class="implementation"></p>
+      <a id="readme" hidden target="_blank" rel="noopener">Open recipe README</a>
+      <p class="small picker-note">Single choices are selected automatically. Choose a mode explicitly when more than one is available.</p>
+    </section>
+    <section class="panel output" aria-labelledby="commands-title">
+      <div class="output-heading"><h3 id="commands-title">Commands</h3><span class="platform" role="tablist" aria-label="Command platform"><button type="button" id="linux-tab" role="tab" aria-selected="true" aria-controls="result">Linux / Bash</button></span></div>
+      <p id="selection-status" role="status" aria-live="polite">Choose a sample to begin.</p>
+      <div id="result" role="tabpanel" aria-labelledby="linux-tab" hidden>
+        <details class="setup"><summary>One-time setup for this implementation</summary><div class="code-head"><span>Prepare dependencies</span><button type="button" data-copy="setup">Copy setup</button></div><pre><code id="setup-command"></code></pre></details>
+        <div class="terminal"><div class="code-head"><span>Terminal 1 · Worker</span><button type="button" data-copy="worker">Copy Worker</button></div><pre><code id="worker-command"></code></pre></div>
+        <div id="client-block" class="client"><div class="code-head"><span>Terminal 2 · run</span><button type="button" data-copy="start">Copy run command</button></div><pre><code id="client-command"></code></pre></div>
+        <details id="controls-block" hidden><summary>Watch controls · run individually when needed</summary><div id="control-commands"></div></details>
+        <p class="small">Commands include the implementation directory. Python commands use that implementation’s <code>.venv</code>. Keep its Worker running while using the client.</p>
+        <p id="credentials" class="small"></p><p id="copy-status" role="status" aria-live="polite"></p>
+      </div>
+    </section>
+  </div>
+  <section id="resolved-panel" class="panel" hidden><h3>Resolved combination</h3><div id="resolution" class="resolution-grid"></div><p id="binding" class="small"></p></section>
+  <section id="evidence-panel" class="panel" hidden><h3 id="evidence-title">Execution evidence</h3><p id="evidence-note"></p><dl id="evidence-ids"></dl><a id="evidence-link" hidden target="_blank" rel="noopener">Read recorded evidence</a></section>
+  <section id="local-panel" class="panel" hidden><h3>Local inference prerequisites</h3><p>Run these checks and warm-up commands in your terminal before starting the Worker. The first model download can take several minutes.</p><div id="local-commands"></div><a href="/source?path=README.md" target="_blank" rel="noopener">Local service installation and warm-up instructions</a></section>
+  <details class="panel teaching"><summary>How this fits the teaching model</summary><p>Choose an implementation directory, then select the catalog IDs its CLI supports. Its own loader resolves those IDs. The Worker registers Activities on the selected task list; Cadence routes the Workflow’s scheduled Activities to that Worker.</p><p>Inference belongs in Activities. Endpoints and credentials stay with the Worker. This explorer reads local files and previews commands; execute the copied commands in your terminal.</p></details>
+  <footer id="read-at"></footer>
+  <noscript>Enable JavaScript to explore recipes and generate commands.</noscript>
+</main>
+</body>
+</html>
