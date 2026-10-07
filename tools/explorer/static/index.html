@@ -59,7 +59,15 @@
 
   <section class="panel step" aria-labelledby="web-title">
     <div class="step-heading"><span>6</span><div><h3 id="web-title">Open Cadence-Web</h3><p>Inspect the configured domain after you start a Workflow.</p></div></div>
-    <a id="cadence-web" class="button-link" href="http://localhost:8088/domains/cadence-ai-samples/workflows" target="_blank" rel="noopener">Open cadence-ai-samples in Cadence-Web</a>
+    <div class="button-group web-actions"><a id="cadence-web" class="button-link" href="http://localhost:8088/redirects/domain/cadence-ai-samples/workflows" target="_blank" rel="noopener">Open domain</a><button type="button" id="resolve-run" hidden>Resolve latest run</button></div>
+    <div id="workflow-run-panel" class="run-panel" hidden>
+      <div class="run-context"><div><span>Workflow ID</span><code id="web-workflow-id"></code></div><div><span>Cluster</span><code id="web-cluster"></code></div></div>
+      <label for="run-id">Run ID <span class="small">Paste an exact historical Run ID to override the latest run.</span></label>
+      <input id="run-id" type="text" maxlength="255" autocomplete="off" spellcheck="false">
+      <p id="workflow-run-status" class="small" role="status" aria-live="polite">Run not resolved.</p>
+      <div class="button-group run-links"><a id="workflow-history" class="button-link" target="_blank" rel="noopener" hidden>Open history</a><a id="workflow-queries" class="button-link" target="_blank" rel="noopener" hidden>Open queries</a></div>
+    </div>
+    <p id="workflow-run-scope" class="small">Complete a supported selection to resolve a run.</p>
   </section>
   <p id="copy-status" role="status" aria-live="polite"></p>
   <footer id="read-at"></footer>

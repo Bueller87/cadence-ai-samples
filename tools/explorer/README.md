@@ -120,6 +120,22 @@ cannot send arbitrary command text, and setup/control commands remain copy-only.
 Windows command tabs and terminal handoff are deferred. The Python server remains
 independent of the Bash launcher so another entry point can reuse it later.
 
+## Cadence-Web run links
+
+For Recurring AI Watch, Step 6 shows the generated Workflow ID and can explicitly
+resolve its current Run ID through the local Cadence-Web read-only API. This needs
+neither the Cadence CLI nor a Cadence SDK dependency in the Explorer. Resolution
+never runs automatically and does not imply that a Workflow was started.
+
+After resolution, **Open history** and **Open queries** target that exact run. The
+Run ID remains editable so an older exact run can be pasted. Resolve again after
+Continue-As-New to replace it with the current run. A missing execution or
+unavailable Cadence-Web instance leaves **Open domain** available.
+
+Ticket Routing direct-run links are deferred because its current actions can
+create several Workflow IDs. Supporting it requires an explicit Workflow
+selection rather than guessing.
+
 ## Validation
 
 ```bash

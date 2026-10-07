@@ -82,11 +82,12 @@ class InferenceTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(LiveConfigurationError):
             runtime_model("anthropic", "model")
 
-    def test_unsupported_classifiers_and_unknown_ids(self):
+    def test_supported_classifiers_and_unknown_ids(self):
+        validate_live(selected("gemini-flash-lite", "jev-default"))
         validate_live(selected("gemini-flash-lite", "laya-local"))
         for classifier in ("von-local", "reflex-local", "kev-local"):
-            with self.assertRaisesRegex(LiveConfigurationError, "catalog candidates"):
-                validate_live(selected("gemini-flash-lite", classifier))
+            with self.assertRaises(CatalogError):
+                selected("gemini-flash-lite", classifier)
         with self.assertRaises(CatalogError):
             selected("unknown")
 

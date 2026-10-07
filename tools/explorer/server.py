@@ -50,6 +50,8 @@ class Handler(BaseHTTPRequestHandler):
                 result = self.explorer.resolve(query)
             elif url.path == '/api/check':
                 result = self.explorer.check(query)
+            elif url.path == '/api/workflow-run':
+                result = self.explorer.workflow_run(query)
             elif url.path == '/source':
                 path = self.explorer.source_path(query.get('path',''))
                 self.send(200, path.read_bytes(), 'text/plain; charset=utf-8')

@@ -74,11 +74,12 @@ class InferenceTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(client.call_args.kwargs["base_url"], expected_url)
                 self.assertEqual(client.call_args.kwargs["max_retries"], 0)
 
-    def test_unsupported_classifiers_and_unknown_ids(self):
+    def test_supported_classifiers_and_unknown_ids(self):
+        validate_live(selected("gemini-flash-lite", "jev-default"))
         validate_live(selected("gemini-flash-lite", "laya-local"))
         for classifier in ("von-local", "reflex-local", "kev-local"):
-            with self.assertRaisesRegex(LiveConfigurationError, "catalog candidates"):
-                validate_live(selected("gemini-flash-lite", classifier))
+            with self.assertRaises(CatalogError):
+                selected("gemini-flash-lite", classifier)
         with self.assertRaises(CatalogError):
             selected("unknown")
 

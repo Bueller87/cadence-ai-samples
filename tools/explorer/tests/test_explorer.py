@@ -16,6 +16,7 @@ import unittest
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import urlencode
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT/'tools/explorer'))
@@ -59,6 +60,36 @@ class ProbeStub(BaseHTTPRequestHandler):
 ProbeStub.posts=[]
 
 
+class WorkflowStub(BaseHTTPRequestHandler):
+    mode='found'
+    run_id='run-current'
+    paths=[]
+
+    def do_GET(self):
+        WorkflowStub.paths.append(self.path)
+        if WorkflowStub.mode=='not-found':
+            self.send_response(404);self.end_headers();return
+        if WorkflowStub.mode=='auth':
+            self.send_response(401);self.end_headers();return
+        if WorkflowStub.mode=='slow':
+            time.sleep(.05)
+        if WorkflowStub.mode=='malformed':
+            payload=b'not json'
+        elif WorkflowStub.mode=='missing':
+            payload=json.dumps(dict(workflowExecutionInfo=None)).encode()
+        else:
+            payload=json.dumps(dict(workflowExecutionInfo=dict(
+                workflowExecution=dict(runId=WorkflowStub.run_id)))).encode()
+        try:
+            self.send_response(200);self.send_header('Content-Type','application/json')
+            self.send_header('Content-Length',str(len(payload)));self.end_headers();self.wfile.write(payload)
+        except BrokenPipeError:
+            pass
+
+    def log_message(self,*args):
+        pass
+
+
 class TerminalStub:
     def __init__(self,available=True,state='prefilled'):
         self.available=available
@@ -74,7 +105,8 @@ class ExplorerTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='cadence explorer ')
         self.root = Path(self.temp.name)
-        shutil.copytree(ROOT/'recipes',self.root/'recipes')
+        shutil.copytree(ROOT/'recipes',self.root/'recipes',
+            ignore=shutil.ignore_patterns('.venv','venv','__pycache__'))
         for name in ('models.yaml','classifiers.yaml','README.md'):
             shutil.copy(ROOT/name,self.root/name)
         self.explorer = Explorer(self.root)
@@ -271,6 +303,56 @@ class ExplorerTests(unittest.TestCase):
             self.assertEqual([path for path,_ in ProbeStub.posts],['/api/generate','/v1/systemone'])
             blocked=self.explorer.post_json('remote','https://example.com/v1',{},1)
             self.assertEqual(blocked['state'],'unavailable check')
+        finally:
+            stub.shutdown();stub.server_close();thread.join()
+
+    def test_workflow_run_resolution_states_and_http_route(self):
+        stub=ThreadingHTTPServer(('127.0.0.1',0),WorkflowStub)
+        thread=threading.Thread(target=stub.serve_forever,daemon=True);thread.start()
+        base=f'http://127.0.0.1:{stub.server_port}'
+        request=dict(sample='recurring-ai-watch',
+            implementation='recipes/recurring-ai-watch/python/google-adk',
+            mode='mock',model='gemini-flash-lite',classifier='jev-default',
+            cadence_web_url='http://attacker.example',cluster='attacker')
+        try:
+            self.explorer=Explorer(self.root,cadence_web_url=base)
+            WorkflowStub.mode='found';WorkflowStub.run_id='run-current';WorkflowStub.paths.clear()
+            result=self.explorer.workflow_run(request)
+            self.assertEqual((result['state'],result['run_id'],result['cluster']),
+                ('found','run-current','cluster0'))
+            self.assertEqual(WorkflowStub.paths[-1],
+                '/api/domains/cadence-ai-samples/cluster0/workflows/'
+                'recurring-ai-watch-python-google-adk-mock-gemini-flash-lite-jev-default-demo')
+            WorkflowStub.run_id='run-continued'
+            self.assertEqual(self.explorer.workflow_run(request)['run_id'],'run-continued')
+            for mode,state in [('not-found','no execution'),('auth','authentication required'),
+                    ('malformed','malformed response'),('missing','no execution')]:
+                WorkflowStub.mode=mode
+                self.assertEqual(self.explorer.workflow_run(request)['state'],state)
+            WorkflowStub.mode='slow'
+            timed=Explorer(self.root,cadence_web_url=base,workflow_timeout=.001)
+            self.assertEqual(timed.workflow_run(request)['state'],'unreachable')
+            refused=socket.socket();refused.bind(('127.0.0.1',0))
+            port=refused.getsockname()[1];refused.close()
+            closed=Explorer(self.root,cadence_web_url=f'http://127.0.0.1:{port}')
+            self.assertEqual(closed.workflow_run(request)['state'],'unreachable')
+            with self.assertRaises(Unsupported):
+                self.explorer.workflow_run(dict(sample='ticket-routing',
+                    implementation='recipes/ticket-routing/go',mode='demo',classifier='mock'))
+
+            WorkflowStub.mode='found';WorkflowStub.run_id='run-http'
+            terminal=TerminalStub()
+            server=ThreadingHTTPServer(('127.0.0.1',0),partial(
+                Handler,explorer=self.explorer,terminal_launcher=terminal))
+            server_thread=threading.Thread(target=server.serve_forever,daemon=True)
+            server_thread.start()
+            connection=http.client.HTTPConnection('127.0.0.1',server.server_port)
+            try:
+                connection.request('GET','/api/workflow-run?'+urlencode(request))
+                response=connection.getresponse();self.assertEqual(response.status,200)
+                self.assertEqual(json.loads(response.read())['run_id'],'run-http')
+            finally:
+                connection.close();server.shutdown();server.server_close();server_thread.join()
         finally:
             stub.shutdown();stub.server_close();thread.join()
 

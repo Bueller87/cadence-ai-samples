@@ -142,12 +142,12 @@ class MainTests(unittest.TestCase):
                 event.return_value.wait = AsyncMock()
                 asyncio.run(run_worker(parser().parse_args(["worker"]), selection))
 
-    def test_catalog_candidate_classifier_is_rejected_before_worker_or_start(self) -> None:
+    def test_removed_classifier_is_unknown_before_worker_or_start(self) -> None:
         for classifier in ("von-local", "reflex-local", "kev-local"):
             for command in ("worker", "start"):
                 with redirect_stderr(StringIO()) as errors, self.assertRaises(SystemExit):
                     asyncio.run(main(["--classifier-id", classifier, command]))
-                self.assertIn("catalog candidates", errors.getvalue())
+                self.assertIn("unknown classifiers ID", errors.getvalue())
 
     def test_laya_classifier_is_accepted_for_worker_and_start(self) -> None:
         with (
