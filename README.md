@@ -27,6 +27,19 @@ All samples use the Cadence domain `cadence-ai-samples`.
 
 Browse recipe directories by problem or use case. The first recipe, [StreamWave ticket routing](recipes/ticket-routing/), demonstrates typed AI-assisted classification with durable Cadence routing. Each recipe README explains how to run it, what to expect, and how it handles failures.
 
+### Local Samples Explorer
+
+Run `./scripts/explore.sh` to open a localhost explorer of this checkout. Choose a
+sample, follow its setup and service checks, warm local inference when applicable,
+and copy matching Worker and Workflow commands. Refresh reads the current recipe
+files and catalogs, including local edits.
+
+The launcher needs Python 3.10+ with venv support and installs its one small
+dependency on first use. Those are explorer prerequisites only. Each recipe lists
+its own Go or Python runtime and service requirements. The explorer previews
+commands; run them in your terminal.
+See [explorer usage and validation](tools/explorer/README.md).
+
 ## Local AI services
 
 Some recipes can run without API keys by using [Laya](https://github.com/NandhaKishorM/laya) for local classification and [Ollama](https://ollama.com/) for local models. The [Recurring AI Watch](recipes/recurring-ai-watch/) recipe selects them with `--classifier-id laya-local` and `--model-id llama3.2-local`.

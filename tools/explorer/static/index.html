@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Choose a Cadence AI recipe and generate matching Linux commands from your local checkout.">
+  <title>Cadence AI Samples Explorer</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="style.css"><script defer src="app.js"></script>
+</head>
+<body>
+  <header><div class="header-inner"><div><span class="eyebrow">CADENCE / DEVELOPER RECIPES</span><h1>AI Samples Explorer</h1></div><span class="local-badge">Local checkout</span></div></header>
+<main>
+  <div class="intro"><div><h2>Choose. Prepare. Run.</h2><p>A first-run companion driven by the recipes on this machine.</p></div></div>
+  <div id="load-status" role="status" aria-live="polite">Reading recipes…</div>
+  <section class="panel step picker" aria-labelledby="selection-title">
+    <div class="step-heading"><span>1</span><div><h3 id="selection-title">Choose a combination</h3><p id="scenario">Choose a sample to see its scenario.</p></div></div>
+    <div class="selection-grid">
+      <div><label for="sample">Sample</label><select id="sample"></select></div>
+      <div id="language-field" hidden><label for="language">Language</label><select id="language"></select></div>
+      <div id="framework-field" hidden><label for="framework">Framework</label><select id="framework"></select></div>
+      <div id="mode-field" hidden><label for="mode" id="mode-label">Execution mode</label><select id="mode"></select></div>
+      <div id="model-field" hidden><label for="model">Model ID <a href="/source?path=models.yaml">models.yaml</a></label><select id="model"></select></div>
+      <div id="classifier-field" hidden><label for="classifier">Classifier ID <a href="/source?path=classifiers.yaml">classifiers.yaml</a></label><select id="classifier"></select></div>
+      <div id="batch-fields" hidden><p class="small">Live batch requires explicit values.</p><label for="count">Ticket count</label><input id="count" type="number" min="1" inputmode="numeric"><label for="concurrency">Concurrency</label><input id="concurrency" type="number" min="1" inputmode="numeric"><p id="batch-limits" class="small"></p></div>
+    </div>
+    <p id="implementation" class="implementation"></p><a id="readme" hidden target="_blank" rel="noopener">Open recipe README</a>
+    <p id="selection-status" role="status" aria-live="polite" class="notice">Choose a sample to begin.</p>
+  </section>
+
+  <section class="panel step" aria-labelledby="prepare-title">
+    <div class="step-heading"><span>2</span><div><h3 id="prepare-title">Check services and prepare</h3><p>Refresh rereads this checkout and checks services for the current selection.</p></div></div>
+    <button type="button" id="refresh">Refresh and check services</button>
+    <p id="check-status" class="small" role="status" aria-live="polite">Services have not been checked.</p>
+    <div id="service-results" class="service-grid"></div>
+    <details id="setup-block" class="setup" hidden><summary>One-time recipe setup</summary><div class="code-head"><span>Prepare dependencies</span><button type="button" data-copy="setup">Copy setup</button></div><pre><code id="setup-command"></code></pre></details>
+    <p id="credentials" class="small"></p>
+    <a href="/source?path=README.md" target="_blank" rel="noopener">Local services and domain setup</a>
+  </section>
+
+  <section class="panel step" aria-labelledby="warmup-title">
+    <div class="step-heading"><span>3</span><div><h3 id="warmup-title">Warm up local inference</h3><p>Explicitly exercise only the selected locally hosted components.</p></div></div>
+    <button type="button" id="warmup" disabled>Warm up selected local services</button>
+    <p id="warmup-status" class="small" role="status" aria-live="polite">Complete a selection to see whether warm-up applies.</p>
+    <div id="warmup-results" class="service-grid"></div>
+  </section>
+
+  <section class="panel step" aria-labelledby="worker-title">
+    <div class="step-heading"><span>4</span><div><h3 id="worker-title">Copy Worker command</h3><p>Terminal 1: Worker. Leave it running.</p></div></div>
+    <div id="worker-block" class="terminal" hidden><div class="code-head"><span>Terminal 1 · Worker</span><button type="button" data-copy="worker">Copy Worker</button></div><pre><code id="worker-command"></code></pre></div>
+  </section>
+
+  <section class="panel step" aria-labelledby="workflow-title">
+    <div class="step-heading"><span>5</span><div><h3 id="workflow-title">Copy Workflow command</h3><p>Terminal 2: Start Workflow. Keep Terminal 1 running.</p></div></div>
+    <div id="client-block" class="client" hidden><div class="code-head"><span>Terminal 2 · Start Workflow</span><button type="button" data-copy="start">Copy start</button></div><pre><code id="client-command"></code></pre></div>
+    <details id="controls-block" hidden><summary>Workflow controls · copy individually</summary><div id="control-commands"></div></details>
+  </section>
+
+  <section class="panel step" aria-labelledby="web-title">
+    <div class="step-heading"><span>6</span><div><h3 id="web-title">Open Cadence-Web</h3><p>Inspect the configured domain after you start a Workflow.</p></div></div>
+    <a id="cadence-web" class="button-link" href="http://localhost:8088/domains/cadence-ai-samples/workflows" target="_blank" rel="noopener">Open cadence-ai-samples in Cadence-Web</a>
+  </section>
+  <p id="copy-status" role="status" aria-live="polite"></p>
+  <footer id="read-at"></footer>
+  <noscript>Enable JavaScript to explore recipes and generate commands.</noscript>
+</main>
+</body>
+</html>
