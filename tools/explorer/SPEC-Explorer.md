@@ -213,11 +213,27 @@ building scaffolding for them during the POC.
    executions, multiple runs, and Continue-As-New explicitly.
 4. **Windows experience:** Linux/Mac and Windows command tabs in the same explorer,
    plus a Windows launcher; preserve the same selection flow.
-5. **Terminal handoff:** open a new terminal with the Worker/Workflow command ready
-   for the user to review and press Enter. No automatic execution.
-6. **Optional infrastructure startup:** explicit start actions only after handling
+5. **Terminal handoff:** the post-demo macOS POC opens Terminal.app with a
+   re-resolved Worker/Workflow command ready for the user to review and press
+   Enter. It never presses Enter automatically; copy remains the permission
+   fallback. Other terminal applications and platforms remain future work.
+6. **Recipe runtime bootstrap:** make the first five minutes after clone reliable
+   by detecting whether the selected implementation is prepared and offering one
+   explicit, recipe-scoped setup action. For Python, create/reuse the implementation
+   virtual environment and install its declared dependencies; support equivalent
+   dependency preparation for other languages. Keep manual setup available, show
+   progress and bounded failures, handle partial/repeated setup safely, and never
+   turn the Explorer into an arbitrary package installer or shell executor. Worker
+   and Workflow handoff must explain when preparation is still required.
+7. **Secure live credential handoff:** before opening a live Worker command,
+   identify the required LLM and classifier credential names and let the user
+   provide their values in a secure local context, such as a hidden Terminal
+   prompt or an approved credential store. Never accept, display, persist, log,
+   or return secret values through the browser, command preview, URL, Workflow
+   input, or history. Keep mock and keyless-local paths free of credential prompts.
+8. **Optional infrastructure startup:** explicit start actions only after handling
    existing installations, running services, ports, permissions, and partial states.
-7. **Unimplemented classifier opportunities:** add implementations/tests before
+9. **Unimplemented classifier opportunities:** add implementations/tests before
    restoring these removed catalog candidates:
    - `kev-local` (`kev`, `kev-latest`): no provider implementation in either recipe.
    - `von-local` (`von`, `von-1.2.0`): no provider implementation in either recipe.

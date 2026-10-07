@@ -59,6 +59,17 @@ class ProbeStub(BaseHTTPRequestHandler):
 ProbeStub.posts=[]
 
 
+class TerminalStub:
+    def __init__(self,available=True,state='prefilled'):
+        self.available=available
+        self.state=state
+        self.commands=[]
+
+    def launch(self,command):
+        self.commands.append(command)
+        return dict(state=self.state,detail='stub result')
+
+
 class ExplorerTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='cadence explorer ')
@@ -264,13 +275,16 @@ class ExplorerTests(unittest.TestCase):
             stub.shutdown();stub.server_close();thread.join()
 
     def test_http_refresh_errors_and_loopback_boundary(self):
-        server=ThreadingHTTPServer(('127.0.0.1',0),partial(Handler,explorer=self.explorer))
+        terminal=TerminalStub()
+        server=ThreadingHTTPServer(('127.0.0.1',0),partial(
+            Handler,explorer=self.explorer,terminal_launcher=terminal))
         thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
         connection=http.client.HTTPConnection('127.0.0.1',server.server_port)
         try:
             connection.request('GET','/api/state');response=connection.getresponse()
             self.assertEqual(response.status,200);self.assertEqual(response.getheader('Cache-Control'),'no-store')
-            self.assertEqual(len(json.loads(response.read())['models']),3)
+            state=json.loads(response.read());self.assertEqual(len(state['models']),3)
+            self.assertTrue(state['terminal_handoff'])
             path=self.root/'models.yaml';path.write_text(path.read_text().replace('llama3.2:latest','new-model'))
             connection.request('GET','/api/state');response=connection.getresponse()
             self.assertEqual(json.loads(response.read())['models'][1]['model'],'new-model')
@@ -288,6 +302,49 @@ class ExplorerTests(unittest.TestCase):
                 'Content-Type':'application/json','Origin':f'http://127.0.0.1:{server.server_port}'})
             response=connection.getresponse();self.assertEqual(response.status,200)
             self.assertEqual(json.loads(response.read())['components'],[])
+            terminal_request=dict(sample='recurring-ai-watch',
+                implementation='recipes/recurring-ai-watch/python/google-adk',mode='mock',
+                model='gemini-flash-lite',classifier='jev-default',action='worker',
+                command='malicious command')
+            body=json.dumps(terminal_request)
+            connection.request('POST','/api/terminal',body=body,headers={'Content-Type':'application/json'})
+            response=connection.getresponse();self.assertEqual(response.status,403);response.read()
+            headers={'Content-Type':'application/json',
+                'Origin':f'http://127.0.0.1:{server.server_port}'}
+            connection.request('POST','/api/terminal',body=body,headers={
+                **headers,'Host':'attacker.example'})
+            response=connection.getresponse();self.assertEqual(response.status,403);response.read()
+            connection.request('POST','/api/terminal',body=body,headers=headers)
+            response=connection.getresponse();self.assertEqual(response.status,200)
+            self.assertEqual(json.loads(response.read())['state'],'prefilled')
+            self.assertEqual(len(terminal.commands),1)
+            self.assertIn('.venv/bin/python',terminal.commands[0])
+            self.assertNotIn('malicious command',terminal.commands[0])
+            terminal_request['action']='start';body=json.dumps(terminal_request)
+            connection.request('POST','/api/terminal',body=body,headers=headers)
+            response=connection.getresponse();self.assertEqual(response.status,200);response.read()
+            self.assertIn(' start --mode mock',terminal.commands[-1])
+            terminal_request['action']='status';body=json.dumps(terminal_request)
+            connection.request('POST','/api/terminal',body=body,headers=headers)
+            response=connection.getresponse();self.assertEqual(response.status,422);response.read()
+            self.assertEqual(len(terminal.commands),2)
+            unavailable=dict(sample='ticket-routing',implementation='recipes/ticket-routing/go',
+                mode='worker',classifier='mock',action='start')
+            connection.request('POST','/api/terminal',body=json.dumps(unavailable),headers=headers)
+            response=connection.getresponse();self.assertEqual(response.status,422);response.read()
+            self.assertEqual(len(terminal.commands),2)
+            connection.request('POST','/api/terminal',body='{broken',headers=headers)
+            response=connection.getresponse();self.assertEqual(response.status,422);response.read()
+            connection.request('POST','/api/terminal',body='{}',headers={
+                'Content-Type':'text/plain','Origin':headers['Origin']})
+            response=connection.getresponse();self.assertEqual(response.status,415);response.read()
+            connection.request('POST','/api/terminal',body=' '*16385,headers=headers)
+            response=connection.getresponse();self.assertEqual(response.status,413);response.read()
+            terminal.available=False
+            terminal_request['action']='worker';body=json.dumps(terminal_request)
+            connection.request('POST','/api/terminal',body=body,headers=headers)
+            response=connection.getresponse();self.assertEqual(response.status,422);response.read()
+            self.assertEqual(len(terminal.commands),2)
         finally:
             connection.close();server.shutdown();server.server_close();thread.join()
 

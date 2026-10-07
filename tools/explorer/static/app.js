@@ -17,6 +17,9 @@
     for(const id of ["setup-block","worker-block","client-block","controls-block"])$(id).hidden=true;
     for(const id of ["setup-command","worker-command","client-command"])$(id).textContent="";
     $("control-commands").replaceChildren();$("warmup").disabled=true;
+    for(const id of ["worker-terminal-status","start-terminal-status"])$(id).textContent="";
+    for(const id of ["open-worker","open-start"]){$(id).hidden=true;$(id).disabled=false;}
+    $("terminal-note").hidden=true;
     $("warmup-results").replaceChildren();$("warmup-status").textContent="Complete a selection to see whether warm-up applies.";
     $("selection-status").textContent=message;$("selection-status").className=isError?"notice error":"notice";
     $("copy-status").textContent="";
@@ -86,6 +89,10 @@
     $("setup-command").textContent=result.setup;$("setup-block").hidden=false;
     $("worker-command").textContent=result.worker;$("worker-block").hidden=false;
     $("client-command").textContent=result.start;$("client-block").hidden=!result.start;
+    const terminalAvailable=state?.terminal_handoff===true;
+    $("open-worker").hidden=!terminalAvailable;
+    $("open-start").hidden=!terminalAvailable||!result.start;
+    $("terminal-note").hidden=!terminalAvailable;
     $("controls-block").hidden=!result.controls.length;$("control-commands").replaceChildren();
     for(const control of result.controls){const head=node("div");head.className="code-head";head.append(node("span",control.name));const button=node("button","Copy "+control.name);button.type="button";button.addEventListener("click",()=>copyText(control.command,button));head.append(button);const pre=node("pre");pre.append(node("code",control.command));$("control-commands").append(head,pre);}
     $("credentials").textContent=result.credentials.length?"Worker environment variables: "+result.credentials.join(", ")+". Set values only in Terminal 1.":result.live?"This selection needs no AI API keys.":"Mock mode needs no AI API keys.";
@@ -133,6 +140,24 @@
     }
   }
 
+  async function openTerminal(action,button){
+    if(!result||!result[action])return;
+    const version=requestVersion,status=$(action==="worker"?"worker-terminal-status":"start-terminal-status");
+    let copied=true;
+    button.disabled=true;status.className="small";status.textContent="Copying command and opening Terminal…";
+    try{await navigator.clipboard.writeText(result[action]);}
+    catch{copied=false;}
+    try{
+      const payload={...Object.fromEntries(query()),action};
+      const response=await fetch("/api/terminal",{method:"POST",headers:{"Content-Type":"application/json","Origin":location.origin},body:JSON.stringify(payload)});
+      const body=await response.json();if(version!==requestVersion)return;
+      if(!response.ok)throw Error(body.error||body.detail||"Terminal handoff failed.");
+      if(body.state==="prefilled")status.textContent="Ready in Terminal. Review the command and press Enter.";
+      else status.textContent=body.detail;
+    }catch(error){if(version===requestVersion)status.textContent=(copied?error.message+" The command is still copied.":error.message);}
+    finally{if(version===requestVersion)button.disabled=false;}
+  }
+
   async function refresh(runChecks=false){
     clear("Reading recipes…");$("refresh").disabled=true;$("load-status").textContent="Reading the current checkout…";
     try{const response=await fetch("/api/state",{cache:"no-store"});if(!response.ok)throw Error("Could not read recipes.");state=await response.json();options("sample",state.recipes.map(r=>({id:r.id,label:r.title})),{placeholder:"Choose a sample"});$("load-status").textContent=`${state.recipes.length} samples in this checkout`;await flow();if(runChecks&&result)await checkServices();}
@@ -147,5 +172,6 @@
   for(const id of ["count","concurrency"])$(id).addEventListener("input",flow);
   $("refresh").addEventListener("click",()=>refresh(true));$("warmup").addEventListener("click",warmup);
   document.querySelectorAll("[data-copy]").forEach(button=>button.addEventListener("click",()=>{if(result)copyText(result[button.dataset.copy],button);}));
+  document.querySelectorAll("[data-terminal]").forEach(button=>button.addEventListener("click",()=>openTerminal(button.dataset.terminal,button)));
   refresh(false);
 })();
