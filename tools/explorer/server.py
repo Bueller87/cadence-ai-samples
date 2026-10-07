@@ -36,8 +36,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         try:
-            host = urlsplit('http://' + self.headers.get('Host', '')).hostname
-            if host not in {'127.0.0.1', 'localhost'}:
+            if not self.loopback_host():
                 self.send(403, 'Use the loopback URL printed by the launcher.', 'text/plain; charset=utf-8')
                 return
             url = urlsplit(self.path)
@@ -46,6 +45,8 @@ class Handler(BaseHTTPRequestHandler):
                 result = self.explorer.snapshot()
             elif url.path == '/api/resolve':
                 result = self.explorer.resolve(query)
+            elif url.path == '/api/check':
+                result = self.explorer.check(query)
             elif url.path == '/source':
                 path = self.explorer.source_path(query.get('path',''))
                 self.send(200, path.read_bytes(), 'text/plain; charset=utf-8')
@@ -63,7 +64,35 @@ class Handler(BaseHTTPRequestHandler):
             self.send(422, json.dumps(dict(error=str(error))), 'application/json; charset=utf-8')
 
     def do_POST(self):
-        self.send(405, 'The explorer only reads files and previews commands.', 'text/plain; charset=utf-8')
+        try:
+            if not self.loopback_host():
+                self.send(403, 'Use the loopback URL printed by the launcher.', 'text/plain; charset=utf-8')
+                return
+            if urlsplit(self.path).path != '/api/warmup':
+                self.send(405, 'This action is not available.', 'text/plain; charset=utf-8')
+                return
+            origin = self.headers.get('Origin')
+            fetch_site = self.headers.get('Sec-Fetch-Site')
+            expected = 'http://' + self.headers.get('Host', '')
+            if origin != expected and fetch_site != 'same-origin':
+                self.send(403, 'Warm-up requires a same-origin browser request.', 'text/plain; charset=utf-8')
+                return
+            if self.headers.get_content_type() != 'application/json':
+                self.send(415, 'Warm-up requires JSON.', 'text/plain; charset=utf-8')
+                return
+            length = int(self.headers.get('Content-Length', '0'))
+            if length <= 0 or length > 16384:
+                self.send(413, 'Warm-up request is empty or too large.', 'text/plain; charset=utf-8')
+                return
+            request = json.loads(self.rfile.read(length))
+            if not isinstance(request, dict):
+                raise ValueError('Warm-up request must be an object.')
+            self.send(200, json.dumps(self.explorer.warmup(request)), 'application/json; charset=utf-8')
+        except (InvalidSelection, Unsupported, ValueError, OSError, SyntaxError, TypeError, AttributeError, json.JSONDecodeError) as error:
+            self.send(422, json.dumps(dict(error=str(error))), 'application/json; charset=utf-8')
+
+    def loopback_host(self):
+        return urlsplit('http://' + self.headers.get('Host', '')).hostname in {'127.0.0.1', 'localhost'}
 
     def log_message(self, *args):
         pass  # Keep local paths and selections out of access logs.

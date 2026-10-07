@@ -5,9 +5,12 @@ import ast
 import json
 import re
 import shlex
+import socket
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 from urllib.parse import quote, urlsplit, urlunsplit
 
 import yaml
@@ -17,6 +20,10 @@ from source import (InvalidSelection, Unsupported, go_classifier, go_cli,
 
 
 SKIP = {'tests', 'testdata', 'perf', '.venv', 'venv', '__pycache__', 'node_modules'}
+SCENARIOS = {
+    'ticket-routing': 'Classify StreamWave support tickets and route them through durable assignment Workflows.',
+    'recurring-ai-watch': 'Classify release notes, then use an agent and LLM to produce a recurring impact report.',
+}
 
 
 def source_link(path):
@@ -121,6 +128,7 @@ class Explorer:
                     if heading:
                         title = heading[1]
                 state['recipes'].append(dict(id=recipe.name, title=title,
+                    description=SCENARIOS.get(recipe.name, 'Explore this recipe from its local README and implementation.'),
                     readme=source_link(readme.relative_to(self.root)) if readme.is_file() and self.inside(readme) else None,
                     variants=self.implementations(recipe)))
         return state
@@ -252,6 +260,153 @@ class Explorer:
             read_at=state['read_at'],note='Recorded live evidence is historical, not a fresh run of this checkout. Read the evidence file for scope and limitations.' if record else
                 'No matching full live execution record found in this recipe’s MATRIX_RESULTS.md.' if live else
                 'Mock execution makes no provider calls. Python catalog IDs remain explicit because the CLI still resolves them.')
+
+    def check(self, request):
+        resolved = self.resolve(request)
+        checked_at = datetime.now(timezone.utc).isoformat(timespec='seconds')
+        path = self.root / resolved['implementation']
+        cli = python_cli(path/'main.py') if path.joinpath('main.py').is_file() else go_cli(path)
+        address_flag = '--target' if cli['kind'] == 'python' else '-address'
+        address = cli['root'].get(address_flag, {}).get('default')
+        services = [self.tcp_probe('Cadence', address)]
+        services.append(self.http_probe('Cadence-Web', 'http://localhost:8088', expect_json=False))
+        if resolved['mock']:
+            services.append(dict(name='Inference', state='unavailable check',
+                endpoint=None, detail='Mock mode does not use inference services.'))
+        else:
+            if resolved['model']:
+                services.append(self.model_probe(resolved['model']))
+            if resolved['classifier']:
+                services.append(self.classifier_probe(resolved['classifier']))
+        return dict(checked_at=checked_at, selection=self.selection_key(resolved), services=services)
+
+    def selection_key(self, resolved):
+        return '|'.join(str(value or '') for value in (
+            resolved['implementation'], resolved['mode'],
+            resolved['model']['id'] if resolved['model'] else '',
+            resolved['classifier']['id'] if resolved['classifier'] else ''))
+
+    def tcp_probe(self, name, address, timeout=1.5):
+        if not isinstance(address, str) or ':' not in address:
+            return dict(name=name, state='unavailable check', endpoint=address,
+                detail='No readable service address is configured.')
+        host, port_text = address.rsplit(':', 1)
+        endpoint = f'{host}:{port_text}'
+        try:
+            with socket.create_connection((host, int(port_text)), timeout=timeout):
+                return dict(name=name, state='reachable', endpoint=endpoint,
+                    detail='TCP connection accepted. Domain and Worker readiness are not verified.')
+        except (OSError, ValueError) as error:
+            return dict(name=name, state='unreachable', endpoint=endpoint,
+                detail=self.safe_error(error, 'Connection failed.'))
+
+    def http_probe(self, name, endpoint, timeout=1.5, expect_json=True):
+        try:
+            with urlopen(Request(endpoint, headers={'Accept':'application/json'}), timeout=timeout) as response:
+                body = response.read(1024 * 1024)
+                if expect_json:
+                    json.loads(body)
+                return dict(name=name, state='reachable', endpoint=endpoint,
+                    detail=f'HTTP {response.status} responded.')
+        except HTTPError as error:
+            state = ('reachable' if 300 <= error.code < 400 else
+                'authentication required' if error.code in {401, 403} else 'unreachable')
+            error.close()
+            return dict(name=name, state=state, endpoint=endpoint,
+                detail=f'HTTP {error.code} responded.')
+        except (URLError, TimeoutError, OSError, ValueError, json.JSONDecodeError) as error:
+            return dict(name=name, state='unreachable', endpoint=endpoint,
+                detail=self.safe_error(error, 'Request failed.'))
+
+    def model_probe(self, model):
+        if model['provider'] != 'ollama':
+            return dict(name=f'Model · {model["id"]}', state='unavailable check',
+                endpoint=model['endpoint'], detail='No non-billable model health check is configured.')
+        endpoint = model['endpoint'].rstrip('/') + '/api/tags'
+        try:
+            with urlopen(Request(endpoint, headers={'Accept':'application/json'}), timeout=1.5) as response:
+                payload = json.load(response)
+            result = dict(name=f'Model · {model["id"]}', state='reachable', endpoint=endpoint,
+                detail=f'HTTP {response.status} responded.')
+            available = {entry.get('name') for entry in payload.get('models', []) if isinstance(entry, dict)}
+            if model['model'] not in available:
+                result.update(state='missing model',
+                    detail=f'Ollama is reachable, but {model["model"]} is not installed.')
+            else:
+                result['detail'] = f'Ollama lists {model["model"]}. The model is not warmed yet.'
+        except HTTPError as error:
+            state = 'authentication required' if error.code in {401,403} else 'unreachable'
+            error.close()
+            result = dict(name=f'Model · {model["id"]}', state=state, endpoint=endpoint,
+                detail=f'HTTP {error.code} responded.')
+        except (URLError, TimeoutError, OSError, ValueError, json.JSONDecodeError, AttributeError) as error:
+            result = dict(name=f'Model · {model["id"]}', state='unreachable', endpoint=endpoint,
+                detail=self.safe_error(error, 'Malformed Ollama response.'))
+        return result
+
+    def classifier_probe(self, classifier):
+        if classifier['provider'] != 'laya':
+            return dict(name=f'Classifier · {classifier["id"]}', state='unavailable check',
+                endpoint=classifier['endpoint'],
+                detail='No non-billable classifier health check is configured.')
+        endpoint = urlsplit(classifier['endpoint'])
+        health = urlunsplit((endpoint.scheme, endpoint.netloc, '/health', '', ''))
+        return self.http_probe(f'Classifier · {classifier["id"]}', health)
+
+    def warmup(self, request):
+        resolved = self.resolve(request)
+        components = []
+        if resolved['mock']:
+            return dict(selection=self.selection_key(resolved), components=[],
+                note='Mock mode does not need local inference warm-up.')
+        model, classifier = resolved['model'], resolved['classifier']
+        if model and model['provider'] == 'ollama':
+            endpoint = model['endpoint'].rstrip('/') + '/api/generate'
+            body = dict(model=model['model'], prompt='Say ok.', stream=False, keep_alive='30m')
+            components.append(self.post_json(f'Model · {model["id"]}', endpoint, body, timeout=15))
+        if classifier and classifier['provider'] == 'laya':
+            body = dict(state='Version: 0.0.1\nRelease notes: warmup', model=classifier['model'],
+                questions=dict(relevant=dict(type='choice',
+                    instructions='Is this a warmup request?',
+                    criteria=dict(yes='It is a warmup.', no='It is not a warmup.'))))
+            components.append(self.post_json(f'Classifier · {classifier["id"]}',
+                classifier['endpoint'], body, timeout=30, required_key='answers'))
+        note = ('Only selected loopback inference components were exercised.'
+            if components else 'No selected local inference component needs warm-up.')
+        return dict(selection=self.selection_key(resolved), components=components, note=note)
+
+    def post_json(self, name, endpoint, body, timeout, required_key=None):
+        parsed = urlsplit(endpoint)
+        if parsed.scheme not in {'http', 'https'} or parsed.hostname not in {'localhost','127.0.0.1','::1'}:
+            return dict(name=name, state='unavailable check', endpoint=endpoint,
+                detail='Warm-up is restricted to selected loopback services.')
+        request = Request(endpoint, method='POST', data=json.dumps(body).encode(),
+            headers={'Content-Type':'application/json', 'Accept':'application/json'})
+        try:
+            with urlopen(request, timeout=timeout) as response:
+                payload = json.load(response)
+            if required_key and (not isinstance(payload, dict) or required_key not in payload):
+                raise ValueError(f'response did not contain {required_key}')
+            return dict(name=name, state='warmed', endpoint=endpoint,
+                detail=f'Local warm-up responded with HTTP {response.status}.')
+        except HTTPError as error:
+            state = 'authentication required' if error.code in {401,403} else 'failed'
+            error.close()
+            return dict(name=name, state=state, endpoint=endpoint, detail=f'HTTP {error.code} responded.')
+        except (URLError, TimeoutError, OSError, ValueError, json.JSONDecodeError) as error:
+            return dict(name=name, state='failed', endpoint=endpoint,
+                detail=self.safe_error(error, 'Warm-up failed or timed out.'))
+
+    @staticmethod
+    def safe_error(error, fallback):
+        if isinstance(error, (TimeoutError, socket.timeout)):
+            return 'Timed out.'
+        reason = getattr(error, 'reason', None)
+        if isinstance(reason, (TimeoutError, socket.timeout)):
+            return 'Timed out.'
+        if isinstance(error, ConnectionRefusedError) or isinstance(reason, ConnectionRefusedError):
+            return 'Connection refused.'
+        return fallback
 
     def validate_command(self,cli,command):
         """Every generated argument must still exist in the current CLI source."""

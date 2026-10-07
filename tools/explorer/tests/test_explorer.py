@@ -6,13 +6,15 @@ import json
 import shlex
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from functools import partial
-from http.server import ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -20,6 +22,41 @@ sys.path.insert(0, str(ROOT/'tools/explorer'))
 from explorer import Explorer
 from server import Handler
 from source import InvalidSelection, Unsupported
+
+
+class ProbeStub(BaseHTTPRequestHandler):
+    def send_json(self, status, body):
+        payload=json.dumps(body).encode()
+        self.send_response(status);self.send_header('Content-Type','application/json')
+        self.send_header('Content-Length',str(len(payload)));self.end_headers();self.wfile.write(payload)
+
+    def do_GET(self):
+        if self.path=='/auth':
+            self.send_json(401,dict(error='missing key'))
+        elif self.path=='/redirect':
+            self.send_response(307);self.end_headers()
+        elif self.path=='/malformed':
+            payload=b'not json';self.send_response(200);self.send_header('Content-Length',str(len(payload)))
+            self.end_headers();self.wfile.write(payload)
+        elif self.path=='/slow':
+            time.sleep(.05)
+            try:self.send_json(200,dict(ok=True))
+            except BrokenPipeError:pass
+        elif self.path=='/api/tags':
+            self.send_json(200,dict(models=[dict(name='another-model')]))
+        else:
+            self.send_json(200,dict(status='ok'))
+
+    def do_POST(self):
+        body=json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+        ProbeStub.posts.append((self.path,body))
+        self.send_json(200,dict(answers=dict(relevant='yes'),response='ok'))
+
+    def log_message(self,*args):
+        pass
+
+
+ProbeStub.posts=[]
 
 
 class ExplorerTests(unittest.TestCase):
@@ -64,6 +101,7 @@ class ExplorerTests(unittest.TestCase):
         self.assertEqual(watch['variants'][0]['modes'],['mock','live'])
         self.assertEqual(ticket['variants'][0]['live_modes'],['live-demo','live-batch'])
         self.assertEqual(ticket['variants'][0]['mock_modes'],['demo','start-ticket','batch'])
+        self.assertEqual([entry['id'] for entry in state['classifiers']],['jev-default','laya-local'])
 
     def test_every_watch_combination_and_actual_cli_parser(self):
         accepted=blocked=evidenced=commands=0
@@ -85,7 +123,7 @@ class ExplorerTests(unittest.TestCase):
                             parsed=[]
                             for line in [result['worker']]+result['client'].splitlines():
                                 tokens=shlex.split(line)
-                                self.assertEqual(tokens[:3],['cd',str(self.root/f'recipes/recurring-ai-watch/python/{framework}'),'&&'])
+                                self.assertEqual(tokens[:3],['cd',str((self.root/f'recipes/recurring-ai-watch/python/{framework}').resolve()),'&&'])
                                 self.assertEqual(tokens[3:5],['.venv/bin/python','main.py'])
                                 args=parser.parse_args(tokens[5:]);parsed.append(args);commands+=1
                                 self.assertEqual(args.domain,'cadence-ai-samples')
@@ -96,7 +134,7 @@ class ExplorerTests(unittest.TestCase):
                                     self.assertEqual(args.classifier_id,classifier['id'])
                                     self.assertEqual(args.task_list,result['task_list'])
                             self.assertEqual(parsed[0].confirm_live,mode=='live')
-        self.assertEqual((accepted,blocked,evidenced,commands),(24,36,6,120))
+        self.assertEqual((accepted,blocked,evidenced,commands),(24,0,6,120))
 
     def test_refresh_reads_catalog_edits_and_new_models(self):
         self.assertEqual(self.watch(model='llama3.2-local')['model']['model'],'llama3.2:latest')
@@ -194,6 +232,37 @@ class ExplorerTests(unittest.TestCase):
             self.assertIn('models',self.explorer.snapshot()['catalog_errors'])
             with self.assertRaises(InvalidSelection):self.explorer.source_path('models.yaml')
 
+    def test_probe_states_and_bounded_local_warmup(self):
+        stub=ThreadingHTTPServer(('127.0.0.1',0),ProbeStub)
+        thread=threading.Thread(target=stub.serve_forever,daemon=True);thread.start()
+        base=f'http://127.0.0.1:{stub.server_port}'
+        try:
+            self.assertEqual(self.explorer.http_probe('auth',base+'/auth')['state'],'authentication required')
+            self.assertEqual(self.explorer.http_probe('redirect',base+'/redirect',expect_json=False)['state'],'reachable')
+            self.assertEqual(self.explorer.http_probe('bad',base+'/malformed')['state'],'unreachable')
+            self.assertEqual(self.explorer.http_probe('slow',base+'/slow',timeout=.001)['detail'],'Timed out.')
+            refused=socket.socket();refused.bind(('127.0.0.1',0));port=refused.getsockname()[1];refused.close()
+            self.assertEqual(self.explorer.http_probe('closed',f'http://127.0.0.1:{port}')['state'],'unreachable')
+            remote=dict(id='remote',provider='google',model='model',endpoint='https://example.com')
+            self.assertEqual(self.explorer.model_probe(remote)['state'],'unavailable check')
+            local=dict(id='local',provider='ollama',model='llama3.2:latest',endpoint=base)
+            self.assertEqual(self.explorer.model_probe(local)['state'],'missing model')
+
+            models=self.root/'models.yaml';models.write_text(models.read_text().replace(
+                'endpoint: http://localhost:11434',f'endpoint: {base}'))
+            classifiers=self.root/'classifiers.yaml';classifiers.write_text(classifiers.read_text().replace(
+                'endpoint: http://localhost:8008/v1/systemone',f'endpoint: {base}/v1/systemone'))
+            ProbeStub.posts.clear()
+            result=self.explorer.warmup(dict(sample='recurring-ai-watch',
+                implementation='recipes/recurring-ai-watch/python/google-adk',mode='live',
+                model='llama3.2-local',classifier='laya-local'))
+            self.assertEqual([item['state'] for item in result['components']],['warmed','warmed'])
+            self.assertEqual([path for path,_ in ProbeStub.posts],['/api/generate','/v1/systemone'])
+            blocked=self.explorer.post_json('remote','https://example.com/v1',{},1)
+            self.assertEqual(blocked['state'],'unavailable check')
+        finally:
+            stub.shutdown();stub.server_close();thread.join()
+
     def test_http_refresh_errors_and_loopback_boundary(self):
         server=ThreadingHTTPServer(('127.0.0.1',0),partial(Handler,explorer=self.explorer))
         thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
@@ -210,6 +279,15 @@ class ExplorerTests(unittest.TestCase):
             connection.request('GET','/source?path=.git/config');response=connection.getresponse();self.assertEqual(response.status,422);response.read()
             connection.request('GET','/api/state',headers={'Host':'attacker.example'});response=connection.getresponse();self.assertEqual(response.status,403);response.read()
             connection.request('POST','/api/resolve',body='{}');response=connection.getresponse();self.assertEqual(response.status,405);response.read()
+            request=json.dumps(dict(sample='recurring-ai-watch',
+                implementation='recipes/recurring-ai-watch/python/google-adk',mode='mock',
+                model='gemini-flash-lite',classifier='jev-default'))
+            connection.request('POST','/api/warmup',body=request,headers={'Content-Type':'application/json'})
+            response=connection.getresponse();self.assertEqual(response.status,403);response.read()
+            connection.request('POST','/api/warmup',body=request,headers={
+                'Content-Type':'application/json','Origin':f'http://127.0.0.1:{server.server_port}'})
+            response=connection.getresponse();self.assertEqual(response.status,200)
+            self.assertEqual(json.loads(response.read())['components'],[])
         finally:
             connection.close();server.shutdown();server.server_close();thread.join()
 

@@ -195,10 +195,20 @@ building scaffolding for them during the POC.
 1. **Contribfest reliability:** deeper Cadence domain/Worker registration/task-list
    diagnostics and a downloadable diagnostic summary with secrets removed. Keep
    “services reachable” distinct from “Worker available.”
-2. **Recipe growth without drift:** strengthen recipe-owned metadata conventions,
-   contributor guidance, and CI checks aligning catalogs, commands, setup docs,
-   and supported combinations. Minimal metadata required for the POC is allowed
-   above the cut line; a generalized authoring system is not.
+2. **Recipe growth without drift:** follow the future
+   [recipe template system specification](../../templates/SPEC-Recipe-Templates.md)
+   and strengthen contributor guidance and CI checks aligning generated profiles,
+   catalogs, commands, setup docs, and supported combinations.
+   - The current Explorer remains a focused POC whose source readers are tailored
+     to the existing recipes.
+   - Future generalization should consume the validated generated-recipe contract,
+     not infer commands from arbitrary repository shapes.
+   - A nonconforming recipe remains visible with its README and an actionable
+     unsupported explanation.
+   - Add minimal recipe-owned metadata only for facts that layout and validated
+     CLI conventions cannot express safely. Do not build a duplicate command
+     catalog or generalized authoring platform by default.
+   - Explorer web-client portability is separate future work.
 3. **Workflow-history deep link:** resolve Run ID using Workflow ID; handle missing
    executions, multiple runs, and Continue-As-New explicitly.
 4. **Windows experience:** Linux/Mac and Windows command tabs in the same explorer,
@@ -207,8 +217,12 @@ building scaffolding for them during the POC.
    for the user to review and press Enter. No automatic execution.
 6. **Optional infrastructure startup:** explicit start actions only after handling
    existing installations, running services, ports, permissions, and partial states.
-7. **Unimplemented classifier opportunities:** preserve removed entries and rationale
-   as issue candidates; add implementations/tests before restoring catalog entries.
+7. **Unimplemented classifier opportunities:** add implementations/tests before
+   restoring these removed catalog candidates:
+   - `kev-local` (`kev`, `kev-latest`): no provider implementation in either recipe.
+   - `von-local` (`von`, `von-1.2.0`): no provider implementation in either recipe.
+   - `reflex-local` (`reflex`, `Qwen/Qwen3.5-4B`): no provider implementation in
+     either recipe.
 
 Milestones motivating later prioritization: Seattle tech talk in approximately
 2–3 weeks and November Contribfest, where contributors have about 60 minutes.

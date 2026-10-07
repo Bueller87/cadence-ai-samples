@@ -22,6 +22,10 @@ if [[ ! -x "$explorer_venv/bin/python" ]]; then
   fi
 fi
 if ! "$explorer_venv/bin/python" -c 'import yaml; assert yaml.__version__ == "6.0.2"' >/dev/null 2>&1; then
-  "$explorer_venv/bin/python" -m pip install --disable-pip-version-check -r "$explorer_dir/requirements.txt"
+  if ! "$explorer_venv/bin/python" -m pip install --disable-pip-version-check -r "$explorer_dir/requirements.txt"; then
+    echo "Configured package index failed; retrying with public PyPI as a fallback." >&2
+    "$explorer_venv/bin/python" -m pip install --disable-pip-version-check \
+      --extra-index-url https://pypi.org/simple -r "$explorer_dir/requirements.txt"
+  fi
 fi
 exec "$explorer_venv/bin/python" "$explorer_dir/server.py" "$@"

@@ -40,7 +40,7 @@ Python mock runs still show model/classifier IDs because the current CLI resolve
 those catalogs even in mock mode. Go mock actions show the built-in `mock`
 classifier and have no generative model or agent-framework selector.
 
-The interface generates setup, Worker, and matching client commands. Commands
+The six numbered steps generate setup, Worker, and matching client commands. Commands
 include this checkout's absolute implementation directory so they can be pasted
 into either terminal without navigating by hand. Python commands use that
 implementation's `.venv/bin/python`; run its one-time setup first. A dedicated
@@ -81,23 +81,28 @@ fetch GitHub or pull a branch. Resolution rereads and revalidates selections too
 A removed ID, malformed catalog, or rejected selection clears the previous
 commands rather than leaving a stale command ready to copy.
 
-## Local inference
+## Checks and local warm-up
 
-Selecting Ollama or Laya in a live path reveals copyable health-check and warm-up
-commands using the current catalog endpoint and model. Run them in your terminal;
-the explorer makes no requests to inference services. Follow the repository-root
-README for service installation. Health checks show service reachability, while
-warm-up requests establish that the selected model can respond. Downloads may
-take several minutes on the first request.
+**Refresh and check services** rereads the checkout and runs bounded, advisory
+checks for Cadence, Cadence-Web, and inference dependencies relevant to the
+selection. Checks never run automatically on page load or selection changes, and
+their results never disable valid commands or links. A TCP connection does not
+prove that a domain or Worker is ready.
+
+For a live selection using Ollama or Laya, **Warm up selected local services**
+sends the smallest configured request to those loopback services. Warm-up is
+explicit, bounded, and reports each component separately. It never calls remote
+inference, downloads models, or starts services. Follow the repository-root README
+to install services or models before retrying.
 
 Keys remain in the local Worker environment. The explorer does not read `.env`
 files, accept credential values, or put keys in commands. Its HTTP endpoints are
-read-only, uncached, and loopback-only. File viewing is limited to public recipe
-README/evidence/CLI files and the two root catalogs.
+uncached and loopback-only. The warm-up action additionally requires a same-origin
+JSON request and accepts only resolved loopback targets. File viewing is limited
+to public recipe README/evidence/CLI files and the two root catalogs.
 
-Windows command tabs/launcher and interactive readiness/warm-up buttons are
-deferred. The Python server is independent of the Bash launcher so a Windows
-entry point can reuse it later.
+Windows command tabs/launcher are deferred. The Python server is independent of
+the Bash launcher so a Windows entry point can reuse it later.
 
 ## Validation
 
@@ -105,11 +110,12 @@ entry point can reuse it later.
 tools/explorer/.venv/bin/python -m unittest discover -s tools/explorer/tests -v
 ```
 
-Tests use a temporary checkout, without AI or Cadence calls. They cover all 60
-Watch selections (24 accepted, 36 rejected candidates), 120 generated commands
-against both actual argparse parsers, Go actions and live-batch bounds, changed
-catalogs/CLI guards, new/incomplete recipes, non-execution of recipe modules,
-quoting of paths with spaces, HTTP refresh behavior, and source-file boundaries.
+Tests use a temporary checkout and local stub services, without cloud AI or
+Cadence calls. They cover all 24 supported Watch selections, 120 generated
+commands against both actual argparse parsers, Go actions and live-batch bounds,
+changed catalogs/CLI guards, new/incomplete recipes, non-execution of recipe
+modules, quoting of paths with spaces, probe/warm-up failures, action protection,
+HTTP refresh behavior, and source-file boundaries.
 
 The optional DOM workflow check requires Node.js and jsdom 26.1.0, solely for
 development; these are not explorer runtime dependencies. Install jsdom into a

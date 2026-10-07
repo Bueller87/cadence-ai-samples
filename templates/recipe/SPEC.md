@@ -18,9 +18,22 @@
 
 [Describe the users, operating context, inputs, constraints, and desired business outcome.]
 
+## Repository implementation profile
+
+Record the composable choices defined by the
+[recipe template system specification](../../templates/SPEC-Recipe-Templates.md).
+
+- **Cadence language:** [Go, Java, Python, or another language with an implemented profile]
+- **Classifier integration:** [none or SystemOne]
+- **Agent integration:** [none, Google ADK, or OpenAI Agents]
+- **Mock and live behavior:** [Supported paths and confirmation boundaries]
+- **Runtime catalog use:** [Model/classifier catalogs used, or not applicable]
+- **Profile deviations:** [Intentional differences from the standard profile
+  contract and why they are needed]
+
 ## Language and dependencies
 
-- **Language:** [Go, Python, or a minimal hybrid]
+- **Language:** [Selected implemented language profile, with any minimal hybrid noted]
 - **Runtime version:** [Version]
 - **Dependencies:** [Required packages and why each is needed]
 
@@ -77,6 +90,7 @@
 ## Definition of done
 
 - [ ] The recipe is independently runnable.
+- [ ] The selected implementation profile and any deviations are documented.
 - [ ] Setup and execution instructions are complete.
 - [ ] Workflow and Activity behavior is tested.
 - [ ] Synthetic fixtures cover normal and edge cases.

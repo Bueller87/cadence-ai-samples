@@ -30,13 +30,14 @@ Browse recipe directories by problem or use case. The first recipe, [StreamWave 
 ### Local Samples Explorer
 
 Run `./scripts/explore.sh` to open a localhost explorer of this checkout. Choose a
-sample, language, framework when applicable, mode, and catalog IDs to get
-matching Linux Worker/client commands. Refresh reads the current recipe files
-and catalogs, including local edits. Recorded live evidence and local-service
-health-check/warm-up commands appear where applicable.
+sample, follow its setup and service checks, warm local inference when applicable,
+and copy matching Worker and Workflow commands. Refresh reads the current recipe
+files and catalogs, including local edits.
 
 The launcher needs Python 3.10+ with venv support and installs its one small
-dependency on first use. It previews commands; run them in your terminal.
+dependency on first use. Those are explorer prerequisites only. Each recipe lists
+its own Go or Python runtime and service requirements. The explorer previews
+commands; run them in your terminal.
 See [explorer usage and validation](tools/explorer/README.md).
 
 ## Local AI services

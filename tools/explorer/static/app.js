@@ -1,8 +1,9 @@
 "use strict";
 (() => {
   const $ = id => document.getElementById(id);
-  let state, result, recipe, variant, requestVersion = 0;
+  let state, result, recipe, variant, requestVersion = 0, checkedSelection = "";
   const node = (tag,text) => {const e=document.createElement(tag);if(text!==undefined)e.textContent=text;return e;};
+
   function options(id, entries, {placeholder, defaultValue}={}) {
     const control=$(id), previous=control.value;
     control.replaceChildren();
@@ -10,19 +11,40 @@
     for(const entry of entries){const option=node("option",entry.label||entry.id);option.value=entry.id;control.append(option);}
     control.value=entries.some(e=>e.id===previous)?previous:entries.length===1?entries[0].id:entries.some(e=>e.id===defaultValue)?defaultValue:"";
   }
+
   function clear(message, isError=false) {
     requestVersion++;result=null;
-    for(const id of ["result","resolved-panel","evidence-panel","local-panel"])$(id).hidden=true;
+    for(const id of ["setup-block","worker-block","client-block","controls-block"])$(id).hidden=true;
     for(const id of ["setup-command","worker-command","client-command"])$(id).textContent="";
+    $("control-commands").replaceChildren();$("warmup").disabled=true;
+    $("warmup-results").replaceChildren();$("warmup-status").textContent="Complete a selection to see whether warm-up applies.";
     $("selection-status").textContent=message;$("selection-status").className=isError?"notice error":"notice";
     $("copy-status").textContent="";
   }
+
+  function markChecksStale() {
+    if(checkedSelection){
+      $("check-status").textContent="Selection changed. These service results are stale; refresh to check again.";
+      $("check-status").className="small stale";
+      for(const badge of $("service-results").querySelectorAll(".status"))badge.textContent="stale";
+    }
+    $("warmup-results").replaceChildren();
+  }
+
   function field(id,show){$(id+"-field").hidden=!show;}
-  function flow() {
+  function query() {
+    return new URLSearchParams({sample:recipe.id,implementation:variant.id,
+      mode:variant.modes.length?$("mode").value:"",model:$("model").value,
+      classifier:$("classifier").value,count:$("count").value,concurrency:$("concurrency").value});
+  }
+
+  async function flow() {
+    markChecksStale();
     clear("Complete the selections to generate matching commands.");
     recipe=state?.recipes.find(r=>r.id===$("sample").value);variant=null;
     for(const id of ["language","framework","mode","model","classifier"])field(id,false);
     $("batch-fields").hidden=true;$("readme").hidden=!recipe?.readme;$("implementation").textContent="";
+    $("scenario").textContent=recipe?.description||"Choose a sample to see its scenario.";
     if(recipe?.readme)$("readme").href=recipe.readme;
     if(!recipe){clear("Choose a sample to begin.");return;}
     if(!recipe.variants.length){clear("This recipe has no discovered implementation directories. Read its README.",true);return;}
@@ -49,47 +71,81 @@
     const usesClassifierCatalog=variant.classifier&&!(variant.kind==="go"&&!variant.live_modes.includes(mode)&&(mode!=="worker"||$("classifier").value===variant.defaults["-classifier-id"]));
     for(const [kind,needed] of [["models",variant.model],["classifiers",usesClassifierCatalog]])if(state.catalog_errors[kind]&&needed){clear(state.catalog_errors[kind],true);return;}
     if((variant.modes.length&&!mode)||(variant.model&&!$("model").value)||(variant.classifier&&!$("classifier").value))return;
-    resolve();
+    await resolve();
   }
+
   async function resolve() {
     const version=++requestVersion;
     $("selection-status").textContent="Reading the selected recipe and validating its options…";
-    const query=new URLSearchParams({sample:recipe.id,implementation:variant.id,mode:variant.modes.length?$("mode").value:"",model:$("model").value,classifier:$("classifier").value,count:$("count").value,concurrency:$("concurrency").value});
-    try{const response=await fetch("/api/resolve?"+query,{cache:"no-store"});const body=await response.json();if(version!==requestVersion)return;if(!response.ok)throw Error(body.error||"Could not resolve this selection.");result=body;render();}
+    try{const response=await fetch("/api/resolve?"+query(),{cache:"no-store"});const body=await response.json();if(version!==requestVersion)return;if(!response.ok)throw Error(body.error||"Could not resolve this selection.");result=body;render();}
     catch(error){if(version===requestVersion)clear(error.message,true);}
   }
-  function configCard(title,config){const card=node("article");card.append(node("h4",title));for(const [label,value] of Object.entries(config)){const line=node("div");line.append(node("span",label),node("code",value));card.append(line);}return card;}
+
   function render(){
-    $("result").hidden=false;$("resolved-panel").hidden=false;$("evidence-panel").hidden=false;
-    $("selection-status").className="notice ready";$("selection-status").textContent=result.live?"Implemented live selection · credentials and services stay in your local Worker.":result.mock?"Mock selection · no provider calls.":"Commands resolved from this implementation. Check its README for runtime prerequisites.";
-    for(const kind of ["setup","worker"])$(kind+"-command").textContent=result[kind];
+    $("selection-status").className="notice ready";$("selection-status").textContent=result.live?"Live selection ready. Credentials and services stay in your local Worker.":result.mock?"Mock selection ready. No provider calls.":"Commands resolved from this implementation.";
+    $("setup-command").textContent=result.setup;$("setup-block").hidden=false;
+    $("worker-command").textContent=result.worker;$("worker-block").hidden=false;
     $("client-command").textContent=result.start;$("client-block").hidden=!result.start;
     $("controls-block").hidden=!result.controls.length;$("control-commands").replaceChildren();
-    for(const control of result.controls){const head=node("div");head.className="code-head";head.append(node("span",control.name));const button=node("button","Copy "+control.name);button.type="button";button.addEventListener("click",()=>copyText(control.command));head.append(button);const pre=node("pre");pre.append(node("code",control.command));$("control-commands").append(head,pre);}
-    $("credentials").textContent=result.credentials.length?"Worker environment variables: "+result.credentials.join(", ")+". Set their values locally before starting the Worker.":result.live?"This selected local inference combination needs no AI API keys.":"Mock mode needs no AI API keys.";
-    $("resolution").replaceChildren(configCard("Implementation",{directory:result.implementation,mode:result.mode||"not applicable"}));
-    if(result.model)$("resolution").append(configCard("Model",result.model));if(result.classifier)$("resolution").append(configCard("Classifier",result.classifier));
-    $("binding").textContent=`Domain: ${result.domain} · Matching task list: ${result.task_list}`+(result.workflow_id?` · Workflow ID: ${result.workflow_id}`:"");
-    $("evidence-title").textContent=result.evidence?"Recorded live evidence":"Execution evidence";$("evidence-note").textContent=result.note;
-    $("evidence-ids").replaceChildren();$("evidence-link").hidden=!result.evidence;
-    if(result.evidence){for(const [label,value] of [["Recorded Workflow ID",result.evidence.workflow_id],["Recorded Run ID",result.evidence.run_id],["Recorded model",result.evidence.model_description]]){$("evidence-ids").append(node("dt",label),node("dd",value));}$("evidence-link").href=result.evidence.source;}
-    $("local-panel").hidden=!result.local.length;$("local-commands").replaceChildren();
-    for(const service of result.local){const article=node("article");article.append(node("h4",service.service));for(const kind of ["health","warmup"]){const head=node("div");head.className="code-head";head.append(node("span",kind==="health"?"Readiness check":"Warm up"));const button=node("button","Copy");button.type="button";button.addEventListener("click",()=>copyText(service[kind]));head.append(button);const pre=node("pre");pre.append(node("code",service[kind]));article.append(head,pre);}$("local-commands").append(article);}
-    $("read-at").textContent="Recipe files read at "+new Date(result.read_at).toLocaleTimeString()+" · Refresh rereads the current checkout.";
+    for(const control of result.controls){const head=node("div");head.className="code-head";head.append(node("span",control.name));const button=node("button","Copy "+control.name);button.type="button";button.addEventListener("click",()=>copyText(control.command,button));head.append(button);const pre=node("pre");pre.append(node("code",control.command));$("control-commands").append(head,pre);}
+    $("credentials").textContent=result.credentials.length?"Worker environment variables: "+result.credentials.join(", ")+". Set values only in Terminal 1.":result.live?"This selection needs no AI API keys.":"Mock mode needs no AI API keys.";
+    $("warmup").disabled=!result.local.length;
+    $("warmup-status").textContent=result.local.length?"Warm-up is available for "+result.local.map(item=>item.service).join(" and ")+".":result.mock?"Mock mode does not need local warm-up.":"This selection has no local inference component to warm.";
+    $("cadence-web").href=`http://localhost:8088/domains/${encodeURIComponent(result.domain)}/workflows`;
+    $("read-at").textContent="Recipe files read at "+new Date(result.read_at).toLocaleTimeString()+".";
   }
-  async function copyText(text){try{await navigator.clipboard.writeText(text);$("copy-status").textContent="Copied.";}catch{$("copy-status").textContent="Clipboard unavailable. Select the command text and copy it manually.";}}
-  async function refresh(){
+
+  function renderServices(target, services) {
+    target.replaceChildren();
+    for(const service of services){
+      const card=node("article");const top=node("div");top.className="service-head";
+      top.append(node("strong",service.name));const badge=node("span",service.state);badge.className="status "+service.state.replaceAll(" ","-");top.append(badge);
+      card.append(top,node("code",service.endpoint||"Not applicable"),node("p",service.detail));target.append(card);
+    }
+  }
+
+  async function checkServices(){
+    if(!result)return;
+    const version=requestVersion;$("check-status").className="small";$("check-status").textContent="Checking selected services…";$("refresh").disabled=true;
+    try{const response=await fetch("/api/check?"+query(),{cache:"no-store"});const body=await response.json();if(version!==requestVersion)return;if(!response.ok)throw Error(body.error||"Service checks failed.");checkedSelection=body.selection;renderServices($("service-results"),body.services);$("check-status").textContent="Checked "+new Date(body.checked_at).toLocaleTimeString()+". Results are advisory.";}
+    catch(error){$("check-status").className="small error";$("check-status").textContent=error.message;}
+    finally{$("refresh").disabled=false;}
+  }
+
+  async function warmup(){
+    if(!result||!result.local.length)return;
+    const version=requestVersion;$("warmup").disabled=true;$("warmup-status").textContent="Warming selected local services…";$("warmup-results").replaceChildren();
+    try{const response=await fetch("/api/warmup",{method:"POST",headers:{"Content-Type":"application/json","Origin":location.origin},body:JSON.stringify(Object.fromEntries(query()))});const body=await response.json();if(version!==requestVersion)return;if(!response.ok)throw Error(body.error||"Warm-up failed.");renderServices($("warmup-results"),body.components);$("warmup-status").textContent=body.note;}
+    catch(error){$("warmup-status").className="small error";$("warmup-status").textContent=error.message;}
+    finally{if(version===requestVersion)$("warmup").disabled=!result?.local.length;}
+  }
+
+  async function copyText(text,button){
+    const original=button?.dataset.copyLabel||button?.textContent;
+    if(button&&!button.dataset.copyLabel)button.dataset.copyLabel=original;
+    try{
+      await navigator.clipboard.writeText(text);
+      $("copy-status").textContent="Copied.";
+      if(button){button.textContent="Copied ✓";button.classList.add("copied");setTimeout(()=>{button.textContent=original;button.classList.remove("copied");},2000);}
+    }catch{
+      $("copy-status").textContent="Clipboard unavailable. Select the command text and copy it manually.";
+      if(button){button.textContent="Copy failed";setTimeout(()=>{button.textContent=original;},2000);}
+    }
+  }
+
+  async function refresh(runChecks=false){
     clear("Reading recipes…");$("refresh").disabled=true;$("load-status").textContent="Reading the current checkout…";
-    try{const response=await fetch("/api/state",{cache:"no-store"});if(!response.ok)throw Error("Could not read recipes.");state=await response.json();options("sample",state.recipes.map(r=>({id:r.id,label:r.title})),{placeholder:"Choose a sample"});$("load-status").textContent=`${state.recipes.length} samples in this checkout`;flow();}
+    try{const response=await fetch("/api/state",{cache:"no-store"});if(!response.ok)throw Error("Could not read recipes.");state=await response.json();options("sample",state.recipes.map(r=>({id:r.id,label:r.title})),{placeholder:"Choose a sample"});$("load-status").textContent=`${state.recipes.length} samples in this checkout`;await flow();if(runChecks&&result)await checkServices();}
     catch(error){state=null;for(const id of ["sample","language","framework","mode","model","classifier"])$(id).replaceChildren();$("load-status").textContent=error.message;clear("Refresh to retry reading this checkout.",true);}
     finally{$("refresh").disabled=false;}
   }
+
   $("sample").addEventListener("change",()=>{$("language").value="";$("framework").value="";$("mode").value="";flow();});
   $("language").addEventListener("change",()=>{$("framework").value="";$("mode").value="";flow();});
   $("framework").addEventListener("change",()=>{$("mode").value="";flow();});
   for(const id of ["mode","model","classifier"])$(id).addEventListener("change",flow);
   for(const id of ["count","concurrency"])$(id).addEventListener("input",flow);
-  $("refresh").addEventListener("click",refresh);
-  document.querySelectorAll("[data-copy]").forEach(button=>button.addEventListener("click",()=>{if(result)copyText(result[button.dataset.copy]);}));
-  refresh();
+  $("refresh").addEventListener("click",()=>refresh(true));$("warmup").addEventListener("click",warmup);
+  document.querySelectorAll("[data-copy]").forEach(button=>button.addEventListener("click",()=>{if(result)copyText(result[button.dataset.copy],button);}));
+  refresh(false);
 })();
