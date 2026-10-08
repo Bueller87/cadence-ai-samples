@@ -3,11 +3,11 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="description" content="Choose a Cadence AI recipe and generate matching Linux commands from your local checkout.">
-  <title>Cadence AI Samples Explorer</title>
+  <title>Cadence Recipe Explorer (Live README)</title>
   <link rel="icon" href="favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="style.css"><script defer src="app.js"></script>
 </head>
 <body>
-  <header><div class="header-inner"><div><span class="eyebrow">CADENCE / DEVELOPER RECIPES</span><h1>AI Samples Explorer</h1></div><span class="local-badge">Local checkout</span></div></header>
+  <header><div class="header-inner"><div><span class="eyebrow">CADENCE / AI SAMPLES</span><h1>Recipe Explorer (Live README)</h1></div><span class="local-badge">Local checkout</span></div></header>
 <main>
   <div class="intro"><div><h2>Choose. Prepare. Run.</h2><p>A first-run companion driven by the recipes on this machine.</p></div></div>
   <div id="load-status" role="status" aria-live="polite">Reading recipes…</div>
@@ -45,18 +45,35 @@
 
   <section class="panel step" aria-labelledby="worker-title">
     <div class="step-heading"><span>4</span><div><h3 id="worker-title">Copy Worker command</h3><p>Terminal 1: Worker. Leave it running.</p></div></div>
-    <div id="worker-block" class="terminal" hidden><div class="code-head"><span>Terminal 1 · Worker</span><button type="button" data-copy="worker">Copy Worker</button></div><pre><code id="worker-command"></code></pre></div>
+    <div id="worker-block" class="terminal" hidden><div class="code-head"><span>Terminal 1 · Worker</span><span class="button-group"><button type="button" data-copy="worker">Copy Worker</button><button type="button" id="open-worker" data-terminal="worker" aria-label="Open Worker in Terminal" hidden>Open in Terminal</button></span></div><pre><code id="worker-command"></code></pre></div>
+    <p id="worker-terminal-status" class="small" role="status" aria-live="polite"></p>
+    <p id="terminal-note" class="small" hidden>macOS may ask for Automation or Accessibility permission. The command is pasted for review and is never run automatically.</p>
   </section>
 
   <section class="panel step" aria-labelledby="workflow-title">
     <div class="step-heading"><span>5</span><div><h3 id="workflow-title">Copy Workflow command</h3><p>Terminal 2: Start Workflow. Keep Terminal 1 running.</p></div></div>
-    <div id="client-block" class="client" hidden><div class="code-head"><span>Terminal 2 · Start Workflow</span><button type="button" data-copy="start">Copy start</button></div><pre><code id="client-command"></code></pre></div>
+    <div id="client-block" class="client" hidden><div class="code-head"><span>Terminal 2 · Start Workflow</span><span class="button-group"><button type="button" data-copy="start">Copy start</button><button type="button" id="open-start" data-terminal="start" aria-label="Open Workflow in Terminal" hidden>Open in Terminal</button></span></div><pre><code id="client-command"></code></pre></div>
+    <p id="start-terminal-status" class="small" role="status" aria-live="polite"></p>
     <details id="controls-block" hidden><summary>Workflow controls · copy individually</summary><div id="control-commands"></div></details>
   </section>
 
   <section class="panel step" aria-labelledby="web-title">
     <div class="step-heading"><span>6</span><div><h3 id="web-title">Open Cadence-Web</h3><p>Inspect the configured domain after you start a Workflow.</p></div></div>
-    <a id="cadence-web" class="button-link" href="http://localhost:8088/domains/cadence-ai-samples/workflows" target="_blank" rel="noopener">Open cadence-ai-samples in Cadence-Web</a>
+    <div class="button-group web-actions"><a id="cadence-web" class="button-link" href="http://localhost:8088/redirects/domain/cadence-ai-samples/workflows" target="_blank" rel="noopener">Open domain</a><button type="button" id="resolve-run" hidden>Resolve latest run</button></div>
+    <div id="workflow-run-panel" class="run-panel" hidden>
+      <div class="run-context"><div><span>Workflow ID</span><code id="web-workflow-id"></code></div><div><span>Cluster</span><code id="web-cluster"></code></div></div>
+      <label for="run-id">Run ID <span class="small">Paste an exact historical Run ID to override the latest run.</span></label>
+      <input id="run-id" type="text" maxlength="255" autocomplete="off" spellcheck="false">
+      <p id="workflow-run-status" class="small" role="status" aria-live="polite">Run not resolved.</p>
+      <div class="button-group run-links"><a id="workflow-history" class="button-link" target="_blank" rel="noopener" hidden>Open history</a><a id="workflow-queries" class="button-link" target="_blank" rel="noopener" hidden>Open queries</a></div>
+      <div id="watch-signals" class="signal-panel" hidden>
+        <h4>Watch Signals</h4>
+        <p class="small">Cadence-Web acceptance does not confirm that the Workflow processed the Signal.</p>
+        <div class="button-group signal-actions"><button type="button" id="signal-check-now" data-signal="check-now">Send check-now</button><button type="button" id="signal-stop-watch" class="danger" data-signal="stop-watch">Send stop-watch</button></div>
+        <p id="signal-status" class="small" role="status" aria-live="polite"></p>
+      </div>
+    </div>
+    <p id="workflow-run-scope" class="small">Complete a supported selection to resolve a run.</p>
   </section>
   <p id="copy-status" role="status" aria-live="polite"></p>
   <footer id="read-at"></footer>

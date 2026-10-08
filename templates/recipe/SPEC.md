@@ -92,6 +92,7 @@ Record the composable choices defined by the
 - [ ] The recipe is independently runnable.
 - [ ] The selected implementation profile and any deviations are documented.
 - [ ] Setup and execution instructions are complete.
+- [ ] Workflow ID reuse behavior is explicit, documented, and tested.
 - [ ] Workflow and Activity behavior is tested.
 - [ ] Synthetic fixtures cover normal and edge cases.
 - [ ] Reliability and architectural decisions are documented.

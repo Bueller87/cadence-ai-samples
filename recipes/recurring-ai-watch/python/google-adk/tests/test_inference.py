@@ -14,6 +14,7 @@ import httpx
 os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
 os.environ["LITELLM_TELEMETRY"] = "False"
 
+from cadence.api.v1 import workflow_pb2
 from cadence.contrib.google_adk import GoogleADKActivities
 from cadence.contrib.pydantic import PydanticDataConverter
 from cadence.testing import TestWorkflowEnvironment
@@ -82,11 +83,12 @@ class InferenceTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(LiveConfigurationError):
             runtime_model("anthropic", "model")
 
-    def test_unsupported_classifiers_and_unknown_ids(self):
+    def test_supported_classifiers_and_unknown_ids(self):
+        validate_live(selected("gemini-flash-lite", "jev-default"))
         validate_live(selected("gemini-flash-lite", "laya-local"))
         for classifier in ("von-local", "reflex-local", "kev-local"):
-            with self.assertRaisesRegex(LiveConfigurationError, "catalog candidates"):
-                validate_live(selected("gemini-flash-lite", classifier))
+            with self.assertRaises(CatalogError):
+                selected("gemini-flash-lite", classifier)
         with self.assertRaises(CatalogError):
             selected("unknown")
 
@@ -146,6 +148,10 @@ class InferenceTests(unittest.IsolatedAsyncioTestCase):
             with patch("main.client", return_value=client):
                 await start(args, selection)
             watch_input = client.start_workflow.call_args.args[1]
+            self.assertEqual(
+                client.start_workflow.call_args.kwargs["workflow_id_reuse_policy"],
+                workflow_pb2.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE,
+            )
             self.assertEqual(watch_input.model_provider, selection.model.provider)
             self.assertEqual(watch_input.model_name, selection.model.model)
             self.assertFalse(any("key" in field or "endpoint" in field for field in asdict(watch_input)))

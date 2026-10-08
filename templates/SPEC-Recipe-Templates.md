@@ -122,6 +122,9 @@ Every implemented profile must generate a recipe that:
    failure handling, and command parsing.
 10. Remains independently runnable and copyable even when that duplicates code
     from another generated profile.
+11. Declares and tests Workflow ID reuse behavior. A stable demo Workflow ID
+    intended for repeated runs must explicitly allow a new Run after the previous
+    Run closes while still rejecting a duplicate start when a Run is open.
 
 The contract describes behavior, not one universal source layout or shared
 runtime library. Profile implementations may use language-appropriate command

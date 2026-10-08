@@ -16,6 +16,7 @@ import unittest
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import urlencode
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT/'tools/explorer'))
@@ -59,11 +60,74 @@ class ProbeStub(BaseHTTPRequestHandler):
 ProbeStub.posts=[]
 
 
+class WorkflowStub(BaseHTTPRequestHandler):
+    mode='found'
+    signal_mode='accepted'
+    run_id='run-current'
+    paths=[]
+    posts=[]
+
+    def do_GET(self):
+        WorkflowStub.paths.append(self.path)
+        if WorkflowStub.mode=='not-found':
+            self.send_response(404);self.end_headers();return
+        if WorkflowStub.mode=='auth':
+            self.send_response(401);self.end_headers();return
+        if WorkflowStub.mode=='slow':
+            time.sleep(.05)
+        if WorkflowStub.mode=='malformed':
+            payload=b'not json'
+        elif WorkflowStub.mode=='missing':
+            payload=json.dumps(dict(workflowExecutionInfo=None)).encode()
+        else:
+            payload=json.dumps(dict(workflowExecutionInfo=dict(
+                workflowExecution=dict(runId=WorkflowStub.run_id)))).encode()
+        try:
+            self.send_response(200);self.send_header('Content-Type','application/json')
+            self.send_header('Content-Length',str(len(payload)));self.end_headers();self.wfile.write(payload)
+        except BrokenPipeError:
+            pass
+
+    def do_POST(self):
+        WorkflowStub.paths.append(self.path)
+        body=self.rfile.read(int(self.headers.get('Content-Length','0')))
+        WorkflowStub.posts.append((self.path,body))
+        if WorkflowStub.signal_mode=='not-found':
+            self.send_response(404);self.end_headers();return
+        if WorkflowStub.signal_mode=='auth':
+            self.send_response(401);self.end_headers();return
+        if WorkflowStub.signal_mode=='rejected':
+            self.send_response(400);self.end_headers();return
+        if WorkflowStub.signal_mode=='slow':
+            time.sleep(.05)
+        payload=b'{}'
+        try:
+            self.send_response(200);self.send_header('Content-Type','application/json')
+            self.send_header('Content-Length',str(len(payload)));self.end_headers();self.wfile.write(payload)
+        except BrokenPipeError:
+            pass
+
+    def log_message(self,*args):
+        pass
+
+
+class TerminalStub:
+    def __init__(self,available=True,state='prefilled'):
+        self.available=available
+        self.state=state
+        self.commands=[]
+
+    def launch(self,command):
+        self.commands.append(command)
+        return dict(state=self.state,detail='stub result')
+
+
 class ExplorerTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='cadence explorer ')
         self.root = Path(self.temp.name)
-        shutil.copytree(ROOT/'recipes',self.root/'recipes')
+        shutil.copytree(ROOT/'recipes',self.root/'recipes',
+            ignore=shutil.ignore_patterns('.venv','venv','__pycache__'))
         for name in ('models.yaml','classifiers.yaml','README.md'):
             shutil.copy(ROOT/name,self.root/name)
         self.explorer = Explorer(self.root)
@@ -263,14 +327,130 @@ class ExplorerTests(unittest.TestCase):
         finally:
             stub.shutdown();stub.server_close();thread.join()
 
+    def test_workflow_run_resolution_states_and_http_route(self):
+        stub=ThreadingHTTPServer(('127.0.0.1',0),WorkflowStub)
+        thread=threading.Thread(target=stub.serve_forever,daemon=True);thread.start()
+        base=f'http://127.0.0.1:{stub.server_port}'
+        request=dict(sample='recurring-ai-watch',
+            implementation='recipes/recurring-ai-watch/python/google-adk',
+            mode='mock',model='gemini-flash-lite',classifier='jev-default',
+            cadence_web_url='http://attacker.example',cluster='attacker')
+        try:
+            self.explorer=Explorer(self.root,cadence_web_url=base)
+            WorkflowStub.mode='found';WorkflowStub.run_id='run-current';WorkflowStub.paths.clear()
+            result=self.explorer.workflow_run(request)
+            self.assertEqual((result['state'],result['run_id'],result['cluster']),
+                ('found','run-current','cluster0'))
+            self.assertEqual(WorkflowStub.paths[-1],
+                '/api/domains/cadence-ai-samples/cluster0/workflows/'
+                'recurring-ai-watch-python-google-adk-mock-gemini-flash-lite-jev-default-demo')
+            WorkflowStub.run_id='run-continued'
+            self.assertEqual(self.explorer.workflow_run(request)['run_id'],'run-continued')
+            for mode,state in [('not-found','no execution'),('auth','authentication required'),
+                    ('malformed','malformed response'),('missing','no execution')]:
+                WorkflowStub.mode=mode
+                self.assertEqual(self.explorer.workflow_run(request)['state'],state)
+            WorkflowStub.mode='slow'
+            timed=Explorer(self.root,cadence_web_url=base,workflow_timeout=.001)
+            self.assertEqual(timed.workflow_run(request)['state'],'unreachable')
+            refused=socket.socket();refused.bind(('127.0.0.1',0))
+            port=refused.getsockname()[1];refused.close()
+            closed=Explorer(self.root,cadence_web_url=f'http://127.0.0.1:{port}')
+            self.assertEqual(closed.workflow_run(request)['state'],'unreachable')
+            with self.assertRaises(Unsupported):
+                self.explorer.workflow_run(dict(sample='ticket-routing',
+                    implementation='recipes/ticket-routing/go',mode='demo',classifier='mock'))
+
+            WorkflowStub.mode='found';WorkflowStub.run_id='run-http'
+            terminal=TerminalStub()
+            server=ThreadingHTTPServer(('127.0.0.1',0),partial(
+                Handler,explorer=self.explorer,terminal_launcher=terminal))
+            server_thread=threading.Thread(target=server.serve_forever,daemon=True)
+            server_thread.start()
+            connection=http.client.HTTPConnection('127.0.0.1',server.server_port)
+            try:
+                connection.request('GET','/api/workflow-run?'+urlencode(request))
+                response=connection.getresponse();self.assertEqual(response.status,200)
+                self.assertEqual(json.loads(response.read())['run_id'],'run-http')
+            finally:
+                connection.close();server.shutdown();server.server_close();server_thread.join()
+        finally:
+            stub.shutdown();stub.server_close();thread.join()
+
+    def test_workflow_signal_allowlist_revalidation_and_http_route(self):
+        stub=ThreadingHTTPServer(('127.0.0.1',0),WorkflowStub)
+        thread=threading.Thread(target=stub.serve_forever,daemon=True);thread.start()
+        base=f'http://127.0.0.1:{stub.server_port}'
+        request=dict(sample='recurring-ai-watch',
+            implementation='recipes/recurring-ai-watch/python/google-adk',
+            mode='mock',model='gemini-flash-lite',classifier='jev-default',
+            run_id='run-current',signalName='attacker',signalInput='secret',
+            cadence_web_url='http://attacker.example',cluster='attacker')
+        try:
+            self.explorer=Explorer(self.root,cadence_web_url=base)
+            WorkflowStub.mode='found';WorkflowStub.run_id='run-current'
+            WorkflowStub.signal_mode='accepted';WorkflowStub.posts.clear()
+            for action,signal_name in [('check-now','check-now'),('stop-watch','stop-watch')]:
+                result=self.explorer.workflow_signal({**request,'action':action})
+                self.assertEqual((result['state'],result['signal_name']),('accepted',signal_name))
+                path,body=WorkflowStub.posts[-1]
+                self.assertTrue(path.endswith(f'/run-current/signal'))
+                self.assertEqual(json.loads(body),dict(signalName=signal_name))
+                self.assertNotIn(b'secret',body)
+            post_count=len(WorkflowStub.posts)
+            stale=self.explorer.workflow_signal({**request,'action':'check-now','run_id':'run-old'})
+            self.assertEqual(stale['state'],'stale run')
+            self.assertEqual(len(WorkflowStub.posts),post_count)
+            for action in ('status','arbitrary',''):
+                with self.assertRaises(InvalidSelection):
+                    self.explorer.workflow_signal({**request,'action':action})
+            with self.assertRaises(Unsupported):
+                self.explorer.workflow_signal(dict(sample='ticket-routing',
+                    implementation='recipes/ticket-routing/go',mode='demo',
+                    classifier='mock',run_id='run-current',action='check-now'))
+            for mode,state in [('not-found','no execution'),('auth','authentication required'),
+                    ('rejected','rejected')]:
+                WorkflowStub.signal_mode=mode
+                self.assertEqual(self.explorer.workflow_signal(
+                    {**request,'action':'check-now'})['state'],state)
+            WorkflowStub.signal_mode='slow'
+            timed=Explorer(self.root,cadence_web_url=base,workflow_timeout=.001)
+            self.assertEqual(timed.workflow_signal(
+                {**request,'action':'check-now'})['state'],'unreachable')
+
+            WorkflowStub.signal_mode='accepted'
+            terminal=TerminalStub()
+            server=ThreadingHTTPServer(('127.0.0.1',0),partial(
+                Handler,explorer=self.explorer,terminal_launcher=terminal))
+            server_thread=threading.Thread(target=server.serve_forever,daemon=True)
+            server_thread.start()
+            connection=http.client.HTTPConnection('127.0.0.1',server.server_port)
+            headers={'Content-Type':'application/json',
+                'Origin':f'http://127.0.0.1:{server.server_port}'}
+            try:
+                body=json.dumps({**request,'action':'check-now'})
+                connection.request('POST','/api/workflow-signal',body=body,headers=headers)
+                response=connection.getresponse();self.assertEqual(response.status,200)
+                self.assertEqual(json.loads(response.read())['state'],'accepted')
+                connection.request('POST','/api/workflow-signal',body=body,
+                    headers={'Content-Type':'application/json'})
+                response=connection.getresponse();self.assertEqual(response.status,403);response.read()
+            finally:
+                connection.close();server.shutdown();server.server_close();server_thread.join()
+        finally:
+            stub.shutdown();stub.server_close();thread.join()
+
     def test_http_refresh_errors_and_loopback_boundary(self):
-        server=ThreadingHTTPServer(('127.0.0.1',0),partial(Handler,explorer=self.explorer))
+        terminal=TerminalStub()
+        server=ThreadingHTTPServer(('127.0.0.1',0),partial(
+            Handler,explorer=self.explorer,terminal_launcher=terminal))
         thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
         connection=http.client.HTTPConnection('127.0.0.1',server.server_port)
         try:
             connection.request('GET','/api/state');response=connection.getresponse()
             self.assertEqual(response.status,200);self.assertEqual(response.getheader('Cache-Control'),'no-store')
-            self.assertEqual(len(json.loads(response.read())['models']),3)
+            state=json.loads(response.read());self.assertEqual(len(state['models']),3)
+            self.assertTrue(state['terminal_handoff'])
             path=self.root/'models.yaml';path.write_text(path.read_text().replace('llama3.2:latest','new-model'))
             connection.request('GET','/api/state');response=connection.getresponse()
             self.assertEqual(json.loads(response.read())['models'][1]['model'],'new-model')
@@ -288,6 +468,49 @@ class ExplorerTests(unittest.TestCase):
                 'Content-Type':'application/json','Origin':f'http://127.0.0.1:{server.server_port}'})
             response=connection.getresponse();self.assertEqual(response.status,200)
             self.assertEqual(json.loads(response.read())['components'],[])
+            terminal_request=dict(sample='recurring-ai-watch',
+                implementation='recipes/recurring-ai-watch/python/google-adk',mode='mock',
+                model='gemini-flash-lite',classifier='jev-default',action='worker',
+                command='malicious command')
+            body=json.dumps(terminal_request)
+            connection.request('POST','/api/terminal',body=body,headers={'Content-Type':'application/json'})
+            response=connection.getresponse();self.assertEqual(response.status,403);response.read()
+            headers={'Content-Type':'application/json',
+                'Origin':f'http://127.0.0.1:{server.server_port}'}
+            connection.request('POST','/api/terminal',body=body,headers={
+                **headers,'Host':'attacker.example'})
+            response=connection.getresponse();self.assertEqual(response.status,403);response.read()
+            connection.request('POST','/api/terminal',body=body,headers=headers)
+            response=connection.getresponse();self.assertEqual(response.status,200)
+            self.assertEqual(json.loads(response.read())['state'],'prefilled')
+            self.assertEqual(len(terminal.commands),1)
+            self.assertIn('.venv/bin/python',terminal.commands[0])
+            self.assertNotIn('malicious command',terminal.commands[0])
+            terminal_request['action']='start';body=json.dumps(terminal_request)
+            connection.request('POST','/api/terminal',body=body,headers=headers)
+            response=connection.getresponse();self.assertEqual(response.status,200);response.read()
+            self.assertIn(' start --mode mock',terminal.commands[-1])
+            terminal_request['action']='status';body=json.dumps(terminal_request)
+            connection.request('POST','/api/terminal',body=body,headers=headers)
+            response=connection.getresponse();self.assertEqual(response.status,422);response.read()
+            self.assertEqual(len(terminal.commands),2)
+            unavailable=dict(sample='ticket-routing',implementation='recipes/ticket-routing/go',
+                mode='worker',classifier='mock',action='start')
+            connection.request('POST','/api/terminal',body=json.dumps(unavailable),headers=headers)
+            response=connection.getresponse();self.assertEqual(response.status,422);response.read()
+            self.assertEqual(len(terminal.commands),2)
+            connection.request('POST','/api/terminal',body='{broken',headers=headers)
+            response=connection.getresponse();self.assertEqual(response.status,422);response.read()
+            connection.request('POST','/api/terminal',body='{}',headers={
+                'Content-Type':'text/plain','Origin':headers['Origin']})
+            response=connection.getresponse();self.assertEqual(response.status,415);response.read()
+            connection.request('POST','/api/terminal',body=' '*16385,headers=headers)
+            response=connection.getresponse();self.assertEqual(response.status,413);response.read()
+            terminal.available=False
+            terminal_request['action']='worker';body=json.dumps(terminal_request)
+            connection.request('POST','/api/terminal',body=body,headers=headers)
+            response=connection.getresponse();self.assertEqual(response.status,422);response.read()
+            self.assertEqual(len(terminal.commands),2)
         finally:
             connection.close();server.shutdown();server.server_close();thread.join()
 

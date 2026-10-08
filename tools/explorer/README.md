@@ -97,12 +97,56 @@ to install services or models before retrying.
 
 Keys remain in the local Worker environment. The explorer does not read `.env`
 files, accept credential values, or put keys in commands. Its HTTP endpoints are
-uncached and loopback-only. The warm-up action additionally requires a same-origin
-JSON request and accepts only resolved loopback targets. File viewing is limited
-to public recipe README/evidence/CLI files and the two root catalogs.
+uncached and loopback-only. Warm-up and Terminal handoff actions additionally
+require same-origin JSON requests. Warm-up accepts only resolved loopback targets,
+and Terminal handoff accepts only re-resolved Worker/start actions. File viewing
+is limited to public recipe README/evidence/CLI files and the two root catalogs.
 
-Windows command tabs/launcher are deferred. The Python server is independent of
-the Bash launcher so a Windows entry point can reuse it later.
+## macOS Terminal handoff
+
+On macOS, **Open in Terminal** copies the selected Worker or Workflow command,
+opens a separate Terminal.app window, and pastes the command at the prompt. It
+does not press Enter or execute the command. Review it before running it.
+
+macOS may ask the application that launched the explorer for Automation or
+Accessibility permission. If automatic paste is denied or times out, Terminal
+still opens and the command remains copied; press Cmd+V to paste it. Permission
+can be changed under **System Settings → Privacy & Security → Automation** or
+**Accessibility**. macOS may attribute the request to Cursor, Terminal, Python,
+or `osascript`, depending on how the explorer was launched.
+
+The action is limited to commands resolved from the current checkout. The browser
+cannot send arbitrary command text, and setup/control commands remain copy-only.
+Windows command tabs and terminal handoff are deferred. The Python server remains
+independent of the Bash launcher so another entry point can reuse it later.
+
+## Cadence-Web run links
+
+For Recurring AI Watch, Step 6 shows the generated Workflow ID and can explicitly
+resolve its current Run ID through the local Cadence-Web read-only API. This needs
+neither the Cadence CLI nor a Cadence SDK dependency in the Explorer. Resolution
+never runs automatically and does not imply that a Workflow was started.
+
+After resolution, **Open history** and **Open queries** target that exact run. The
+Run ID remains editable so an older exact run can be pasted. Resolve again after
+Continue-As-New to replace it with the current run. A missing execution or
+unavailable Cadence-Web instance leaves **Open domain** available.
+
+Ticket Routing direct-run links are deferred because its current actions can
+create several Workflow IDs. Supporting it requires an explicit Workflow
+selection rather than guessing.
+
+After a successful latest-run resolution, Recurring AI Watch also shows
+payload-free **Send check-now** and **Send stop-watch** controls. The Explorer
+revalidates that the displayed run is still current, maps only those two
+allowlisted actions, and proxies the Signal through Cadence-Web. Button feedback
+means Cadence-Web accepted or rejected the request; it does not prove the
+Workflow processed the Signal. Editing the Run ID disables the controls until the
+latest run is resolved again. The copyable CLI controls remain available.
+
+Queries continue to run in Cadence-Web through **Open queries**. Generic Signal
+discovery and payload forms are future work; the Explorer does not accept
+arbitrary Signal names, raw JSON payloads, or browser-provided serialization.
 
 ## Validation
 
@@ -110,12 +154,13 @@ the Bash launcher so a Windows entry point can reuse it later.
 tools/explorer/.venv/bin/python -m unittest discover -s tools/explorer/tests -v
 ```
 
-Tests use a temporary checkout and local stub services, without cloud AI or
-Cadence calls. They cover all 24 supported Watch selections, 120 generated
-commands against both actual argparse parsers, Go actions and live-batch bounds,
-changed catalogs/CLI guards, new/incomplete recipes, non-execution of recipe
-modules, quoting of paths with spaces, probe/warm-up failures, action protection,
-HTTP refresh behavior, and source-file boundaries.
+Tests use a temporary checkout and local stub services, without cloud AI,
+Cadence, or Terminal.app calls. They cover all 24 supported Watch selections,
+120 generated commands against both actual argparse parsers, Go actions and
+live-batch bounds, changed catalogs/CLI guards, new/incomplete recipes,
+non-execution of recipe modules, quoting of paths with spaces, probe/warm-up
+failures, Terminal handoff and fallback, action protection, HTTP refresh
+behavior, and source-file boundaries.
 
 The optional DOM workflow check requires Node.js and jsdom 26.1.0, solely for
 development; these are not explorer runtime dependencies. Install jsdom into a

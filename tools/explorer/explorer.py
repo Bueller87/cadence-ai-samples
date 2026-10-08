@@ -20,6 +20,8 @@ from source import (InvalidSelection, Unsupported, go_classifier, go_cli,
 
 
 SKIP = {'tests', 'testdata', 'perf', '.venv', 'venv', '__pycache__', 'node_modules'}
+CADENCE_WEB_URL = 'http://localhost:8088'
+CADENCE_CLUSTER = 'cluster0'
 SCENARIOS = {
     'ticket-routing': 'Classify StreamWave support tickets and route them through durable assignment Workflows.',
     'recurring-ai-watch': 'Classify release notes, then use an agent and LLM to produce a recurring impact report.',
@@ -64,8 +66,14 @@ def evidence(directory):
 
 
 class Explorer:
-    def __init__(self, root):
+    def __init__(self, root, cadence_web_url=CADENCE_WEB_URL,
+                 cadence_cluster=CADENCE_CLUSTER, opener=urlopen,
+                 workflow_timeout=1.5):
         self.root = Path(root).resolve()
+        self.cadence_web_url = cadence_web_url.rstrip('/')
+        self.cadence_cluster = cadence_cluster
+        self.opener = opener
+        self.workflow_timeout = workflow_timeout
 
     def inside(self, path):
         return path.resolve().is_relative_to(self.root) and not path.is_symlink()
@@ -254,6 +262,7 @@ class Explorer:
             start=prefix+shlex.join(starter) if starter else '',
             controls=[dict(name=c[-1],command=prefix+shlex.join(c)) for c in controls],
             domain=domain,task_list=task_list,workflow_id=workflow_id if cli['kind']=='python' else None,
+            cadence_web_url=self.cadence_web_url, cadence_cluster=self.cadence_cluster,
             implementation=variant['id'],mode=mode,live=live,model=model,classifier=classifier,
             evidence=record,credentials=credentials,local=self.local_commands(model,classifier) if live else [],
             mock=(mode=='mock' if cli['kind']=='python' else mode in cli['mock_modes'] or (mode=='worker' and not live)),
@@ -279,6 +288,115 @@ class Explorer:
             if resolved['classifier']:
                 services.append(self.classifier_probe(resolved['classifier']))
         return dict(checked_at=checked_at, selection=self.selection_key(resolved), services=services)
+
+    def workflow_run(self, request):
+        resolved = self.resolve(request)
+        if request.get('sample') != 'recurring-ai-watch':
+            raise Unsupported('Direct run links currently support Recurring AI Watch only.')
+        workflow_id = resolved.get('workflow_id')
+        if not isinstance(workflow_id, str) or not workflow_id:
+            raise Unsupported('The selected recipe does not expose one Workflow ID.')
+        checked_at = datetime.now(timezone.utc).isoformat(timespec='seconds')
+        result = dict(state='unreachable', domain=resolved['domain'],
+            cluster=self.cadence_cluster, workflow_id=workflow_id,
+            run_id=None, checked_at=checked_at)
+        segments = [quote(value, safe='') for value in (
+            resolved['domain'], self.cadence_cluster, workflow_id)]
+        endpoint = (self.cadence_web_url + '/api/domains/' + segments[0] + '/'
+            + segments[1] + '/workflows/' + segments[2])
+        try:
+            with self.opener(Request(endpoint, headers={'Accept':'application/json'}),
+                    timeout=self.workflow_timeout) as response:
+                body = response.read(1024 * 1024 + 1)
+            if len(body) > 1024 * 1024:
+                raise ValueError('response is too large')
+            payload = json.loads(body)
+            if not isinstance(payload, dict):
+                raise ValueError('response is not an object')
+            workflow_info = payload.get('workflowExecutionInfo')
+            if workflow_info is None:
+                result.update(state='no execution',
+                    detail='No current execution was found for this Workflow ID.')
+                return result
+            run_id = workflow_info.get('workflowExecution', {}).get('runId')
+            if not isinstance(run_id, str) or not run_id.strip():
+                result.update(state='malformed response',
+                    detail='Cadence-Web did not return a current Run ID.')
+            elif len(run_id) > 255 or any(ord(character) < 32 for character in run_id):
+                result.update(state='malformed response',
+                    detail='Cadence-Web returned an invalid Run ID.')
+            else:
+                result.update(state='found', run_id=run_id,
+                    detail='Resolved the current Run ID through Cadence-Web.')
+        except HTTPError as error:
+            state = ('no execution' if error.code == 404 else
+                'authentication required' if error.code in {401,403} else
+                'unreachable')
+            detail = ('No current execution was found for this Workflow ID.'
+                if state == 'no execution' else
+                'Cadence-Web requires authentication for this lookup.'
+                if state == 'authentication required' else
+                f'Cadence-Web responded with HTTP {error.code}.')
+            error.close()
+            result.update(state=state, detail=detail)
+        except (URLError, TimeoutError, OSError) as error:
+            result['detail'] = self.safe_error(error, 'Cadence-Web could not be reached.')
+        except (ValueError, TypeError, AttributeError, json.JSONDecodeError):
+            result.update(state='malformed response',
+                detail='Cadence-Web returned an unreadable workflow response.')
+        return result
+
+    def workflow_signal(self, request):
+        signals = {'check-now':'check-now', 'stop-watch':'stop-watch'}
+        action = request.get('action')
+        if action not in signals:
+            raise InvalidSelection('Workflow Signal action must be check-now or stop-watch.')
+        displayed_run = request.get('run_id')
+        if (not isinstance(displayed_run, str) or not displayed_run.strip()
+                or len(displayed_run) > 255
+                or any(ord(character) < 32 for character in displayed_run)):
+            raise InvalidSelection('Resolve the current Run ID before sending a Signal.')
+        current = self.workflow_run(request)
+        result = dict(state=current['state'], action=action,
+            signal_name=signals[action], run_id=displayed_run, detail=current['detail'])
+        if current['state'] != 'found':
+            return result
+        if current['run_id'] != displayed_run:
+            return dict(state='stale run', action=action,
+                signal_name=signals[action], run_id=displayed_run,
+                detail='The current Run ID changed. Resolve the latest run and retry.')
+        segments = [quote(value, safe='') for value in (
+            current['domain'], current['cluster'], current['workflow_id'], displayed_run)]
+        endpoint = (self.cadence_web_url + '/api/domains/' + segments[0] + '/'
+            + segments[1] + '/workflows/' + segments[2] + '/' + segments[3] + '/signal')
+        body = json.dumps(dict(signalName=signals[action]), separators=(',',':')).encode()
+        request_object = Request(endpoint, method='POST', data=body,
+            headers={'Accept':'application/json', 'Content-Type':'application/json'})
+        try:
+            with self.opener(request_object, timeout=self.workflow_timeout) as response:
+                response_body = response.read(1024 * 1024 + 1)
+            if len(response_body) > 1024 * 1024:
+                raise ValueError('response is too large')
+            result.update(state='accepted',
+                detail='Cadence-Web accepted the Signal; Workflow processing is not yet confirmed.')
+        except HTTPError as error:
+            state = ('no execution' if error.code == 404 else
+                'authentication required' if error.code in {401,403} else
+                'rejected')
+            detail = ('The resolved Workflow execution is no longer available.'
+                if state == 'no execution' else
+                'Cadence-Web requires authentication for this Signal.'
+                if state == 'authentication required' else
+                f'Cadence-Web rejected the Signal with HTTP {error.code}.')
+            error.close()
+            result.update(state=state, detail=detail)
+        except (URLError, TimeoutError, OSError) as error:
+            result.update(state='unreachable',
+                detail=self.safe_error(error, 'Cadence-Web could not be reached.'))
+        except (ValueError, TypeError):
+            result.update(state='malformed response',
+                detail='Cadence-Web returned an unreadable Signal response.')
+        return result
 
     def selection_key(self, resolved):
         return '|'.join(str(value or '') for value in (
