@@ -62,7 +62,10 @@ python main.py stop
 The default Workflow ID is `recurring-ai-watch-google-adk-demo` (or
 `recurring-ai-watch-openai-agents-demo`). Supply `--workflow-id`
 before the command to operate on another Watch. `start --interval 15` sets the
-interval in seconds. `start` submits the Workflow and returns immediately.
+interval in seconds. `start` submits the Workflow and returns immediately. A
+closed Watch ID may be started again; Cadence creates a new Run and preserves the
+previous Run's history. Starting the same ID while it is still open remains an
+error.
 
 ## Live run
 

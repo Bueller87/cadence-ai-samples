@@ -9,6 +9,7 @@ import httpx
 
 from agents import ModelResponse, ModelSettings, ModelTracing
 from agents.usage import Usage, serialize_usage
+from cadence.api.v1 import workflow_pb2
 from cadence.contrib.pydantic import PydanticDataConverter
 from cadence.testing import TestWorkflowEnvironment
 from openai.types.responses import ResponseOutputMessage, ResponseOutputText
@@ -170,6 +171,10 @@ class InferenceTests(unittest.IsolatedAsyncioTestCase):
             with patch("main.client", return_value=client):
                 await start(args, selection)
             watch_input = client.start_workflow.call_args.args[1]
+            self.assertEqual(
+                client.start_workflow.call_args.kwargs["workflow_id_reuse_policy"],
+                workflow_pb2.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE,
+            )
             self.assertEqual(watch_input.model_provider, selection.model.provider)
             self.assertEqual(watch_input.model_name, selection.model.model)
             self.assertFalse(any("key" in field or "endpoint" in field for field in asdict(watch_input)))

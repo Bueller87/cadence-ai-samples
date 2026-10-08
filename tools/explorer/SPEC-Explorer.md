@@ -1,6 +1,7 @@
 # Cadence AI Samples Explorer — Product Specification
 
-Status: agreed product direction, ready for implementation.
+Status: October 5 POC scope implemented and validated; merged to `main` on
+October 7, 2026 in `8446cf3`. Post-demo backlog is active.
 Owner: Kevin Burns. Decisions recorded October 4, 2026 (America/Los_Angeles).
 Target: October 5, 2026 Cadence Developer Advocacy POC demo.
 
@@ -181,6 +182,17 @@ and longer teaching explanations in READMEs and the presentation.
   numbered order, concise text, and removal of all three cards.
 - Rehearse healthy and missing-service views. Document unverified behavior honestly.
 
+## POC completion status
+
+**Done (October 7, 2026, `8446cf3`, merged to `main`).**
+
+The scope above this section is complete for the current two-recipe checkout and
+the October 5 Mac target. The launcher, six-step flow, supported combinations,
+commands, service checks, local warm-up, Cadence-Web domain link, focused tests,
+and healthy/missing-service walkthrough were implemented and validated. Remaining
+limitations and post-demo expansion are tracked below. This baseline merged to
+`main` on October 7, 2026 in `8446cf3`.
+
 ---
 
 ## HARD CUT LINE — October 5, 2026 POC demo
@@ -192,10 +204,15 @@ building scaffolding for them during the POC.
 
 ## Future backlog — proposed priority, for review after the demo
 
-1. **Contribfest reliability:** deeper Cadence domain/Worker registration/task-list
+Status labels: **Done** is delivered for its stated scope, **Partial** has a
+delivered first slice and explicit follow-up, and **Planned** is not implemented.
+Delivered entries include the date, seven-character commit, and whether that
+commit is merged or remains on a feature branch.
+
+1. **Planned — Contribfest reliability:** deeper Cadence domain/Worker registration/task-list
    diagnostics and a downloadable diagnostic summary with secrets removed. Keep
    “services reachable” distinct from “Worker available.”
-2. **Recipe growth without drift:** follow the future
+2. **Planned — Recipe growth without drift:** follow the future
    [recipe template system specification](../../templates/SPEC-Recipe-Templates.md)
    and strengthen contributor guidance and CI checks aligning generated profiles,
    catalogs, commands, setup docs, and supported combinations.
@@ -209,25 +226,36 @@ building scaffolding for them during the POC.
      CLI conventions cannot express safely. Do not build a duplicate command
      catalog or generalized authoring platform by default.
    - Explorer web-client portability is separate future work.
-3. **Workflow-history deep link:** the post-demo Recurring AI Watch POC explicitly
+3. **Partial (October 7, 2026, `0938ebc`, `kevin/exp-automation`) —
+   Workflow-history deep link:** the post-demo Recurring AI Watch POC explicitly
    resolves the current Run ID through the local Cadence-Web read-only API and
    provides exact History and Queries links plus a manual Run ID override. Resolve
-   again after Continue-As-New. Ticket Routing and other multi-Workflow recipes
-   remain future work and require explicit Workflow selection; never guess a run.
-4. **Signal control plane:** after resolving an exact Run ID, offer only
-   recipe-defined, allowlisted Signal actions such as Recurring AI Watch
-   `check-now` and `stop-watch`. Keep query execution in Cadence-Web through
-   **Open queries**, where results render properly, and preserve the copyable CLI
-   controls as the manual path. Never accept arbitrary Signal names or payloads;
-   require explicit confirmation for stopping or other destructive actions, target
-   the resolved run, invalidate stale controls, and report the observed result.
-5. **Windows experience:** Linux/Mac and Windows command tabs in the same explorer,
+   again after Continue-As-New. This commit remains on the feature branch. Ticket
+   Routing and other multi-Workflow recipes remain future work and require
+   explicit Workflow selection; never guess a run.
+4. **Partial (implemented October 7, validated October 8, 2026; pending commit on
+   `kevin/exp-automation`) —
+   Signal control plane:** the Recurring AI Watch POC exposes payload-free,
+   allowlisted `check-now` and `stop-watch` actions only after latest-run
+   resolution. It revalidates the exact current run, reports Cadence-Web
+   acceptance without claiming Workflow processing, and preserves copyable CLI
+   controls as the manual path. Queries remain in Cadence-Web through **Open
+   queries**. A disposable mock Watch verified that `check-now` advanced the check
+   count and `stop-watch` completed the Workflow. Both Watch implementations now
+   explicitly allow a closed demo Workflow ID to start a new Run while still
+   rejecting a duplicate start when a Run is open. Future work should evaluate a
+   separate control panel and recipe-owned, schema-driven typed fields only for
+   Signals that accept payloads; do not default to arbitrary Signal names or a
+   raw JSON textbox.
+5. **Planned — Windows experience:** Linux/Mac and Windows command tabs in the same explorer,
    plus a Windows launcher; preserve the same selection flow.
-6. **Terminal handoff:** the post-demo macOS POC opens Terminal.app with a
+6. **Partial (October 7, 2026, `cb61e06`, `kevin/exp-automation`) —
+   Terminal handoff:** the post-demo macOS POC opens Terminal.app with a
    re-resolved Worker/Workflow command ready for the user to review and press
    Enter. It never presses Enter automatically; copy remains the permission
-   fallback. Other terminal applications and platforms remain future work.
-7. **Recipe runtime bootstrap:** make the first five minutes after clone reliable
+   fallback. This commit remains on the feature branch. Other terminal
+   applications and platforms remain future work.
+7. **Planned — Recipe runtime bootstrap:** make the first five minutes after clone reliable
    by detecting whether the selected implementation is prepared and offering one
    explicit, recipe-scoped setup action. For Python, create/reuse the implementation
    virtual environment and install its declared dependencies; support equivalent
@@ -235,15 +263,15 @@ building scaffolding for them during the POC.
    progress and bounded failures, handle partial/repeated setup safely, and never
    turn the Explorer into an arbitrary package installer or shell executor. Worker
    and Workflow handoff must explain when preparation is still required.
-8. **Secure live credential handoff:** before opening a live Worker command,
+8. **Planned — Secure live credential handoff:** before opening a live Worker command,
    identify the required LLM and classifier credential names and let the user
    provide their values in a secure local context, such as a hidden Terminal
    prompt or an approved credential store. Never accept, display, persist, log,
    or return secret values through the browser, command preview, URL, Workflow
    input, or history. Keep mock and keyless-local paths free of credential prompts.
-9. **Optional infrastructure startup:** explicit start actions only after handling
+9. **Planned — Optional infrastructure startup:** explicit start actions only after handling
    existing installations, running services, ports, permissions, and partial states.
-10. **Unimplemented classifier opportunities:** add implementations/tests before
+10. **Planned — Unimplemented classifier opportunities:** add implementations/tests before
    restoring these removed catalog candidates:
    - `kev-local` (`kev`, `kev-latest`): no provider implementation in either recipe.
    - `von-local` (`von`, `von-1.2.0`): no provider implementation in either recipe.

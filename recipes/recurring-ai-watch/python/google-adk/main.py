@@ -11,6 +11,7 @@ from datetime import timedelta
 from pathlib import Path
 
 import cadence
+from cadence.api.v1 import workflow_pb2
 from cadence.contrib.pydantic import PydanticDataConverter
 from cadence.worker import Worker
 
@@ -114,6 +115,7 @@ async def start(args: argparse.Namespace, selection: CatalogSelection) -> None:
             ),
             task_list=args.task_list,
             workflow_id=args.workflow_id,
+            workflow_id_reuse_policy=workflow_pb2.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE,
             execution_start_to_close_timeout=timedelta(days=365),
             task_start_to_close_timeout=timedelta(seconds=30),
         )

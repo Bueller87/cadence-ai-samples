@@ -136,6 +136,18 @@ Ticket Routing direct-run links are deferred because its current actions can
 create several Workflow IDs. Supporting it requires an explicit Workflow
 selection rather than guessing.
 
+After a successful latest-run resolution, Recurring AI Watch also shows
+payload-free **Send check-now** and **Send stop-watch** controls. The Explorer
+revalidates that the displayed run is still current, maps only those two
+allowlisted actions, and proxies the Signal through Cadence-Web. Button feedback
+means Cadence-Web accepted or rejected the request; it does not prove the
+Workflow processed the Signal. Editing the Run ID disables the controls until the
+latest run is resolved again. The copyable CLI controls remain available.
+
+Queries continue to run in Cadence-Web through **Open queries**. Generic Signal
+discovery and payload forms are future work; the Explorer does not accept
+arbitrary Signal names, raw JSON payloads, or browser-provided serialization.
+
 ## Validation
 
 ```bash

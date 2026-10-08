@@ -27,8 +27,8 @@ async function main(){
   let output='';server.stdout.on('data',chunk=>output+=chunk);server.stderr.on('data',chunk=>errors.push(String(chunk)));
   await waitFor(()=>/http:\/\/127\.0\.0\.1:\d+\//.test(output),'server startup');
   const url=output.match(/http:\/\/127\.0\.0\.1:\d+\//)[0];
-  const copies=[],terminalRequests=[],terminalEvents=[],runRequests=[];const runIds=['run-current','run-continued'];
-  let rejectClipboard=false,terminalState='prefilled',holdTerminal=false,releaseTerminal,holdRun=false,releaseRun;
+  const copies=[],terminalRequests=[],terminalEvents=[],runRequests=[],signalRequests=[];const runIds=['run-current','run-continued'];
+  let rejectClipboard=false,terminalState='prefilled',holdTerminal=false,releaseTerminal,holdRun=false,releaseRun,signalState='accepted',holdSignal=false,releaseSignal;
   const virtualConsole=new VirtualConsole();virtualConsole.on('jsdomError',error=>errors.push(error.message));
   dom=await JSDOM.fromURL(url,{runScripts:'dangerously',resources:'usable',pretendToBeVisual:true,virtualConsole,
     beforeParse(window){
@@ -46,6 +46,12 @@ async function main(){
           if(holdRun)return new Promise(resolve=>releaseRun=()=>resolve(response()));
           return response();
         }
+        if(target.pathname==='/api/workflow-signal'){
+          signalRequests.push(JSON.parse(options.body));
+          const response=()=>new Response(JSON.stringify({state:signalState,detail:signalState==='accepted'?'Cadence-Web accepted the Signal; Workflow processing is not yet confirmed.':'Cadence-Web rejected the Signal.'}),{status:200,headers:{'Content-Type':'application/json'}});
+          if(holdSignal)return new Promise(resolve=>releaseSignal=()=>resolve(response()));
+          return response();
+        }
         const response=await fetch(target,options);
         if(target.pathname==='/api/state'){
           const body=await response.json();body.terminal_handoff=true;
@@ -53,6 +59,7 @@ async function main(){
         }
         return response;
       };
+      window.confirm=()=>{throw Error('Signal controls must not use confirm()');};
       window.navigator.clipboard={writeText:async text=>{if(rejectClipboard)throw Error('Denied');copies.push(text);terminalEvents.push('copy');}};
     }});
   const $=id=>dom.window.document.getElementById(id);
@@ -77,7 +84,13 @@ async function main(){
   assert.equal($('web-cluster').textContent,'cluster0');assert.ok($('web-workflow-id').textContent.endsWith('-demo'));
   $('resolve-run').click();await waitFor(()=>$('run-id').value==='run-current','latest run resolution');
   assert.ok($('workflow-history').href.endsWith('/run-current/history'));assert.ok($('workflow-queries').href.endsWith('/run-current/queries'));
-  input('run-id','historical run/1');assert.ok($('workflow-history').href.includes('/historical%20run%2F1/history'));assert.ok($('workflow-run-status').textContent.includes('entered'));
+  assert.equal($('watch-signals').hidden,false);holdSignal=true;$('signal-check-now').click();await waitFor(()=>typeof releaseSignal==='function','held check-now Signal');
+  assert.equal($('signal-check-now').disabled,true);assert.equal($('signal-stop-watch').disabled,true);assert.equal(signalRequests[0].action,'check-now');assert.equal(signalRequests[0].run_id,'run-current');assert.equal('signalName' in signalRequests[0],false);assert.equal('signalInput' in signalRequests[0],false);
+  releaseSignal();await waitFor(()=>$('signal-check-now').textContent==='Signal sent ✓','Signal accepted feedback');await waitFor(()=>$('signal-check-now').textContent==='Send check-now','Signal accepted feedback reset');holdSignal=false;releaseSignal=undefined;
+  signalState='rejected';$('signal-stop-watch').click();await waitFor(()=>$('signal-stop-watch').textContent==='Send failed','Signal failed feedback');assert.ok($('signal-status').textContent.includes('rejected'));await waitFor(()=>$('signal-stop-watch').textContent==='Send stop-watch','Signal failed feedback reset');
+  signalState='accepted';holdSignal=true;$('signal-check-now').click();await waitFor(()=>typeof releaseSignal==='function','held stale Signal');
+  input('run-id','historical run/1');releaseSignal();await waitFor(()=>$('watch-signals').hidden&&$('signal-status').textContent==='','stale Signal response ignored');holdSignal=false;releaseSignal=undefined;
+  assert.ok($('workflow-history').href.includes('/historical%20run%2F1/history'));assert.ok($('workflow-run-status').textContent.includes('entered'));
   $('resolve-run').click();await waitFor(()=>$('run-id').value==='run-continued','continued run resolution');
   assert.ok($('workflow-history').href.endsWith('/run-continued/history'));assert.equal(runRequests.length,2);
   assert.equal($('open-worker').hidden,false);assert.equal($('open-start').hidden,false);assert.equal($('terminal-note').hidden,false);
@@ -122,7 +135,7 @@ async function main(){
   $('refresh').click();await waitFor(()=>$('sample').options.length===4,'new recipe discovery');change('sample','new-recipe');
   assert.equal($('language').value,'java');assert.equal($('language-field').hidden,false);assert.equal($('readme').hidden,false);await failed();assert.ok($('selection-status').textContent.includes('adapter'));
   assert.deepEqual(errors,[]);
-  console.log('PASS: real HTTP + six-step DOM flow, visible single-choice selectors, explicit modes, manual checks, local warm-up availability, Mac terminal handoff/fallback/stale state, latest/manual Run ID deep links, individual controls, catalog refresh, Go live batches, clipboard fallback, and incomplete recipes.');
+  console.log('PASS: real HTTP + six-step DOM flow, visible single-choice selectors, explicit modes, manual checks, local warm-up availability, Mac terminal handoff/fallback/stale state, latest/manual Run ID deep links, allowlisted Signal feedback/stale state, individual controls, catalog refresh, Go live batches, clipboard fallback, and incomplete recipes.');
 }
 main().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{
   if(dom)dom.window.close();

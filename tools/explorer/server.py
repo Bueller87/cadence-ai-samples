@@ -74,7 +74,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send(403, 'Use the loopback URL printed by the launcher.', 'text/plain; charset=utf-8')
                 return
             action_path = urlsplit(self.path).path
-            if action_path not in {'/api/warmup', '/api/terminal'}:
+            if action_path not in {'/api/warmup', '/api/terminal', '/api/workflow-signal'}:
                 self.send(405, 'This action is not available.', 'text/plain; charset=utf-8')
                 return
             origin = self.headers.get('Origin')
@@ -95,7 +95,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError('Action request must be an object.')
             if action_path == '/api/warmup':
                 result = self.explorer.warmup(request)
-            else:
+            elif action_path == '/api/terminal':
                 action = request.pop('action', None)
                 if action not in {'worker', 'start'}:
                     raise InvalidSelection('Terminal action must be worker or start.')
@@ -109,6 +109,8 @@ class Handler(BaseHTTPRequestHandler):
                 if result.get('state') not in {'prefilled', 'opened-copy-only'}:
                     self.send(422, json.dumps(result), 'application/json; charset=utf-8')
                     return
+            else:
+                result = self.explorer.workflow_signal(request)
             self.send(200, json.dumps(result), 'application/json; charset=utf-8')
         except (InvalidSelection, Unsupported, ValueError, OSError, SyntaxError, TypeError, AttributeError, json.JSONDecodeError) as error:
             self.send(422, json.dumps(dict(error=str(error))), 'application/json; charset=utf-8')

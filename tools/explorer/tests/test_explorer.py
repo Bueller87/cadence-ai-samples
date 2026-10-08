@@ -62,8 +62,10 @@ ProbeStub.posts=[]
 
 class WorkflowStub(BaseHTTPRequestHandler):
     mode='found'
+    signal_mode='accepted'
     run_id='run-current'
     paths=[]
+    posts=[]
 
     def do_GET(self):
         WorkflowStub.paths.append(self.path)
@@ -80,6 +82,25 @@ class WorkflowStub(BaseHTTPRequestHandler):
         else:
             payload=json.dumps(dict(workflowExecutionInfo=dict(
                 workflowExecution=dict(runId=WorkflowStub.run_id)))).encode()
+        try:
+            self.send_response(200);self.send_header('Content-Type','application/json')
+            self.send_header('Content-Length',str(len(payload)));self.end_headers();self.wfile.write(payload)
+        except BrokenPipeError:
+            pass
+
+    def do_POST(self):
+        WorkflowStub.paths.append(self.path)
+        body=self.rfile.read(int(self.headers.get('Content-Length','0')))
+        WorkflowStub.posts.append((self.path,body))
+        if WorkflowStub.signal_mode=='not-found':
+            self.send_response(404);self.end_headers();return
+        if WorkflowStub.signal_mode=='auth':
+            self.send_response(401);self.end_headers();return
+        if WorkflowStub.signal_mode=='rejected':
+            self.send_response(400);self.end_headers();return
+        if WorkflowStub.signal_mode=='slow':
+            time.sleep(.05)
+        payload=b'{}'
         try:
             self.send_response(200);self.send_header('Content-Type','application/json')
             self.send_header('Content-Length',str(len(payload)));self.end_headers();self.wfile.write(payload)
@@ -351,6 +372,69 @@ class ExplorerTests(unittest.TestCase):
                 connection.request('GET','/api/workflow-run?'+urlencode(request))
                 response=connection.getresponse();self.assertEqual(response.status,200)
                 self.assertEqual(json.loads(response.read())['run_id'],'run-http')
+            finally:
+                connection.close();server.shutdown();server.server_close();server_thread.join()
+        finally:
+            stub.shutdown();stub.server_close();thread.join()
+
+    def test_workflow_signal_allowlist_revalidation_and_http_route(self):
+        stub=ThreadingHTTPServer(('127.0.0.1',0),WorkflowStub)
+        thread=threading.Thread(target=stub.serve_forever,daemon=True);thread.start()
+        base=f'http://127.0.0.1:{stub.server_port}'
+        request=dict(sample='recurring-ai-watch',
+            implementation='recipes/recurring-ai-watch/python/google-adk',
+            mode='mock',model='gemini-flash-lite',classifier='jev-default',
+            run_id='run-current',signalName='attacker',signalInput='secret',
+            cadence_web_url='http://attacker.example',cluster='attacker')
+        try:
+            self.explorer=Explorer(self.root,cadence_web_url=base)
+            WorkflowStub.mode='found';WorkflowStub.run_id='run-current'
+            WorkflowStub.signal_mode='accepted';WorkflowStub.posts.clear()
+            for action,signal_name in [('check-now','check-now'),('stop-watch','stop-watch')]:
+                result=self.explorer.workflow_signal({**request,'action':action})
+                self.assertEqual((result['state'],result['signal_name']),('accepted',signal_name))
+                path,body=WorkflowStub.posts[-1]
+                self.assertTrue(path.endswith(f'/run-current/signal'))
+                self.assertEqual(json.loads(body),dict(signalName=signal_name))
+                self.assertNotIn(b'secret',body)
+            post_count=len(WorkflowStub.posts)
+            stale=self.explorer.workflow_signal({**request,'action':'check-now','run_id':'run-old'})
+            self.assertEqual(stale['state'],'stale run')
+            self.assertEqual(len(WorkflowStub.posts),post_count)
+            for action in ('status','arbitrary',''):
+                with self.assertRaises(InvalidSelection):
+                    self.explorer.workflow_signal({**request,'action':action})
+            with self.assertRaises(Unsupported):
+                self.explorer.workflow_signal(dict(sample='ticket-routing',
+                    implementation='recipes/ticket-routing/go',mode='demo',
+                    classifier='mock',run_id='run-current',action='check-now'))
+            for mode,state in [('not-found','no execution'),('auth','authentication required'),
+                    ('rejected','rejected')]:
+                WorkflowStub.signal_mode=mode
+                self.assertEqual(self.explorer.workflow_signal(
+                    {**request,'action':'check-now'})['state'],state)
+            WorkflowStub.signal_mode='slow'
+            timed=Explorer(self.root,cadence_web_url=base,workflow_timeout=.001)
+            self.assertEqual(timed.workflow_signal(
+                {**request,'action':'check-now'})['state'],'unreachable')
+
+            WorkflowStub.signal_mode='accepted'
+            terminal=TerminalStub()
+            server=ThreadingHTTPServer(('127.0.0.1',0),partial(
+                Handler,explorer=self.explorer,terminal_launcher=terminal))
+            server_thread=threading.Thread(target=server.serve_forever,daemon=True)
+            server_thread.start()
+            connection=http.client.HTTPConnection('127.0.0.1',server.server_port)
+            headers={'Content-Type':'application/json',
+                'Origin':f'http://127.0.0.1:{server.server_port}'}
+            try:
+                body=json.dumps({**request,'action':'check-now'})
+                connection.request('POST','/api/workflow-signal',body=body,headers=headers)
+                response=connection.getresponse();self.assertEqual(response.status,200)
+                self.assertEqual(json.loads(response.read())['state'],'accepted')
+                connection.request('POST','/api/workflow-signal',body=body,
+                    headers={'Content-Type':'application/json'})
+                response=connection.getresponse();self.assertEqual(response.status,403);response.read()
             finally:
                 connection.close();server.shutdown();server.server_close();server_thread.join()
         finally:
