@@ -1,0 +1,13 @@
+---
+description: Load the canonical repository context and coding-agent contract
+alwaysApply: true
+---
+
+# Repository context
+
+Follow [AGENTS.md](../../AGENTS.md) as the canonical agent contract. Read
+[agent-context/README.md](../../agent-context/README.md) for repository
+authority, the document map, approved-work discovery, and handoff procedures.
+
+Do not duplicate repository policy in Cursor rules or rely on chat history as
+project state.

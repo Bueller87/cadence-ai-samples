@@ -1,0 +1,111 @@
+name: Recipe proposal
+description: Propose a new recipe or port for maintainer triage
+title: "[Recipe]: "
+labels:
+  - status:needs-triage
+  - type:recipe
+  - area:recipes
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Proposals are not approved work until a maintainer adds `status:agent-ready`.
+        Do not include credentials, proprietary data, or private company context.
+  - type: dropdown
+    id: contribution_kind
+    attributes:
+      label: Contribution kind
+      options:
+        - New recipe
+        - Port of a public sample
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem and business scenario
+      description: Describe the user, durable process, inputs, and useful outcome.
+    validations:
+      required: true
+  - type: input
+    id: source
+    attributes:
+      label: Public source reference
+      description: For a port, link the public source repository or sample.
+  - type: dropdown
+    id: language
+    attributes:
+      label: Cadence language
+      options:
+        - Go
+        - Python
+        - Java
+        - Other or undecided
+    validations:
+      required: true
+  - type: dropdown
+    id: classifier
+    attributes:
+      label: Classifier integration
+      options:
+        - None
+        - SystemOne
+        - Other or undecided
+    validations:
+      required: true
+  - type: dropdown
+    id: agent
+    attributes:
+      label: Agent integration
+      options:
+        - None
+        - Google ADK
+        - OpenAI Agents
+        - Other or undecided
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and non-goals
+      description: State what belongs in the first useful slice and what does not.
+    validations:
+      required: true
+  - type: textarea
+    id: mock_path
+    attributes:
+      label: Offline or mock path
+      description: Explain how the core behavior can be exercised without paid AI access.
+    validations:
+      required: true
+  - type: input
+    id: spec
+    attributes:
+      label: Canonical or intended specification path
+      description: Link an existing spec, or give the intended `recipes/<slug>/SPEC.md` path for a new recipe.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Provide observable completion and validation criteria.
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation approach
+      description: List the offline tests, mock walkthrough, and any separately approved live checks.
+    validations:
+      required: true
+  - type: checkboxes
+    id: approval
+    attributes:
+      label: Approval gate
+      options:
+        - label: I understand this proposal must be labeled `status:agent-ready` by a maintainer before implementation.
+          required: true

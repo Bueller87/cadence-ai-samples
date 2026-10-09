@@ -2,6 +2,34 @@
 
 Start a contribution with a specific problem or use case, not a library feature.
 
+## Contribution workflow
+
+1. Open an upstream Issue describing the problem, scope, non-goals, acceptance
+   criteria, and offline validation path.
+2. Wait for a maintainer to add `status:agent-ready` before implementation.
+3. Before taking an Issue, check for an assignee, claim comment, or active linked
+   PR. Comment your intent so another contributor does not duplicate it.
+4. Work on a branch in your fork and open a draft PR against
+   `cadence-workflow/cadence-ai-samples:main`.
+5. Link the Issue and include actual test commands/results, untested behavior, and
+   known limitations.
+6. Sign every commit for DCO with `git commit -s`.
+7. Wait for repository-owner approval. Do not approve or merge your own PR.
+
+Anyone may propose work. Unapproved ideas use `status:needs-triage`; only a human
+maintainer promotes them to `status:agent-ready`.
+
+## Coding-agent contributions
+
+Agent-assisted changes follow the same Issue, branch, PR, review, and validation
+requirements as human-written changes. Coding agents must begin with
+[AGENTS.md](AGENTS.md) and the
+[repository context map](agent-context/README.md). Agents may create upstream
+`status:needs-triage` proposals but may not approve priority, architecture, PRs,
+or merges.
+
+## Recipe contributions
+
 Before implementation:
 
 1. Describe the proposed use case and why durable workflow orchestration helps.

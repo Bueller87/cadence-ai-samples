@@ -193,6 +193,11 @@ and healthy/missing-service walkthrough were implemented and validated. Remainin
 limitations and post-demo expansion are tracked below. This baseline merged to
 `main` on October 7, 2026 in `8446cf3`.
 
+Post-demo Terminal handoff, current-run deep links, payload-free Watch Signal
+controls, and repeatable Watch IDs merged through
+[PR #2](https://github.com/cadence-workflow/cadence-ai-samples/pull/2) on
+October 8, 2026 in `2693a81`.
+
 ---
 
 ## HARD CUT LINE — October 5, 2026 POC demo
@@ -202,17 +207,17 @@ Everything below is backlog only. Do not implement before October 6, 2026
 expansion; Kevin must prioritize the next work. Preserve these ideas without
 building scaffolding for them during the POC.
 
-## Future backlog — proposed priority, for review after the demo
+## Future backlog — tracked in upstream Issues
 
-Status labels: **Done** is delivered for its stated scope, **Partial** has a
-delivered first slice and explicit follow-up, and **Planned** is not implemented.
-Delivered entries include the date, seven-character commit, and whether that
-commit is merged or remains on a feature branch.
+The linked Issues are authoritative for remaining status, priority, and
+ownership. This section preserves requirements and historical delivered scope.
 
-1. **Planned — Contribfest reliability:** deeper Cadence domain/Worker registration/task-list
+1. **Contribfest reliability ([Issue #5](https://github.com/cadence-workflow/cadence-ai-samples/issues/5)):**
+   deeper Cadence domain/Worker registration/task-list
    diagnostics and a downloadable diagnostic summary with secrets removed. Keep
    “services reachable” distinct from “Worker available.”
-2. **Planned — Recipe growth without drift:** follow the future
+2. **Recipe growth without drift ([Issue #7](https://github.com/cadence-workflow/cadence-ai-samples/issues/7)):**
+   follow the future
    [recipe template system specification](../../templates/SPEC-Recipe-Templates.md)
    and strengthen contributor guidance and CI checks aligning generated profiles,
    catalogs, commands, setup docs, and supported combinations.
@@ -226,16 +231,14 @@ commit is merged or remains on a feature branch.
      CLI conventions cannot express safely. Do not build a duplicate command
      catalog or generalized authoring platform by default.
    - Explorer web-client portability is separate future work.
-3. **Partial (October 7, 2026, `0938ebc`, `kevin/exp-automation`) —
-   Workflow-history deep link:** the post-demo Recurring AI Watch POC explicitly
+3. **Workflow-history deep link ([Issue #3](https://github.com/cadence-workflow/cadence-ai-samples/issues/3)):**
+   the delivered Recurring AI Watch slice explicitly
    resolves the current Run ID through the local Cadence-Web read-only API and
    provides exact History and Queries links plus a manual Run ID override. Resolve
-   again after Continue-As-New. This commit remains on the feature branch. Ticket
-   Routing and other multi-Workflow recipes remain future work and require
-   explicit Workflow selection; never guess a run.
-4. **Partial (implemented October 7, validated October 8, 2026; pending commit on
-   `kevin/exp-automation`) —
-   Signal control plane:** the Recurring AI Watch POC exposes payload-free,
+   again after Continue-As-New. Ticket Routing and other multi-Workflow recipes
+   remain future work and require explicit Workflow selection; never guess a run.
+4. **Signal control plane ([Issue #6](https://github.com/cadence-workflow/cadence-ai-samples/issues/6)):**
+   the delivered Recurring AI Watch slice exposes payload-free,
    allowlisted `check-now` and `stop-watch` actions only after latest-run
    resolution. It revalidates the exact current run, reports Cadence-Web
    acceptance without claiming Workflow processing, and preserves copyable CLI
@@ -247,15 +250,16 @@ commit is merged or remains on a feature branch.
    separate control panel and recipe-owned, schema-driven typed fields only for
    Signals that accept payloads; do not default to arbitrary Signal names or a
    raw JSON textbox.
-5. **Planned — Windows experience:** Linux/Mac and Windows command tabs in the same explorer,
+5. **Windows experience ([Issue #4](https://github.com/cadence-workflow/cadence-ai-samples/issues/4)):**
+   Linux/Mac and Windows command tabs in the same Explorer,
    plus a Windows launcher; preserve the same selection flow.
-6. **Partial (October 7, 2026, `cb61e06`, `kevin/exp-automation`) —
-   Terminal handoff:** the post-demo macOS POC opens Terminal.app with a
+6. **Terminal handoff ([Issue #4](https://github.com/cadence-workflow/cadence-ai-samples/issues/4)):**
+   the delivered macOS slice opens Terminal.app with a
    re-resolved Worker/Workflow command ready for the user to review and press
    Enter. It never presses Enter automatically; copy remains the permission
-   fallback. This commit remains on the feature branch. Other terminal
-   applications and platforms remain future work.
-7. **Planned — Recipe runtime bootstrap:** make the first five minutes after clone reliable
+   fallback. Other terminal applications and platforms remain future work.
+7. **Recipe runtime bootstrap ([Issue #8](https://github.com/cadence-workflow/cadence-ai-samples/issues/8)):**
+   make the first five minutes after clone reliable
    by detecting whether the selected implementation is prepared and offering one
    explicit, recipe-scoped setup action. For Python, create/reuse the implementation
    virtual environment and install its declared dependencies; support equivalent
@@ -263,15 +267,18 @@ commit is merged or remains on a feature branch.
    progress and bounded failures, handle partial/repeated setup safely, and never
    turn the Explorer into an arbitrary package installer or shell executor. Worker
    and Workflow handoff must explain when preparation is still required.
-8. **Planned — Secure live credential handoff:** before opening a live Worker command,
+8. **Secure live credential handoff ([Issue #10](https://github.com/cadence-workflow/cadence-ai-samples/issues/10)):**
+   before opening a live Worker command,
    identify the required LLM and classifier credential names and let the user
    provide their values in a secure local context, such as a hidden Terminal
    prompt or an approved credential store. Never accept, display, persist, log,
    or return secret values through the browser, command preview, URL, Workflow
    input, or history. Keep mock and keyless-local paths free of credential prompts.
-9. **Planned — Optional infrastructure startup:** explicit start actions only after handling
+9. **Optional infrastructure startup ([Issue #12](https://github.com/cadence-workflow/cadence-ai-samples/issues/12)):**
+   explicit start actions only after handling
    existing installations, running services, ports, permissions, and partial states.
-10. **Planned — Unimplemented classifier opportunities:** add implementations/tests before
+10. **Unimplemented classifier opportunities ([Issue #11](https://github.com/cadence-workflow/cadence-ai-samples/issues/11)):**
+   add implementations/tests before
    restoring these removed catalog candidates:
    - `kev-local` (`kev`, `kev-latest`): no provider implementation in either recipe.
    - `von-local` (`von`, `von-1.2.0`): no provider implementation in either recipe.

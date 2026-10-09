@@ -2,7 +2,10 @@
 
 **Repository:** `cadence-workflow/cadence-ai-samples`
 **Recipe path:** `recipes/ticket-routing/`  
-**Status:** Implemented through Phase 4C; owner review pending. Automatic acknowledgment simulation and classification-accuracy benchmarking remain deferred.
+**Status:** Implemented through Phase 4C; owner review is tracked in
+[Issue #17](https://github.com/cadence-workflow/cadence-ai-samples/issues/17).
+Automatic acknowledgment simulation and classification-accuracy benchmarking
+remain deferred.
 **Language:** Go  
 **Scenario:** StreamWave, a fictional streaming service
 
