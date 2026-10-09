@@ -1,0 +1,80 @@
+name: Work proposal
+description: Propose tooling, templates, catalogs, documentation, or other work
+title: ""
+labels:
+  - status:needs-triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Proposals are not approved work until a maintainer adds `status:agent-ready`.
+        Do not include credentials, proprietary data, or private company context.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Explorer
+        - Recipes
+        - Templates
+        - Catalogs
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What concrete problem or limitation needs attention?
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context and source
+      description: Link relevant code, specs, public references, Issues, or PRs.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and non-goals
+      description: State the intended boundary and explicit exclusions.
+    validations:
+      required: true
+  - type: input
+    id: spec
+    attributes:
+      label: Canonical specification
+      description: Repository path to the controlling spec, or explain why none applies.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation approach
+      description: Include an offline or mock path when practical.
+    validations:
+      required: true
+  - type: textarea
+    id: blockers
+    attributes:
+      label: Decisions or blockers
+      description: Identify choices that require maintainer authority.
+  - type: checkboxes
+    id: approval
+    attributes:
+      label: Approval gate
+      options:
+        - label: I understand this proposal must be labeled `status:agent-ready` by a maintainer before implementation.
+          required: true

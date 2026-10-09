@@ -149,7 +149,9 @@ commands for them.
 
 ### First scaffold families
 
-Prioritize these families when template implementation is approved:
+Remaining implementation is tracked in
+[Issue #9](https://github.com/cadence-workflow/cadence-ai-samples/issues/9).
+Prioritize these families when that work is approved:
 
 1. `python/bare`
 2. `go/bare`
@@ -162,6 +164,8 @@ is not delivered in the first phase.
 
 ### Follow-on profiles
 
+Follow-on work is tracked in
+[Issue #13](https://github.com/cadence-workflow/cadence-ai-samples/issues/13).
 After the first families are validated:
 
 1. Complete Python/SystemOne-only and SystemOne-plus-agent compositions.
@@ -182,6 +186,12 @@ are candidates for later ports:
 | Agent Handoffs | `agent-handoffs` | Python | none initially | OpenAI Agents |
 | Auto Research | `auto-research` | Python | none initially | OpenAI Agents |
 | Human in the Loop | `human-in-the-loop` | Python | none initially | OpenAI Agents |
+
+Port status and ownership live in
+[Issue #16](https://github.com/cadence-workflow/cadence-ai-samples/issues/16),
+[Issue #15](https://github.com/cadence-workflow/cadence-ai-samples/issues/15),
+and [Issue #14](https://github.com/cadence-workflow/cadence-ai-samples/issues/14),
+respectively.
 
 Each port begins with the Python/OpenAI Agents scaffold. The port preserves the
 sample's business intent and durable behavior while adopting this repository's
