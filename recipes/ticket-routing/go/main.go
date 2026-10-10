@@ -275,6 +275,7 @@ func runTickets(ctx context.Context, cadenceClient client.Client, taskList, clas
 
 		log.Printf("%s classification: department=%s priority=%s complexity=%s model=%s", classificationSource, result.Classification.Department, result.Classification.Priority, result.Classification.Complexity, result.Classification.Model)
 		log.Printf("classification confidence: department=%.3f priority=%.3f complexity=%.3f", result.Classification.DepartmentConfidence, result.Classification.PriorityConfidence, result.Classification.ComplexityConfidence)
+		log.Printf("classification uncertainty: %s", formatClassificationUncertainty(result.Classification))
 		if result.Classification.InputTokens > 0 || result.Classification.OutputTokens > 0 {
 			log.Printf("provider token usage: input=%d output=%d", result.Classification.InputTokens, result.Classification.OutputTokens)
 		} else {

@@ -512,7 +512,7 @@ func classificationDetails(timings []batchExecutionTiming) string {
 		if timing.InferenceLatency > 0 {
 			latency = timing.InferenceLatency.Round(time.Millisecond).String()
 		}
-		lines = append(lines, fmt.Sprintf("ticket=%s department=%s department-confidence=%.2f priority=%s priority-confidence=%.2f complexity=%s complexity-confidence=%.2f model=%s outcome=%s classifier-request-response-latency=%s",
+		lines = append(lines, fmt.Sprintf("ticket=%s department=%s department-confidence=%.2f priority=%s priority-confidence=%.2f complexity=%s complexity-confidence=%.2f %s model=%s outcome=%s classifier-request-response-latency=%s",
 			timing.TicketID,
 			decision.Department,
 			decision.DepartmentConfidence,
@@ -520,6 +520,7 @@ func classificationDetails(timings []batchExecutionTiming) string {
 			decision.PriorityConfidence,
 			decision.Complexity,
 			decision.ComplexityConfidence,
+			formatClassificationUncertainty(decision),
 			decision.Model,
 			timing.Outcome,
 			latency,

@@ -233,8 +233,21 @@ func TicketIntakeWorkflow(ctx workflow.Context, ticket Ticket) (TicketResult, er
 	}, nil
 }
 
+// classificationCallObserver, when set, runs on every ClassifyTicket entry.
+// Tests use it to prove workflow replay does not call the classifier again.
+// Production leaves it nil.
+var classificationCallObserver func()
+
+// formatClassificationUncertainty prints the informational uncertainty flags.
+func formatClassificationUncertainty(decision RoutingDecision) string {
+	return fmt.Sprintf("priority-uncertain=%t complexity-uncertain=%t", decision.PriorityUncertain, decision.ComplexityUncertain)
+}
+
 // ClassifyTicket is the default deterministic mock Jev classifier.
 func ClassifyTicket(_ context.Context, ticket Ticket) (RoutingDecision, error) {
+	if classificationCallObserver != nil {
+		classificationCallObserver()
+	}
 	if strings.TrimSpace(ticket.TicketID) == "" {
 		return RoutingDecision{}, fmt.Errorf("ticket ID is required")
 	}

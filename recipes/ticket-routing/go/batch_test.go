@@ -248,9 +248,11 @@ func TestClassificationDetailsIncludesFieldsInSubmissionOrder(t *testing.T) {
 				Department:           "unknown",
 				DepartmentConfidence: 0.40,
 				Priority:             PriorityLow,
-				PriorityConfidence:   0.70,
+				PriorityConfidence:   0.40,
+				PriorityUncertain:    true,
 				Complexity:           ComplexityTier1,
-				ComplexityConfidence: 0.80,
+				ComplexityConfidence: 0.30,
+				ComplexityUncertain:  true,
 				Model:                "jev-test",
 			},
 		},
@@ -278,8 +280,10 @@ func TestClassificationDetailsIncludesFieldsInSubmissionOrder(t *testing.T) {
 	require.Contains(t, report, "department=billing department-confidence=0.99")
 	require.Contains(t, report, "priority=high priority-confidence=0.97")
 	require.Contains(t, report, "complexity=tier2 complexity-confidence=0.88")
-	require.Contains(t, report, "model=jev-test outcome=SLA_TIMEOUT classifier-request-response-latency=20ms")
+	require.Contains(t, report, "priority-uncertain=false complexity-uncertain=false model=jev-test outcome=SLA_TIMEOUT")
+	require.Contains(t, report, "classifier-request-response-latency=20ms")
 	require.Contains(t, report, "ticket=ticket-3 department=unknown")
+	require.Contains(t, report, "priority-uncertain=true complexity-uncertain=true model=jev-test outcome=UNROUTABLE")
 
 	failureLine := "ticket=ticket-2 outcome=TECHNICAL_FAILURE"
 	require.Contains(t, report, failureLine)

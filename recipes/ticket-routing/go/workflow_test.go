@@ -11,16 +11,20 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
+	"runtime"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/cadence"
+	"go.uber.org/cadence/.gen/go/shared"
 	"go.uber.org/cadence/client"
 	"go.uber.org/cadence/encoded"
 	cadencemocks "go.uber.org/cadence/mocks"
 	"go.uber.org/cadence/testsuite"
+	"go.uber.org/cadence/worker"
 	"go.uber.org/cadence/workflow"
 )
 
@@ -526,6 +530,122 @@ func TestMockClassifierProducesTypedDecision(t *testing.T) {
 	require.Equal(t, ComplexityTier2, decision.Complexity)
 	require.Equal(t, "mock-jev-v1", decision.Model)
 }
+
+func TestRecordedClassificationIsNotCalledAgainOnReplay(t *testing.T) {
+	ticket := Ticket{TicketID: "replay-001", Message: "synthetic replay ticket"}
+	decision := validDecision(DepartmentBilling)
+	decision.DepartmentConfidence = 0.50
+	calls := 0
+	classificationCallObserver = func() { calls++ }
+	t.Cleanup(func() { classificationCallObserver = nil })
+
+	_, err := ClassifyTicket(context.Background(), ticket)
+	require.NoError(t, err)
+	require.Equal(t, 1, calls, "the observer must count a direct classifier call")
+
+	calls = 0
+	replayer := worker.NewWorkflowReplayer()
+	replayer.RegisterWorkflow(TicketIntakeWorkflow)
+	replayer.RegisterActivity(ClassifyTicket)
+	require.NoError(t, replayer.ReplayWorkflowHistory(nil, recordedClassificationHistory(t, ticket, decision)))
+	require.Equal(t, 0, calls, "replay must reuse the recorded classification Activity result")
+}
+
+func recordedClassificationHistory(t *testing.T, ticket Ticket, decision RoutingDecision) *shared.History {
+	t.Helper()
+	converter := encoded.GetDefaultDataConverter()
+	workflowInput, err := converter.ToData(ticket)
+	require.NoError(t, err)
+	activityResult, err := converter.ToData(decision)
+	require.NoError(t, err)
+	result := TicketResult{
+		TicketID:       ticket.TicketID,
+		Classification: decision,
+		Status:         StatusUnroutable,
+		Reason:         invalidClassificationReason(decision),
+	}
+	workflowResult, err := converter.ToData(result)
+	require.NoError(t, err)
+
+	taskList := &shared.TaskList{Name: stringPtr("ticket-routing"), Kind: shared.TaskListKindNormal.Ptr()}
+	workflowType := &shared.WorkflowType{Name: stringPtr(functionName(TicketIntakeWorkflow))}
+	activityType := &shared.ActivityType{Name: stringPtr(functionName(ClassifyTicket))}
+	return &shared.History{
+		Events: []*shared.HistoryEvent{
+			historyEvent(1, shared.EventTypeWorkflowExecutionStarted, &shared.WorkflowExecutionStartedEventAttributes{
+				WorkflowType: workflowType,
+				TaskList:     taskList,
+				Input:        workflowInput,
+			}),
+			historyEvent(2, shared.EventTypeDecisionTaskScheduled, &shared.DecisionTaskScheduledEventAttributes{}),
+			historyEvent(3, shared.EventTypeDecisionTaskStarted, &shared.DecisionTaskStartedEventAttributes{}),
+			historyEvent(4, shared.EventTypeDecisionTaskCompleted, &shared.DecisionTaskCompletedEventAttributes{
+				ScheduledEventId: int64Ptr(2),
+				StartedEventId:   int64Ptr(3),
+			}),
+			historyEvent(5, shared.EventTypeActivityTaskScheduled, &shared.ActivityTaskScheduledEventAttributes{
+				ActivityId:   stringPtr("0"),
+				ActivityType: activityType,
+				TaskList:     taskList,
+				Input:        workflowInput,
+			}),
+			historyEvent(6, shared.EventTypeActivityTaskStarted, &shared.ActivityTaskStartedEventAttributes{
+				ScheduledEventId: int64Ptr(5),
+			}),
+			historyEvent(7, shared.EventTypeActivityTaskCompleted, &shared.ActivityTaskCompletedEventAttributes{
+				ScheduledEventId: int64Ptr(5),
+				StartedEventId:   int64Ptr(6),
+				Result:           activityResult,
+			}),
+			historyEvent(8, shared.EventTypeDecisionTaskScheduled, &shared.DecisionTaskScheduledEventAttributes{}),
+			historyEvent(9, shared.EventTypeDecisionTaskStarted, &shared.DecisionTaskStartedEventAttributes{}),
+			historyEvent(10, shared.EventTypeDecisionTaskCompleted, &shared.DecisionTaskCompletedEventAttributes{
+				ScheduledEventId: int64Ptr(8),
+				StartedEventId:   int64Ptr(9),
+			}),
+			historyEvent(11, shared.EventTypeWorkflowExecutionCompleted, &shared.WorkflowExecutionCompletedEventAttributes{
+				Result:                       workflowResult,
+				DecisionTaskCompletedEventId: int64Ptr(10),
+			}),
+		},
+	}
+}
+
+func historyEvent(eventID int64, eventType shared.EventType, attributes interface{}) *shared.HistoryEvent {
+	event := &shared.HistoryEvent{
+		EventId:   int64Ptr(eventID),
+		EventType: eventType.Ptr(),
+	}
+	switch attributes := attributes.(type) {
+	case *shared.WorkflowExecutionStartedEventAttributes:
+		event.WorkflowExecutionStartedEventAttributes = attributes
+	case *shared.DecisionTaskScheduledEventAttributes:
+		event.DecisionTaskScheduledEventAttributes = attributes
+	case *shared.DecisionTaskStartedEventAttributes:
+		event.DecisionTaskStartedEventAttributes = attributes
+	case *shared.DecisionTaskCompletedEventAttributes:
+		event.DecisionTaskCompletedEventAttributes = attributes
+	case *shared.ActivityTaskScheduledEventAttributes:
+		event.ActivityTaskScheduledEventAttributes = attributes
+	case *shared.ActivityTaskStartedEventAttributes:
+		event.ActivityTaskStartedEventAttributes = attributes
+	case *shared.ActivityTaskCompletedEventAttributes:
+		event.ActivityTaskCompletedEventAttributes = attributes
+	case *shared.WorkflowExecutionCompletedEventAttributes:
+		event.WorkflowExecutionCompletedEventAttributes = attributes
+	default:
+		panic("unsupported history attributes")
+	}
+	return event
+}
+
+func functionName(fn interface{}) string {
+	return runtime.FuncForPC(reflect.ValueOf(fn).Pointer()).Name()
+}
+
+func stringPtr(value string) *string { return &value }
+
+func int64Ptr(value int64) *int64 { return &value }
 
 func TestJevClassifierSendsAndParsesDocumentedContract(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
