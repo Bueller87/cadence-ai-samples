@@ -671,9 +671,19 @@ func TestJevClassifierSendsAndParsesDocumentedContract(t *testing.T) {
 
 	classifier, err := newSystemOneClassifier("test-api-key", server.URL+"/v1/systemone", testJevModel, server.Client())
 	require.NoError(t, err)
+	inferenceStarted := time.Date(2026, time.October, 10, 12, 0, 0, 0, time.UTC)
+	inferenceFinished := inferenceStarted.Add(25 * time.Millisecond)
+	clockValues := []time.Time{inferenceStarted, inferenceFinished}
+	classifier.now = func() time.Time {
+		require.NotEmpty(t, clockValues)
+		current := clockValues[0]
+		clockValues = clockValues[1:]
+		return current
+	}
 	decision, err := classifier.ClassifyTicket(t.Context(), Ticket{TicketID: "jev-001", Message: "A synthetic billing request."})
 
 	require.NoError(t, err)
+	require.Empty(t, clockValues)
 	require.Equal(t, DepartmentBilling, decision.Department)
 	require.Equal(t, PriorityHigh, decision.Priority)
 	require.Equal(t, ComplexityTier2, decision.Complexity)
@@ -685,7 +695,7 @@ func TestJevClassifierSendsAndParsesDocumentedContract(t *testing.T) {
 	require.Equal(t, 412, decision.InputTokens)
 	require.Equal(t, 47, decision.OutputTokens)
 	require.True(t, decision.TokenUsageReported)
-	require.Greater(t, decision.InferenceLatency, time.Duration(0))
+	require.Equal(t, 25*time.Millisecond, decision.InferenceLatency)
 	require.False(t, decision.PriorityUncertain)
 	require.False(t, decision.ComplexityUncertain)
 }
