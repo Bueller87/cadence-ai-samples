@@ -25,7 +25,7 @@ TicketIntakeWorkflow
 
 External classification runs in a Cadence Activity. Workflow code uses only the recorded typed result, so replay does not call the provider again after a successful Activity result has been persisted.
 
-Each assignment has a deterministic identifier. The Child Workflow accepts an acknowledgment only when its ticket ID, employee ID, and assignment ID all match the current assignment. The SLA defaults are 5 seconds for `critical`, 10 seconds for `high`, 20 seconds for `normal`, and 30 seconds for `low`; use `-sla-critical`, `-sla-high`, `-sla-normal`, and `-sla-low` to configure shorter or longer deadlines for the existing demos. The one-ticket manual demo uses `-manual-sla`, which defaults to two minutes.
+Each assignment has a deterministic identifier. The Child Workflow accepts an acknowledgment only when its ticket ID, employee ID, and assignment ID all match the current assignment. The SLA defaults are 5 seconds for `critical`, 10 seconds for `high`, 20 seconds for `normal`, and 30 seconds for `low`. These durations are demo policy, not real customer SLAs. Use `-sla-critical`, `-sla-high`, `-sla-normal`, and `-sla-low` to configure shorter or longer deadlines for the existing demos. The one-ticket manual demo uses `-manual-sla`, which defaults to two minutes.
 
 ## Requirements
 
@@ -175,7 +175,7 @@ export CLASSIFIER_AI_KEY='paste-your-personal-key-here'
 go run . -mode worker -classifier-id jev-default -task-list ticket-routing-jev
 ```
 
-The worker fails during startup if `CLASSIFIER_AI_KEY` is missing. The key is read only by the worker and is not printed, written to files, or placed in workflow history.
+The worker fails during startup if `CLASSIFIER_AI_KEY` is missing. The key is read only by the worker and is not printed, written to files, or placed in workflow history. [`.env.example`](go/.env.example) names the variable. The worker does not load that file.
 
 In a second terminal, which does not need the key:
 
@@ -186,7 +186,7 @@ go run . -mode live-demo -classifier-id jev-default -task-list ticket-routing-je
 
 Remove the key when finished with `unset CLASSIFIER_AI_KEY`.
 
-The output identifies the selected classifier and displays department, priority, complexity, all three confidence values, the returned model, reported token usage, selected Child Workflow, fictional employee, business status, and whether the SLA was met.
+The output identifies the selected classifier and displays department, priority, complexity, all three confidence values, `priority-uncertain` and `complexity-uncertain`, the returned model, reported token usage, selected Child Workflow, fictional employee, business status, and whether the SLA was met.
 
 ## First Live Jev Test
 
@@ -201,13 +201,14 @@ The first live integration test used one real Jev API call with a synthetic bill
 | Priority confidence | `0.97` |
 | Complexity | `tier1` |
 | Complexity confidence | `0.55` |
+| Complexity uncertain | `true` |
 | Input tokens | `670` |
 | Output tokens | `128` |
 | Published Jev input price | `$0.042 / million tokens` |
 | Estimated input inference cost | `$0.00002814` |
 | Estimated output inference cost | `$0.00` |
 
-The Billing Child Workflow completed successfully, with an observed duration of 28 ms before the acknowledgment wait was added. That duration does not measure Jev inference or the full workflow. This single call does not provide enough data for a performance benchmark. The estimated inference cost excludes infrastructure and any additional API calls.
+Complexity confidence `0.55` is below the `0.65` informational threshold, so this result is `complexity-uncertain`. The chosen `tier1` value stays on the result. Department confidence `1.00` and priority confidence `0.97` are not uncertain. The Billing Child Workflow completed successfully, with an observed duration of 28 ms before the acknowledgment wait was added. That duration does not measure Jev inference or the full workflow. This single call does not provide enough data for a performance benchmark. The estimated inference cost excludes infrastructure and any additional API calls. This result is historical evidence from the public POC, preserved because live Jev is not rerun from this machine.
 
 ## Reliability and result interpretation
 
@@ -258,7 +259,7 @@ cd recipes/ticket-routing/go
 go run . -mode batch -count 1000 -concurrency 25 -batch-sla 1s
 ```
 
-No acknowledgment Signals are sent in batch mode. Routed tickets therefore complete with `SLA_TIMEOUT`; workflow-engine failures are counted separately. The terminal summary reports submitted, completed, failed, `UNROUTABLE`, `ACKNOWLEDGED`, and `SLA_TIMEOUT` totals. It also reports department totals, peak in-flight executions, wall-clock duration, per-execution client wait times, and completed workflows per second. Every failed execution includes its workflow ID, ticket ID, start time, elapsed time, and Cadence error. The one-second business SLA does not impose a one-second workflow execution timeout. Bounded parent and Child Workflow timeouts include scheduling and execution overhead so delayed workflow tasks can still process the durable SLA timer. Use this batch to try the flow. It does not measure performance, classification accuracy, provider cost, or latency.
+No acknowledgment Signals are sent in batch mode. Routed tickets therefore complete with `SLA_TIMEOUT`; workflow-engine failures are counted separately. The terminal summary reports submitted, completed, failed, `UNROUTABLE`, `ACKNOWLEDGED`, and `SLA_TIMEOUT` totals. It also reports department totals, peak in-flight executions, wall-clock duration, per-execution client wait times, and completed workflows per second. Every failed execution includes its workflow ID, ticket ID, start time, elapsed time, and Cadence error. The one-second business SLA is demo policy, not a real customer SLA, and it does not impose a one-second workflow execution timeout. Bounded parent and Child Workflow timeouts include scheduling and execution overhead so delayed workflow tasks can still process the durable SLA timer. Use this batch to try the flow. It does not measure performance, classification accuracy, provider cost, or latency.
 
 ## Explicit live classifier batch
 
@@ -288,7 +289,7 @@ cd recipes/ticket-routing/go
 go run . -mode live-batch -classifier-id jev-default -count 4 -concurrency 1 -batch-sla 1s -task-list ticket-routing-jev -sample balanced -show-classifications -confirm-live
 ```
 
-`-show-classifications` prints completed tickets in dataset submission order with the classified department, priority, complexity, their confidences, model, business outcome, and classifier request/response latency. Technical failures show only the ticket ID and failure status. It never prints API keys or full ticket messages. Without the flag, the existing live summary is unchanged.
+`-show-classifications` prints completed tickets in dataset submission order with the classified department, priority, complexity, their confidences, `priority-uncertain`, `complexity-uncertain`, model, business outcome, and classifier request/response latency. Technical failures show only the ticket ID and failure status. It never prints API keys or full ticket messages. Without the flag, the existing live summary is unchanged.
 
 The optional `-input-token-price-per-million` flag accepts a user-supplied input-token price for an illustrative successful-response estimate. For example, append `-input-token-price-per-million 0.042` only after checking the price you intend to use. No price is built into the sample.
 
@@ -302,7 +303,7 @@ The report aggregates provider-reported input and output tokens and counts succe
 
 ### Final local live Jev run
 
-Kevin's final local functional run used 10 synthetic tickets with `-sample balanced` at concurrency 2. No acknowledgment Signals were sent, so every routed ticket completed with the expected business outcome of `SLA_TIMEOUT`.
+Kevin's final local functional run used 10 synthetic tickets with `-sample balanced` at concurrency 2. It is historical evidence from [cadence-ai-samples-poc pull request 2](https://github.com/Bueller87/cadence-ai-samples-poc/pull/2) and was not repeated here. No acknowledgment Signals were sent, so every routed ticket completed with the expected business outcome of `SLA_TIMEOUT`.
 
 | Field | Observed value |
 |---|---:|
@@ -325,9 +326,11 @@ From `recipes/ticket-routing/go`:
 
 ```bash
 gofmt -w .
-go build ./...
+go build -o /dev/null .
 go test ./...
 ```
+
+`go build ./...` also succeeds. In this directory that command writes a binary named `go`, which is gitignored. Prefer `-o /dev/null` or another explicit output path.
 
 Tests cover:
 
@@ -342,6 +345,6 @@ Automated tests never contact Cadence or TypeSafe.
 
 Start with `go/workflow.go`, `go/main.go`, and `go/catalog.go`. `workflow.go` contains the Workflow, Activities, typed data, mock rules, and small System One HTTP client; `catalog.go` loads `classifiers.yaml`; `main.go` selects and registers the Activity implementation. No shared repository package or third-party AI client library is required.
 
-## Deferred features
+## Non-goals
 
-The recipe still intentionally does not include automatic employee acknowledgment simulation, reassignment, skill matching, workload balancing, multi-level escalation, classification-accuracy scoring, or production performance claims. Those remain deferred to later phases.
+Automatic acknowledgment simulation and classification-accuracy benchmarking are non-goals. The recipe also does not include reassignment, skill matching, workload balancing, multi-level escalation, or production performance claims. Provisional labels in [testdata/tickets.jsonl](testdata/tickets.jsonl) are not ground truth.
