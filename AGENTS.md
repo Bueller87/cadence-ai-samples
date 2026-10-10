@@ -38,10 +38,17 @@ reading order, and handoff commands.
   `cadence-workflow/cadence-ai-samples`; never infer the target from `origin`.
 - Only a human may promote an Issue to `status:agent-ready`, approve architecture
   or priority, approve a PR, or merge.
-- Any contributor may claim an unassigned `status:agent-ready` Issue. First check
-  for an assignee, a claim comment, or an active linked PR, then comment intent
-  before branching.
-- Skip claimed work. Do not open competing implementation PRs without agreement.
+- Any contributor may claim an unassigned `status:agent-ready` Issue. Immediately
+  before claiming, recheck its assignee, comments, labels, and active linked PRs.
+- Claim in this order: comment intent, remove `status:agent-ready`, add
+  `status:in-progress`, then create the branch.
+- Skip assigned, claimed, linked-PR, or `status:in-progress` work. Do not open
+  competing implementation PRs without agreement.
+- If abandoning work, comment the reason and current state, remove
+  `status:in-progress`, and restore `status:agent-ready`. Preserve or delete the
+  branch only with human direction.
+- Keep `status:in-progress` through implementation and draft-PR handoff. Merge
+  closes the Issue.
 
 ## Implementation and validation
 
@@ -61,6 +68,8 @@ reading order, and handoff commands.
 ## Git and pull requests
 
 - Branches and pushes use the contributor's verified `origin` fork.
+- Name implementation branches `issue-N-short-slug`. Do not include agent or tool
+  names such as `codex`, `cursor`, or `claude`; work may move between agents.
 - PRs use the contributor fork as head and
   `cadence-workflow/cadence-ai-samples:main` as base.
 - Sign every commit with DCO using lowercase `-s`.
@@ -88,6 +97,8 @@ Before handing work to another machine or agent:
 2. Open or update the draft PR and linked Issue.
 3. Record changed paths, commits, actual tests/results, limitations, blockers, and
    exact next steps.
-4. Update specs/ADRs only when their triggers apply.
-5. Leave the next agent able to resume from a fresh checkout, this file, the
+4. Finalize the PR description after the signed commit is pushed so its commit,
+   branch, checklist, and validation state are not stale.
+5. Update specs/ADRs only when their triggers apply.
+6. Leave the next agent able to resume from a fresh checkout, this file, the
    context map, and the linked Issue/PR without conversational history.
