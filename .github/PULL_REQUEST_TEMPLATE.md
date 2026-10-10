@@ -33,8 +33,10 @@ Link follow-up Issues instead of creating a second backlog here.
 ## Contributor checklist
 
 - [ ] The PR implements one approved Issue and stays within its scope.
+- [ ] The linked Issue was claimed and remains `status:in-progress`.
 - [ ] Tests and documentation match the changed behavior.
 - [ ] No credentials, proprietary data, or unrelated changes are included.
 - [ ] Commits include DCO sign-off (`git commit -s`).
 - [ ] The head branch is in a contributor fork and the base is upstream `main`.
+- [ ] This PR body was finalized after the signed commit and branch push.
 - [ ] I will not approve or merge my own PR; repository-owner approval is required.

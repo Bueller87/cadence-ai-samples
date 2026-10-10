@@ -8,8 +8,10 @@ Start a contribution with a specific problem or use case, not a library feature.
    criteria, and offline validation path.
 2. Wait for a maintainer to add `status:agent-ready` before implementation.
 3. Before taking an Issue, check for an assignee, claim comment, or active linked
-   PR. Comment your intent so another contributor does not duplicate it.
-4. Work on a branch in your fork and open a draft PR against
+   PR. Recheck immediately before claiming, comment your intent, replace
+   `status:agent-ready` with `status:in-progress`, then create an
+   `issue-N-short-slug` branch.
+4. Work on that branch in your fork and open a draft PR against
    `cadence-workflow/cadence-ai-samples:main`.
 5. Link the Issue and include actual test commands/results, untested behavior, and
    known limitations.
@@ -18,6 +20,11 @@ Start a contribution with a specific problem or use case, not a library feature.
 
 Anyone may propose work. Unapproved ideas use `status:needs-triage`; only a human
 maintainer promotes them to `status:agent-ready`.
+
+Keep claimed work `status:in-progress` until merge closes the Issue. If abandoning
+it, comment the reason and current state, replace `status:in-progress` with
+`status:agent-ready`, and ask before deleting the branch. Branch names identify
+the Issue, not the coding tool, because work may move between agents.
 
 ## Coding-agent contributions
 

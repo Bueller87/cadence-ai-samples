@@ -89,10 +89,37 @@ gh issue list --repo cadence-workflow/cadence-ai-samples \
   --state open --label status:needs-triage
 ```
 
-Before taking an Issue, inspect it for an assignee, a claim comment, and an active
-linked PR. Any contributor may claim an unclaimed `status:agent-ready` Issue by
-commenting their intent before branching. Only a human may mark an Issue
-agent-ready.
+Claimed work:
+
+```bash
+gh issue list --repo cadence-workflow/cadence-ai-samples \
+  --state open --label status:in-progress
+```
+
+Before taking an Issue, inspect its assignee, comments, labels, and active linked
+PRs. Recheck immediately before claiming. Any contributor may claim an unclaimed
+`status:agent-ready` Issue in this order:
+
+```bash
+gh issue comment N --repo cadence-workflow/cadence-ai-samples \
+  --body "Claiming this approved Issue. Branch: issue-N-short-slug."
+gh issue edit N --repo cadence-workflow/cadence-ai-samples \
+  --remove-label status:agent-ready --add-label status:in-progress
+git switch -c issue-N-short-slug
+```
+
+Only a human may mark an Issue agent-ready. Keep it in-progress through the draft
+PR handoff. On abandonment, comment the reason and current state, then return it
+to the approved queue:
+
+```bash
+gh issue edit N --repo cadence-workflow/cadence-ai-samples \
+  --remove-label status:in-progress --add-label status:agent-ready
+```
+
+Preserve or delete the abandoned branch only with human direction. Active work is
+reconstructed from the in-progress Issue, `issue-N-short-slug` branch, and linked
+draft PR, never an agent-specific branch prefix or chat history.
 
 ## Creating a proposal
 
