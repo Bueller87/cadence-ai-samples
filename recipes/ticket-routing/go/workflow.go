@@ -277,6 +277,7 @@ type SystemOneClassifier struct {
 	endpoint   string
 	model      string
 	httpClient *http.Client
+	now        func() time.Time
 }
 
 type jevRequest struct {
@@ -327,6 +328,7 @@ func newSystemOneClassifier(apiKey, endpoint, model string, httpClient *http.Cli
 		endpoint:   endpoint,
 		model:      model,
 		httpClient: httpClient,
+		now:        time.Now,
 	}, nil
 }
 
@@ -392,7 +394,7 @@ func (classifier *SystemOneClassifier) ClassifyTicket(ctx context.Context, ticke
 	}
 	request.Header.Set("Content-Type", "application/json")
 
-	inferenceStarted := time.Now()
+	inferenceStarted := classifier.now()
 	response, err := classifier.httpClient.Do(request)
 	if err != nil {
 		return RoutingDecision{}, fmt.Errorf("classifier request failed: %w", err)
@@ -424,7 +426,7 @@ func (classifier *SystemOneClassifier) ClassifyTicket(ctx context.Context, ticke
 	if err != nil {
 		return RoutingDecision{}, err
 	}
-	decision.InferenceLatency = time.Since(inferenceStarted)
+	decision.InferenceLatency = classifier.now().Sub(inferenceStarted)
 	return decision, nil
 }
 
