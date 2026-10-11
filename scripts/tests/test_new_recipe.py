@@ -94,6 +94,72 @@ class NewRecipeTests(unittest.TestCase):
         self.assertEqual(result.stdout, "")
         self.assertNothingWritten()
 
+    def assertProfileContract(self, recipe, profile, choices, next_steps):
+        language, classifier, agent = choices
+        readme = (recipe / "README.md").read_text()
+        spec = (recipe / "SPEC.md").read_text()
+        runtime = "\n".join(
+            path.read_text()
+            for path in recipe.joinpath(profile).rglob("*")
+            if path.is_file()
+            and "tests" not in path.parts
+            and path.suffix in {".py", ".go", ".java"}
+        )
+        title = " ".join(part.capitalize() for part in recipe.name.split("-"))
+        self.assertTrue(
+            readme.startswith(f"# {title}\n"),
+            f"{profile}: README title drift",
+        )
+        command_mode = "-mode" if language == "go" else "--mode"
+        for action in ("worker", "start"):
+            command = f"{action} {command_mode} mock"
+            self.assertIn(command, readme, f"{profile}: README command drift")
+            self.assertIn(command, next_steps, f"{profile}: next-steps command drift")
+        setup = {
+            "go": "go test ./...",
+            "java": "./gradlew test",
+            "python": "unittest discover -s tests -v",
+        }[language]
+        self.assertIn(setup, readme, f"{profile}: README setup drift")
+        self.assertIn(setup, next_steps, f"{profile}: next-steps setup drift")
+
+        expected_fields = {
+            "language": language.title(),
+            "classifier": "SystemOne" if classifier == "systemone" else "none",
+            "agent": {
+                "google-adk": "Google ADK",
+                "openai-agents": "OpenAI Agents",
+            }.get(agent, "none"),
+        }
+        field_patterns = {
+            "language": r"(?:\*\*Cadence language:\*\*|- Language:)",
+            "classifier": r"(?:\*\*Classifier integration:\*\*|- Classifier:)",
+            "agent": r"(?:\*\*Agent integration:\*\*|- Agent:)",
+        }
+        for field, expected in expected_fields.items():
+            self.assertRegex(
+                spec,
+                rf"{field_patterns[field]} {re.escape(expected)}",
+                f"{profile}: SPEC profile-field drift",
+            )
+
+        required = []
+        if classifier == "systemone":
+            required.append(("classifiers.yaml", "CLASSIFIER_AI_KEY"))
+        if agent != "none":
+            required.append(("models.yaml", "MODEL_AI_KEY"))
+        for catalog, credential in required:
+            self.assertIn(catalog, runtime, f"{profile}: runtime catalog drift")
+            self.assertIn(catalog, readme, f"{profile}: README catalog drift")
+            self.assertIn(credential, runtime, f"{profile}: runtime credential-name drift")
+            self.assertIn(credential, readme, f"{profile}: README credential-name drift")
+
+        metadata = [
+            path for path in recipe.rglob("*")
+            if path.is_file() and path.name.lower().startswith("metadata.")
+        ]
+        self.assertEqual(metadata, [], f"{profile}: unexpected metadata layer")
+
     def test_every_combination_is_classified_by_the_matrix(self):
         combinations = list(itertools.product(LANGUAGES, CLASSIFIERS, AGENTS))
         self.assertEqual(len(combinations), 18)
@@ -246,6 +312,60 @@ class NewRecipeTests(unittest.TestCase):
                 )
                 if language == "java":
                     self.assertTrue(os.access(implementation / "gradlew", os.X_OK))
+                self.assertProfileContract(
+                    recipe,
+                    profile,
+                    choices,
+                    result.stdout,
+                )
+
+    def test_profile_contract_mutations_fail_with_specific_diagnostics(self):
+        profile = "python/google-adk-systemone"
+        choices = PROFILE_CHOICES[profile]
+        result = self.run_script("contract-mutation", *flags(*choices))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        recipe = self.root / "recipes/contract-mutation"
+        readme = recipe / "README.md"
+        spec = recipe / "SPEC.md"
+
+        mutations = (
+            (readme, "# Contract Mutation", "# Drifted Title", "README title drift"),
+            (readme, "worker --mode mock", "worker --mode drift", "README command drift"),
+            (readme, "unittest discover -s tests -v", "pytest", "README setup drift"),
+            (readme, "MODEL_AI_KEY", "DRIFTED_MODEL_KEY", "README credential-name drift"),
+            (spec, "Language: Python", "Language: Rust", "SPEC profile-field drift"),
+        )
+        for path, old, new, diagnostic in mutations:
+            original = path.read_text()
+            self.assertIn(old, original)
+            path.write_text(original.replace(old, new))
+            with self.subTest(surface=diagnostic), self.assertRaisesRegex(
+                AssertionError,
+                diagnostic,
+            ):
+                self.assertProfileContract(recipe, profile, choices, result.stdout)
+            path.write_text(original)
+
+        runtime_catalog_files = [
+            path for path in recipe.joinpath(profile).rglob("*.py")
+            if "tests" not in path.parts and "models.yaml" in path.read_text()
+        ]
+        originals = {path: path.read_text() for path in runtime_catalog_files}
+        self.assertTrue(originals)
+        for path, original in originals.items():
+            path.write_text(original.replace("models.yaml", "model-catalog.json"))
+        with self.assertRaisesRegex(AssertionError, "runtime catalog drift"):
+            self.assertProfileContract(recipe, profile, choices, result.stdout)
+        for path, original in originals.items():
+            path.write_text(original)
+
+        with self.assertRaisesRegex(AssertionError, "next-steps setup drift"):
+            self.assertProfileContract(
+                recipe,
+                profile,
+                choices,
+                result.stdout.replace("unittest discover -s tests -v", "pytest"),
+            )
 
     def test_generated_markdown_links_resolve_inside_the_recipe(self):
         self.assertEqual(self.run_script("alpha", *BARE).returncode, 0)

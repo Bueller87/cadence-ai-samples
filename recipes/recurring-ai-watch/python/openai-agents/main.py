@@ -81,9 +81,14 @@ def client(args: argparse.Namespace) -> cadence.Client:
     )
 
 
-async def run_worker(args: argparse.Namespace, selection: CatalogSelection) -> None:
+async def run_worker(
+    args: argparse.Namespace,
+    selection: CatalogSelection | None = None,
+) -> None:
     registry = build_registry()
     if args.mode == "live":
+        if selection is None:
+            raise ValueError("live worker requires catalog selections")
         if not args.confirm_live:
             raise ValueError("live worker requires --confirm-live")
         from live import live_activities
@@ -93,13 +98,22 @@ async def run_worker(args: argparse.Namespace, selection: CatalogSelection) -> N
     worker = Worker(client(args), args.task_list, registry)
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     async with worker:
-        print(f"{args.mode} worker polling task-list={args.task_list} "
-              f"model={selection.model.id} classifier={selection.classifier.id}")
+        detail = (
+            f" model={selection.model.id} classifier={selection.classifier.id}"
+            if selection
+            else ""
+        )
+        print(f"{args.mode} worker polling task-list={args.task_list}{detail}")
         await asyncio.Event().wait()
 
 
-async def start(args: argparse.Namespace, selection: CatalogSelection) -> None:
+async def start(
+    args: argparse.Namespace,
+    selection: CatalogSelection | None = None,
+) -> None:
     if args.mode == "live":
+        if selection is None:
+            raise ValueError("live start requires catalog selections")
         from live import validate_live
 
         validate_live(selection)
@@ -111,7 +125,9 @@ async def start(args: argparse.Namespace, selection: CatalogSelection) -> None:
                 interval=timedelta(seconds=args.interval),
                 mode=args.mode,
                 model_name=selection.model.model if args.mode == "live" else None,
-                model_provider=selection.model.provider,
+                model_provider=(
+                    selection.model.provider if args.mode == "live" else "openai"
+                ),
             ),
             task_list=args.task_list,
             workflow_id=args.workflow_id,
@@ -148,7 +164,8 @@ async def main(argv: Sequence[str] | None = None) -> None:
     cli = parser()
     args = cli.parse_args(argv)
     try:
-        if args.command in {"worker", "start"}:
+        selection = None
+        if args.command in {"worker", "start"} and args.mode == "live":
             selection = load_selection(
                 args.catalog_dir,
                 model_id=args.model_id,

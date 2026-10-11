@@ -6,6 +6,7 @@ from cadence import activity, workflow
 from cadence.contrib.google_adk import CadenceAgentRunner, GoogleADKActivities
 from cadence.contrib.google_adk.cadence_model import CadenceModel
 from google.adk.agents import LlmAgent
+from google.adk.models.google_llm import Gemini
 from google.adk.models.llm_request import LlmRequest
 from google.adk.models.llm_response import LlmResponse
 from google.adk.sessions import InMemorySessionService
@@ -62,15 +63,30 @@ def build_model_activities(selection: CatalogSelection, environ):
         litellm.num_retries = 0
         litellm.telemetry = False
         litellm.suppress_debug_info = True
-    return ADKActivities()
+    return ADKActivities(selection)
 
 
 class ADKActivities(GoogleADKActivities):
+    def __init__(self, selection: CatalogSelection | None = None) -> None:
+        self._selection = selection
+
     @activity.override(GoogleADKActivities.generate_content_async)
     async def generate_content_async(
         self, model_name: str, llm_request: LlmRequest
     ) -> list[LlmResponse]:
         try:
+            if self._selection and self._selection.model.provider == "google":
+                model = Gemini(
+                    model=model_name,
+                    base_url=self._selection.model.endpoint,
+                )
+                responses = []
+                async for response in model.generate_content_async(
+                    llm_request=llm_request,
+                    stream=False,
+                ):
+                    responses.append(response)
+                return responses
             return await super().generate_content_async(model_name, llm_request)
         except genai_errors.APIError as error:
             # Google reports invalid API keys as HTTP 400, not necessarily 401.

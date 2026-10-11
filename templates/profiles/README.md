@@ -104,3 +104,14 @@ tests, and delete the scratch recipe:
 # Follow the printed next steps, then:
 rm -rf recipes/scratch-check
 ```
+
+These checks keep the profile fields, README commands, setup steps, catalog
+names, credential environment-variable names, generated CLI, and Explorer
+resolution aligned. Profiles with live inference must also retain an offline
+endpoint-mutation test proving that a changed safe catalog endpoint reaches the
+provider transport.
+
+The implemented profiles need no recipe metadata layer. Their validated layout
+and literal CLI contracts provide the facts the Explorer needs. If a future
+profile cannot express a required fact through those contracts, add metadata
+only after a failing contract test demonstrates the gap.

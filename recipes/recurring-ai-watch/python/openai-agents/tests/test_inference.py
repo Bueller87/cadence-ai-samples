@@ -1,7 +1,7 @@
 """Offline dispatch, typed Activity boundaries, and OpenAI Agents agent-loop tests."""
 
 import unittest
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -74,6 +74,31 @@ class InferenceTests(unittest.IsolatedAsyncioTestCase):
                                 "openai": selection.model.endpoint}[selection.model.provider]
                 self.assertEqual(client.call_args.kwargs["base_url"], expected_url)
                 self.assertEqual(client.call_args.kwargs["max_retries"], 0)
+
+    def test_changed_catalog_endpoints_reach_openai_compatible_transports(self):
+        cases = (
+            ("gemini-flash-lite", "https://google-gateway.example/native",
+             "https://google-gateway.example/native/v1beta/openai/"),
+            ("llama3.2-local", "http://127.0.0.1:11435",
+             "http://127.0.0.1:11435/v1/"),
+            ("openai-nano", "https://openai-gateway.example/v1",
+             "https://openai-gateway.example/v1"),
+        )
+        for model_id, changed_endpoint, expected_base_url in cases:
+            selection = selected(model_id)
+            selection = replace(
+                selection,
+                model=replace(selection.model, endpoint=changed_endpoint),
+            )
+            environment = {"CLASSIFIER_AI_KEY": "test-classifier"}
+            if selection.model.provider != "ollama":
+                environment["MODEL_AI_KEY"] = "test-model"
+            with self.subTest(model=model_id), patch("inference.AsyncOpenAI") as client:
+                live_activities(selection, environment)
+                self.assertEqual(
+                    client.call_args.kwargs["base_url"],
+                    expected_base_url,
+                )
 
     def test_supported_classifiers_and_unknown_ids(self):
         validate_live(selected("gemini-flash-lite", "jev-default"))

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -783,6 +784,45 @@ func TestLoadClassifierFromRepositoryCatalog(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, classifierProviderLaya, laya.Provider)
 	require.Equal(t, "convaiinnovations/laya", laya.Model)
+}
+
+func TestMutatedCatalogEndpointReachesClassifierTransport(t *testing.T) {
+	requestTargets := make(chan [2]string, 1)
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var payload struct {
+			Model string `json:"model"`
+		}
+		require.NoError(t, json.NewDecoder(request.Body).Decode(&payload))
+		requestTargets <- [2]string{request.URL.Path, payload.Model}
+		writer.Header().Set("Content-Type", "application/json")
+		_, err := io.WriteString(writer, validJevResponse)
+		require.NoError(t, err)
+	}))
+	defer server.Close()
+
+	catalog := fmt.Sprintf(`classifiers:
+  - id: changed-jev
+    provider: typesafe
+    model: changed-model
+    endpoint: %s/changed-systemone
+`, server.URL)
+	selected, err := loadClassifier(writeTestCatalog(t, catalog), "changed-jev")
+	require.NoError(t, err)
+
+	classifier, err := newSystemOneClassifier(
+		"test-api-key",
+		selected.Endpoint,
+		selected.Model,
+		server.Client(),
+	)
+	require.NoError(t, err)
+	decision, err := classifier.ClassifyTicket(
+		context.Background(),
+		Ticket{TicketID: "endpoint-mutation-001", Message: "Synthetic request."},
+	)
+	require.NoError(t, err)
+	require.NotEmpty(t, decision.Model)
+	require.Equal(t, [2]string{"/changed-systemone", "changed-model"}, <-requestTargets)
 }
 
 func TestLoadClassifierRejectsInvalidCatalogs(t *testing.T) {
