@@ -278,6 +278,64 @@ class ExplorerTests(unittest.TestCase):
             commands.append(args.command)
         self.assertEqual(commands,['worker','start'])
 
+    def test_generated_phase_two_profiles_are_discovered_and_resolved(self):
+        shutil.copytree(ROOT/'scripts',self.root/'scripts',ignore=shutil.ignore_patterns('__pycache__'))
+        shutil.copytree(ROOT/'templates',self.root/'templates',ignore=shutil.ignore_patterns('.venv','__pycache__'))
+        cases=[
+            ('generated-go-bare',('go','none','none'),'go/bare',
+                dict(mode='start')),
+            ('generated-go-systemone',('go','systemone','none'),'go/systemone',
+                dict(mode='demo',classifier='mock')),
+            ('generated-google-adk',('python','none','google-adk'),'python/google-adk',
+                dict(mode='mock',model='gemini-flash-lite')),
+            ('generated-openai-agents',('python','none','openai-agents'),'python/openai-agents',
+                dict(mode='mock',model='gemini-flash-lite')),
+        ]
+        for slug,(language,classifier,agent),profile,selection in cases:
+            with self.subTest(profile=profile):
+                generated=subprocess.run([str(self.root/'scripts/new-recipe.sh'),slug,
+                    '--language',language,'--classifier',classifier,'--agent',agent],
+                    capture_output=True,text=True,timeout=30)
+                self.assertEqual(generated.returncode,0,generated.stderr)
+                implementation=f'recipes/{slug}/{profile}'
+                recipe=next(r for r in self.explorer.snapshot()['recipes'] if r['id']==slug)
+                variant=next(v for v in recipe['variants'] if v['id']==implementation)
+                self.assertTrue(variant['supported'],variant['reason'])
+                result=self.explorer.resolve(dict(
+                    sample=slug,implementation=implementation,**selection))
+                self.assertIn('worker',result['worker'])
+                self.assertTrue(result['start'])
+                self.assertEqual(result['domain'],'cadence-ai-samples')
+                self.assertEqual(result['implementation'],implementation)
+
+        for profile in ('python/google-adk','python/openai-agents'):
+            slug='generated-'+profile.split('/')[-1]
+            implementation=f'recipes/{slug}/{profile}'
+            for model in ('gemini-flash-lite','llama3.2-local','openai-nano'):
+                with self.subTest(profile=profile,model=model):
+                    result=self.explorer.resolve(dict(
+                        sample=slug,implementation=implementation,mode='live',model=model))
+                    self.assertTrue(result['live'])
+                    self.assertIn('--confirm-live',result['worker'])
+                    self.assertIn('--mode live',result['start'])
+
+        systemone=self.explorer.resolve(dict(
+            sample='generated-go-systemone',
+            implementation='recipes/generated-go-systemone/go/systemone',
+            mode='live-demo',classifier='laya-local'))
+        self.assertTrue(systemone['live'])
+        self.assertIn('-confirm-live',systemone['worker'])
+        self.assertIn('-confirm-live',systemone['start'])
+
+        go_main=self.root/'recipes/generated-go-bare/go/bare/main.go'
+        go_main.write_text(go_main.read_text().replace(
+            'case "start":\n\t\tcadenceClient',
+            'case "live":\n\t\treturn\n\tcase "start":\n\t\tcadenceClient'))
+        recipe=next(r for r in self.explorer.snapshot()['recipes']
+            if r['id']=='generated-go-bare')
+        self.assertFalse(recipe['variants'][0]['supported'])
+        self.assertIn('only worker and start',recipe['variants'][0]['reason'])
+
     def test_unfamiliar_validation_and_invalid_endpoints_fail_closed(self):
         model_file=self.root/'models.yaml'
         model_file.write_text(model_file.read_text().replace('http://localhost:11434','http://example.com:11434'))

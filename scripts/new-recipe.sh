@@ -4,7 +4,7 @@ set -euo pipefail
 languages="go java python"
 classifiers="none systemone"
 agents="none google-adk openai-agents"
-implemented_profiles="python/bare"
+implemented_profiles="go/bare go/systemone python/bare python/google-adk python/openai-agents"
 
 # The single source of valid combinations. Help output and validation both use it.
 profile_for() {

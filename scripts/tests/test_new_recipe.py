@@ -26,7 +26,20 @@ VALID = {
     ("python", "none", "openai-agents"): "python/openai-agents",
     ("python", "systemone", "openai-agents"): "python/openai-agents-systemone",
 }
-IMPLEMENTED = {"python/bare"}
+IMPLEMENTED = {
+    "go/bare",
+    "go/systemone",
+    "python/bare",
+    "python/google-adk",
+    "python/openai-agents",
+}
+PROFILE_CHOICES = {
+    "go/bare": ("go", "none", "none"),
+    "go/systemone": ("go", "systemone", "none"),
+    "python/bare": ("python", "none", "none"),
+    "python/google-adk": ("python", "none", "google-adk"),
+    "python/openai-agents": ("python", "none", "openai-agents"),
+}
 BARE = ("--language", "python", "--classifier", "none", "--agent", "none")
 MARKER = re.compile(rb"__[A-Z][A-Z0-9_]*__")
 THIRD_PARTY = {"cadence", "grpc", "pydantic"}
@@ -95,7 +108,11 @@ class NewRecipeTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         rows = re.findall(r"^  (\w+) +(\S+) +(\S+) +(\S+/\S+)$", result.stdout, re.M)
         self.assertEqual({(l, c, a): p for l, c, a, p in rows}, VALID)
-        self.assertIn("Implemented in this checkout: python/bare", result.stdout)
+        self.assertIn(
+            "Implemented in this checkout: "
+            "go/bare go/systemone python/bare python/google-adk python/openai-agents",
+            result.stdout,
+        )
 
     def test_slug_only_and_missing_options_fail_with_help(self):
         self.assertUsageError(self.run_script("example"),
@@ -173,6 +190,35 @@ class NewRecipeTests(unittest.TestCase):
         self.assertIn('DEFAULT_WORKFLOW_ID = "invoice-review-demo"', main)
         self.assertIn('domain", default="cadence-ai-samples"', main)
         self.assertIn('name = "invoice-review"', (recipe / "python/bare/pyproject.toml").read_text())
+
+    def test_every_implemented_profile_generates_a_complete_recipe(self):
+        for profile, choices in PROFILE_CHOICES.items():
+            slug = profile.replace("/", "-")
+            with self.subTest(profile=profile):
+                result = self.run_script(slug, *flags(*choices))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(f"from profile {profile}", result.stdout)
+                recipe = self.root / "recipes" / slug
+                implementation = recipe / profile
+                self.assertTrue((recipe / "README.md").is_file())
+                self.assertTrue((recipe / "SPEC.md").is_file())
+                self.assertTrue((recipe / "PROMPT.md").is_file())
+                self.assertTrue(implementation.is_dir())
+                contents = tree(recipe)
+                self.assertTrue(contents)
+                for name, content in contents.items():
+                    self.assertIsNone(MARKER.search(content), name)
+                    self.assertIsNone(MARKER.search(name.encode()), name)
+                language, classifier, agent = choices
+                spec = (recipe / "SPEC.md").read_text()
+                self.assertIn(f"**Cadence language:** {language.title()}", spec)
+                classifier_name = "SystemOne" if classifier == "systemone" else "none"
+                agent_name = {
+                    "google-adk": "Google ADK",
+                    "openai-agents": "OpenAI Agents",
+                }.get(agent, "none")
+                self.assertIn(f"**Classifier integration:** {classifier_name}", spec)
+                self.assertIn(f"**Agent integration:** {agent_name}", spec)
 
     def test_generated_markdown_links_resolve_inside_the_recipe(self):
         self.assertEqual(self.run_script("alpha", *BARE).returncode, 0)

@@ -35,6 +35,9 @@ def value(node, env):
     if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
         items = [value(n, env) for n in node.elts]
         return tuple(items) if isinstance(node, ast.Tuple) else items
+    if isinstance(node, ast.Dict):
+        return {value(key, env): value(item, env)
+                for key, item in zip(node.keys, node.values)}
     if isinstance(node, ast.Attribute) and not node.attr.startswith('_'):
         owner = value(node.value, env)
         if isinstance(owner, (SimpleNamespace, type(urlsplit('http://localhost')))):
@@ -67,9 +70,11 @@ def value(node, env):
         args = [value(a, env) for a in node.args]
         if isinstance(node.func, ast.Name) and node.func.id in {'urlsplit', 'isLoopbackHost', 'trim'}:
             return env[node.func.id](*args)
-        if isinstance(node.func, ast.Attribute) and node.func.attr in {'rstrip', 'strip'}:
+        if isinstance(node.func, ast.Attribute) and node.func.attr in {'rstrip', 'strip', 'get'}:
             owner = value(node.func.value, env)
-            if isinstance(owner, str):
+            if isinstance(owner, str) and node.func.attr in {'rstrip', 'strip'}:
+                return getattr(owner, node.func.attr)(*args)
+            if isinstance(owner, dict) and node.func.attr == 'get':
                 return getattr(owner, node.func.attr)(*args)
     raise Unsupported(f'Unrecognized source expression: {ast.unparse(node)}')
 
@@ -180,6 +185,8 @@ def python_guard(path, selection):
     if fn is None:
         raise Unsupported('No readable validate_live() found; live combinations cannot be verified.')
     env = {**constants(tree), 'selection': selection, 'urlsplit': urlsplit}
+    if fn.args.args:
+        env[fn.args.args[0].arg] = selection
 
     def execute(statements):
         for statement in statements:
@@ -316,21 +323,36 @@ def go_cli(directory):
         except Unsupported:
             default_value = None
         flags['-' + name] = dict(type=kind, default=default_value, help=help_text)
+    for match in re.finditer(r'flag\.(String|Bool|Int|Float64|Duration)Var\([^,]+,\s*"([^"]+)",\s*([^,]+),\s*"((?:\\.|[^"\\])*)"\)', main):
+        kind, name, default, help_text = match.groups()
+        try:
+            default_value = go_expr(default, env)
+        except Unsupported:
+            default_value = None
+        flags['-' + name] = dict(type=kind, default=default_value, help=help_text)
     switch = re.search(r'switch \*mode\s*\{', main)
     if not switch or '-mode' not in flags or '-domain' not in flags or '-task-list' not in flags:
         raise Unsupported('Go adapter requires a literal mode switch, domain, and task list flags.')
     modes = re.findall(r'case "([^"]+)":', block(main, switch.end() - 1)[0])
     if 'worker' not in modes:
         raise Unsupported('Go CLI does not expose a Worker mode.')
-    classifier_flow = go_function(source, 'configuredClassifier')
-    live = re.search(r'if\s*\(([^{}]*?)\)\s*&&\s*!live\s*\{', classifier_flow, re.S)
-    mock = re.search(r'if\s*\(([^{}]*?)\)\s*&&\s*live\s*\{', classifier_flow, re.S)
-    if not live or not mock:
-        raise Unsupported('Go classifier mode binding is unfamiliar; see the README.')
-    live_modes = re.findall(r'mode == "([^"]+)"', live[1])
-    mock_modes = re.findall(r'mode == "([^"]+)"', mock[1])
-    if set(live_modes + mock_modes) - set(modes):
-        raise Unsupported('Go mode switch and classifier binding disagree.')
+    if '-classifier-id' in flags:
+        classifier_flow = go_function(source, 'configuredClassifier')
+        live = re.search(r'if\s*\(([^{}]*?)\)\s*&&\s*!live\s*\{', classifier_flow, re.S)
+        mock = re.search(r'if\s*\(([^{}]*?)\)\s*&&\s*live\s*\{', classifier_flow, re.S)
+        if not live or not mock:
+            raise Unsupported('Go classifier mode binding is unfamiliar; see the README.')
+        live_modes = re.findall(r'mode == "([^"]+)"', live[1])
+        mock_modes = re.findall(r'mode == "([^"]+)"', mock[1])
+        if set(live_modes + mock_modes) - set(modes):
+            raise Unsupported('Go mode switch and classifier binding disagree.')
+    else:
+        if set(modes) != {'worker', 'start'}:
+            raise Unsupported(
+                'Classifier-free Go CLIs must expose only worker and start modes.'
+            )
+        live_modes = []
+        mock_modes = ['start']
     return dict(kind='go', root=flags, modes=modes, live_modes=live_modes, mock_modes=mock_modes,
                 env=env, source=source)
 

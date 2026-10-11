@@ -165,7 +165,7 @@ class Explorer:
         cli = python_cli(path/'main.py') if variant['kind'] == 'python' else go_cli(path)
         model = self.selected_catalog(state,'models',request.get('model')) if variant['model'] else None
         live = mode == 'live' if cli['kind'] == 'python' else mode in cli['live_modes']
-        if cli['kind'] == 'go' and mode == 'worker':
+        if cli['kind'] == 'go' and variant['classifier'] and mode == 'worker':
             live = request.get('classifier') != cli['env'].get('mockClassifierID')
         mock_id = cli.get('env',{}).get('mockClassifierID')
         classifier = None
@@ -175,7 +175,10 @@ class Explorer:
             selection = SimpleNamespace(model=SimpleNamespace(**model) if model else None,
                                         classifier=SimpleNamespace(**classifier) if classifier else None)
             if live:
-                python_guard(path/'live.py',selection)
+                guard = path / 'live.py'
+                if not guard.is_file():
+                    guard = path / 'inference.py'
+                python_guard(guard, selection if classifier else selection.model)
             else:
                 # Read the CLI's classifier restriction even though mock mode makes no AI calls.
                 main = ast.parse((path/'main.py').read_text())
@@ -186,7 +189,7 @@ class Explorer:
                             env = {'selection':selection,'classifier':(classifier['id'],classifier['provider'])}
                             if value(node.test,env):
                                 raise InvalidSelection('This classifier is a catalog candidate, not implemented by the selected CLI.')
-        if cli['kind'] == 'go' and live:
+        if cli['kind'] == 'go' and live and classifier:
             go_classifier(cli,classifier)
         parts = [recipe['id'],variant['language'],variant.get('framework') or 'bare',mode or 'default']
         parts.extend(e['id'] for e in (model,classifier) if e)
@@ -217,10 +220,18 @@ class Explorer:
             if mode not in cli['live_modes'] + cli['mock_modes'] + ['worker']:
                 raise InvalidSelection('This action needs identifiers from a running ticket. Follow the manual acknowledgment section in the README.' if mode=='acknowledge' else
                     'No safe generated command flow is available for this action. Follow the recipe README.')
-            classifier_id = classifier['id'] if classifier else mock_id
-            base = ['go','run','.',domain_flag,domain,'-task-list',task_list,'-classifier-id',classifier_id]
+            base = ['go','run','.',domain_flag,domain,'-task-list',task_list]
+            if '-workflow-id' in flags:
+                base += ['-workflow-id',workflow_id]
+            if variant['classifier']:
+                classifier_id = classifier['id'] if classifier else mock_id
+                base += ['-classifier-id',classifier_id]
             worker = base+['-mode','worker']
             starter = base+['-mode',mode] if mode != 'worker' else None
+            if live and '-confirm-live' in flags:
+                worker += ['-confirm-live']
+                if starter and mode != 'live-batch':
+                    starter += ['-confirm-live']
             controls = []
             if mode in {'batch','live-batch'}:
                 # These inputs are explicit user choices, not guessed live defaults.
@@ -261,7 +272,8 @@ class Explorer:
             client='\n'.join(prefix+shlex.join(c) for c in ([starter] if starter else [])+controls),
             start=prefix+shlex.join(starter) if starter else '',
             controls=[dict(name=c[-1],command=prefix+shlex.join(c)) for c in controls],
-            domain=domain,task_list=task_list,workflow_id=workflow_id if cli['kind']=='python' else None,
+            domain=domain,task_list=task_list,
+            workflow_id=workflow_id if cli['kind']=='python' or '-workflow-id' in flags else None,
             cadence_web_url=self.cadence_web_url, cadence_cluster=self.cadence_cluster,
             implementation=variant['id'],mode=mode,live=live,model=model,classifier=classifier,
             evidence=record,credentials=credentials,local=self.local_commands(model,classifier) if live else [],

@@ -148,6 +148,25 @@ The contract describes behavior, not one universal source layout or shared
 runtime library. Profile implementations may use language-appropriate command
 syntax while exposing the same concepts.
 
+### Inference as configuration
+
+For profiles with live inference, `models.yaml` is the source of model provider,
+model name, and provider-native base endpoint values, and `classifiers.yaml` is
+the equivalent source for classifier selections. The selected catalog entry is
+the sole runtime source of those values. Worker-local adapters may derive a
+transport-specific protocol route from that configured base, such as adding
+`/v1beta/openai/` for Google's OpenAI-compatible API or `/v1/` for Ollama. They
+do not define provider endpoint constants, require an exact host, or put
+endpoints into Workflow input or history.
+
+Endpoint validation remains fail closed without replacing configuration:
+credential-bearing remote providers require HTTPS, local providers require a
+loopback host, and URLs reject embedded credentials, query strings, fragments,
+missing hosts, and unsupported schemes. Offline tests change a safe catalog
+endpoint and verify that the changed base, plus any documented adapter-owned
+protocol suffix, reaches the provider client or request transport without
+making a live provider call.
+
 ## Explorer relationship
 
 The Local Samples Explorer is a consumer of the generated recipe contract, not
@@ -230,6 +249,8 @@ discovery test. Implementation must test:
 - Generated setup, Worker, Workflow, and test commands.
 - Mock execution without credentials or paid provider calls.
 - Catalog and environment-variable documentation matching generated source.
+- Catalog endpoint changes reaching the selected provider transport without
+  live calls or hardcoded-host overrides.
 - Explorer discovery and command resolution for each delivered profile.
 - Independence: a generated recipe does not import source from another recipe.
 

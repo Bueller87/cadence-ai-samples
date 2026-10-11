@@ -1,0 +1,139 @@
+# __RECIPE_TITLE__
+
+## Problem
+
+Describe the business request this recipe's agent should handle.
+
+## Solution
+
+Replace the starter prompt and instruction with the smallest agent behavior that
+solves the problem. The scaffold runs a one-shot Cadence Workflow:
+
+`prompt → mock Activity or Google ADK model Activity → result`
+
+Mock mode is the default. It is deterministic, makes no network calls, reads no
+catalog, and needs no credentials. Live mode uses Google ADK with a model selected
+from `models.yaml`. This profile has no classifier integration and does not read
+`classifiers.yaml`.
+
+## Requirements
+
+- Python 3.12 or 3.13.
+- A Cadence server at `localhost:7833` with domain `cadence-ai-samples`.
+- Live mode only: the repository-root `models.yaml`, or a copied catalog passed
+  with `--catalog-dir`.
+
+The dependencies use the same proven pins as Recurring AI Watch: Cadence Python
+SDK PR #176 commit `2bc1af4207d20cd99ae64fa1ef82d803905af947`,
+Google ADK 2.1.0, LiteLLM 1.83.7, Pydantic 2.12.5, and PyYAML 6.0.2.
+
+## Setup
+
+From the repository root:
+
+```bash
+cd recipes/__RECIPE_SLUG__/python/google-adk
+python3.13 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e .
+```
+
+## Mock run
+
+Start the Worker in terminal 1:
+
+```bash
+python main.py worker
+```
+
+Start the example Workflow in terminal 2:
+
+```bash
+python main.py start --prompt "Summarize the next step for this request."
+```
+
+Both commands default to domain `cadence-ai-samples`, task list
+`__RECIPE_SLUG__-google-adk`, and Workflow ID
+`__RECIPE_SLUG__-google-adk-demo`. Put global options before the command, for
+example `python main.py --task-list another-list worker`.
+
+## Live run
+
+Supported selections are the current model entries below. Live startup validates
+the ID, provider, and endpoint without calling a provider.
+
+| Model ID | Provider | Credential |
+| --- | --- | --- |
+| `gemini-flash-lite` | Google Gemini | `MODEL_AI_KEY` |
+| `llama3.2-local` | local Ollama | none |
+| `openai-nano` | OpenAI through ADK LiteLLM | `MODEL_AI_KEY` |
+
+`models.yaml` is the sole source of each provider, model name, and endpoint.
+The Worker passes that endpoint to Gemini's `base_url` or the selected LiteLLM
+transport. Remote credential-bearing providers require HTTPS; Ollama requires a
+loopback endpoint. No endpoint is stored in Workflow input or history.
+
+In terminal 1, set the credential only in the Worker environment, then explicitly
+confirm live provider use:
+
+```bash
+export MODEL_AI_KEY='your-provider-key'
+python main.py --model-id gemini-flash-lite \
+  --task-list __RECIPE_SLUG__-google-adk-live \
+  worker --mode live --confirm-live
+```
+
+For local Ollama, start Ollama and make `llama3.2:latest` available, omit
+`MODEL_AI_KEY`, and select `--model-id llama3.2-local`.
+
+In terminal 2, use the same model and task list:
+
+```bash
+python main.py --model-id gemini-flash-lite \
+  --task-list __RECIPE_SLUG__-google-adk-live \
+  start --mode live --prompt "Summarize the next step for this request."
+```
+
+Use `--catalog-dir /path/to/catalogs` when the recipe is copied away from this
+repository. Never store credentials in YAML, Workflow input, commands committed
+to source control, or Cadence history.
+
+## Workflow ID reuse
+
+`start` uses Cadence's `ALLOW_DUPLICATE` policy. After the stable demo Workflow
+ID closes, another `start` creates a new Run and preserves the old history. If a
+Run with that ID is still open, Cadence rejects the duplicate and the CLI reports
+how to select another `--workflow-id`.
+
+## Activity and failure behavior
+
+The Workflow contains only deterministic orchestration. Mock behavior is a local
+Activity. In live mode, Google ADK's `CadenceAgentRunner` schedules model work
+through `GoogleADKActivities.generate_content_async`; provider clients and
+credentials exist only in the Worker.
+
+Model Activities have a 30-second schedule-to-close timeout and at most three
+attempts with exponential backoff. Authentication, configuration, and response
+schema failures are non-retryable. Provider bodies are not copied into mapped
+failure messages.
+
+## Tests
+
+From `recipes/__RECIPE_SLUG__/python/google-adk`:
+
+```bash
+python -m unittest discover -s tests -v
+python -m py_compile config.py workflow.py inference.py main.py
+```
+
+The suite is offline. It tests Workflow and Activity behavior, catalog parsing,
+all supported live selections, endpoint and credential validation, literal CLI
+commands, mock defaults, Workflow ID reuse, duplicate-open-run reporting, and
+failure paths. It does not need a Cadence server or provider credentials.
+
+## Copying this recipe
+
+Keep `config.py`, `workflow.py`, `inference.py`, and `main.py` together. Replace
+the synthetic Activity and agent instruction with recipe-specific behavior while
+keeping external calls inside Activities. Preserve a mock path so core tests stay
+offline, and update `SPEC.md` before adding business behavior.
