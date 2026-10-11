@@ -157,7 +157,8 @@ tools/explorer/.venv/bin/python -m unittest discover -s tools/explorer/tests -v
 Tests use a temporary checkout and local stub services, without cloud AI,
 Cadence, or Terminal.app calls. They cover all 24 supported Watch selections,
 120 generated commands against both actual argparse parsers, Go actions and
-live-batch bounds, changed catalogs/CLI guards, new/incomplete recipes,
+live-batch bounds, changed catalogs/CLI guards, new/incomplete recipes, a
+freshly generated `python/bare` recipe,
 non-execution of recipe modules, quoting of paths with spaces, probe/warm-up
 failures, Terminal handoff and fallback, action protection, HTTP refresh
 behavior, and source-file boundaries.
