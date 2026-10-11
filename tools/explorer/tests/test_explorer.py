@@ -258,9 +258,12 @@ class ExplorerTests(unittest.TestCase):
         self.assertEqual([v['id'] for v in recipe['variants']],[implementation])
         variant=recipe['variants'][0]
         self.assertTrue(variant['supported'],variant['reason'])
-        self.assertEqual((variant['framework'],variant['modes'],variant['model'],variant['classifier']),(None,[],False,False))
+        self.assertEqual((variant['framework'],set(variant['actions']),
+                          set(variant['modes']),variant['model'],variant['classifier']),
+                         (None,{'worker','start'},{'mock','live'},False,False))
         self.assertEqual(variant['defaults']['--domain'],'cadence-ai-samples')
-        result=self.explorer.resolve(dict(sample='invoice-review',implementation=implementation))
+        result=self.explorer.resolve(dict(
+            sample='invoice-review',implementation=implementation,mode='mock'))
         self.assertEqual((result['live'],result['credentials'],result['controls']),(False,[],[]))
         path=self.root/implementation/'main.py'
         tree=ast.parse(path.read_text())
@@ -273,25 +276,33 @@ class ExplorerTests(unittest.TestCase):
             tokens=shlex.split(line)
             self.assertEqual(tokens[:5],['cd',str((self.root/implementation).resolve()),'&&','.venv/bin/python','main.py'])
             args=scope['parser']().parse_args(tokens[5:])
-            self.assertEqual((args.domain,args.task_list,args.workflow_id),
-                (result['domain'],result['task_list'],result['workflow_id']))
+            self.assertEqual((args.domain,args.task_list),
+                             (result['domain'],result['task_list']))
+            if args.command == 'start':
+                self.assertEqual(args.workflow_id,result['workflow_id'])
             commands.append(args.command)
         self.assertEqual(commands,['worker','start'])
 
-    def test_generated_phase_two_profiles_are_discovered_and_resolved(self):
+    def test_every_generated_profile_is_discovered_and_resolved(self):
         shutil.copytree(ROOT/'scripts',self.root/'scripts',ignore=shutil.ignore_patterns('__pycache__'))
         shutil.copytree(ROOT/'templates',self.root/'templates',ignore=shutil.ignore_patterns('.venv','__pycache__'))
         cases=[
-            ('generated-go-bare',('go','none','none'),'go/bare',
-                dict(mode='start')),
-            ('generated-go-systemone',('go','systemone','none'),'go/systemone',
-                dict(mode='demo',classifier='mock')),
-            ('generated-google-adk',('python','none','google-adk'),'python/google-adk',
-                dict(mode='mock',model='gemini-flash-lite')),
-            ('generated-openai-agents',('python','none','openai-agents'),'python/openai-agents',
-                dict(mode='mock',model='gemini-flash-lite')),
+            ('generated-go-bare',('go','none','none'),'go/bare'),
+            ('generated-go-systemone',('go','systemone','none'),'go/systemone'),
+            ('generated-java-bare',('java','none','none'),'java/bare'),
+            ('generated-java-systemone',('java','systemone','none'),'java/systemone'),
+            ('generated-python-bare',('python','none','none'),'python/bare'),
+            ('generated-python-systemone',('python','systemone','none'),'python/systemone'),
+            ('generated-google-adk',('python','none','google-adk'),'python/google-adk'),
+            ('generated-google-adk-systemone',('python','systemone','google-adk'),
+                'python/google-adk-systemone'),
+            ('generated-openai-agents',('python','none','openai-agents'),
+                'python/openai-agents'),
+            ('generated-openai-agents-systemone',('python','systemone','openai-agents'),
+                'python/openai-agents-systemone'),
         ]
-        for slug,(language,classifier,agent),profile,selection in cases:
+        forbidden_actions={'demo','live-demo','batch','live-batch','acknowledge','benchmark'}
+        for slug,(language,classifier,agent),profile in cases:
             with self.subTest(profile=profile):
                 generated=subprocess.run([str(self.root/'scripts/new-recipe.sh'),slug,
                     '--language',language,'--classifier',classifier,'--agent',agent],
@@ -301,40 +312,154 @@ class ExplorerTests(unittest.TestCase):
                 recipe=next(r for r in self.explorer.snapshot()['recipes'] if r['id']==slug)
                 variant=next(v for v in recipe['variants'] if v['id']==implementation)
                 self.assertTrue(variant['supported'],variant['reason'])
-                result=self.explorer.resolve(dict(
-                    sample=slug,implementation=implementation,**selection))
-                self.assertIn('worker',result['worker'])
-                self.assertTrue(result['start'])
-                self.assertEqual(result['domain'],'cadence-ai-samples')
-                self.assertEqual(result['implementation'],implementation)
+                self.assertTrue(variant['generic'])
+                self.assertEqual(set(variant['actions']),{'worker','start'})
+                self.assertEqual(set(variant['modes']),{'mock','live'})
+                self.assertFalse(set(variant['actions']) & forbidden_actions)
+                self.assertFalse(set(variant['modes']) & forbidden_actions)
+                for mode in ('mock','live'):
+                    request=dict(sample=slug,implementation=implementation,mode=mode)
+                    if mode == 'live' and agent != 'none':
+                        request['model']='llama3.2-local'
+                    if mode == 'live' and classifier == 'systemone':
+                        request['classifier']='laya-local'
+                    result=self.explorer.resolve(request)
+                    self.assertEqual((result['live'],result['mock']),
+                                     (mode=='live',mode=='mock'))
+                    self.assertEqual(result['controls'],[])
+                    commands={'worker':result['worker'],'start':result['start']}
+                    for action,command in commands.items():
+                        tokens=shlex.split(command)
+                        if language == 'python':
+                            cli=tokens[tokens.index('main.py')+1:]
+                            actual_action=next(item for item in cli
+                                               if item in {'worker','start'})
+                            actual_mode=cli[cli.index('--mode')+1]
+                        elif language == 'go':
+                            cli=tokens[tokens.index('.')+1:]
+                            actual_action=cli[0]
+                            actual_mode=cli[cli.index('-mode')+1]
+                        else:
+                            argument=next(item for item in tokens
+                                          if item.startswith('--args='))
+                            cli=shlex.split(argument.removeprefix('--args='))
+                            actual_action=cli[0]
+                            actual_mode=cli[cli.index('--mode')+1]
+                        self.assertEqual((actual_action,actual_mode),(action,mode))
+                        self.assertNotIn(actual_action,forbidden_actions)
+                        self.assertNotIn(actual_mode,forbidden_actions)
+                    start_tokens=shlex.split(result['start'])
+                    for flag in ('confirm-live','catalog-dir','model-id','classifier-id'):
+                        self.assertFalse(any(flag in token for token in start_tokens),
+                                         (profile,mode,flag,result['start']))
+                    inference=classifier=='systemone' or agent!='none'
+                    confirm='--confirm-live' if language!='go' else '-confirm-live'
+                    self.assertEqual(confirm in result['worker'],
+                                     mode=='live' and inference)
 
-        for profile in ('python/google-adk','python/openai-agents'):
-            slug='generated-'+profile.split('/')[-1]
-            implementation=f'recipes/{slug}/{profile}'
-            for model in ('gemini-flash-lite','llama3.2-local','openai-nano'):
-                with self.subTest(profile=profile,model=model):
-                    result=self.explorer.resolve(dict(
-                        sample=slug,implementation=implementation,mode='live',model=model))
-                    self.assertTrue(result['live'])
-                    self.assertIn('--confirm-live',result['worker'])
-                    self.assertIn('--mode live',result['start'])
-
-        systemone=self.explorer.resolve(dict(
-            sample='generated-go-systemone',
-            implementation='recipes/generated-go-systemone/go/systemone',
-            mode='live-demo',classifier='laya-local'))
-        self.assertTrue(systemone['live'])
-        self.assertIn('-confirm-live',systemone['worker'])
-        self.assertIn('-confirm-live',systemone['start'])
+        java_systemone=self.explorer.resolve(dict(
+            sample='generated-java-systemone',
+            implementation='recipes/generated-java-systemone/java/systemone',
+            mode='live',classifier='laya-local'))
+        self.assertTrue(java_systemone['live'])
+        self.assertIn('--classifier-id laya-local',java_systemone['worker'])
+        self.assertNotIn('--classifier-id',java_systemone['start'])
+        self.assertEqual(java_systemone['credentials'],[])
+        java_typesafe=self.explorer.resolve(dict(
+            sample='generated-java-systemone',
+            implementation='recipes/generated-java-systemone/java/systemone',
+            mode='live',classifier='jev-default'))
+        self.assertEqual(java_typesafe['credentials'],['CLASSIFIER_AI_KEY'])
 
         go_main=self.root/'recipes/generated-go-bare/go/bare/main.go'
         go_main.write_text(go_main.read_text().replace(
-            'case "start":\n\t\tcadenceClient',
-            'case "live":\n\t\treturn\n\tcase "start":\n\t\tcadenceClient'))
+            'case "worker", "start":','case "worker", "start", "benchmark":'))
         recipe=next(r for r in self.explorer.snapshot()['recipes']
             if r['id']=='generated-go-bare')
         self.assertFalse(recipe['variants'][0]['supported'])
-        self.assertIn('only worker and start',recipe['variants'][0]['reason'])
+        self.assertIn('exactly worker and start',recipe['variants'][0]['reason'])
+
+        java_main=self.root/(
+            'recipes/generated-java-bare/java/bare/src/main/java/com/example/'
+            'cadence/recipe/RecipeApplication.java')
+        java_main.write_text(java_main.read_text().replace(
+            '&& !"start".equals(action)',
+            '&& !"start".equals(action) && !"benchmark".equals(action)'))
+        recipe=next(r for r in self.explorer.snapshot()['recipes']
+            if r['id']=='generated-java-bare')
+        self.assertFalse(recipe['variants'][0]['supported'])
+        self.assertIn('exactly worker and start',recipe['variants'][0]['reason'])
+
+        classifiers=self.root/'classifiers.yaml'
+        classifiers.write_text(classifiers.read_text().replace(
+            'http://localhost:8008/v1/systemone',
+            'http://example.com:8008/v1/systemone'))
+        for profile,slug in (
+                ('python/systemone','generated-python-systemone'),
+                ('python/google-adk-systemone','generated-google-adk-systemone'),
+                ('python/openai-agents-systemone','generated-openai-agents-systemone')):
+            request=dict(sample=slug,implementation=f'recipes/{slug}/{profile}',
+                         mode='live',classifier='laya-local')
+            if profile != 'python/systemone':
+                request['model']='llama3.2-local'
+            with self.subTest(profile=profile,validation='catalog endpoint'):
+                with self.assertRaises(InvalidSelection):
+                    self.explorer.resolve(request)
+
+    def test_generated_java_rejects_nested_source_symlinks(self):
+        shutil.copytree(ROOT/'scripts',self.root/'scripts',
+                        ignore=shutil.ignore_patterns('__pycache__'))
+        shutil.copytree(ROOT/'templates',self.root/'templates',
+                        ignore=shutil.ignore_patterns('.venv','__pycache__'))
+        generated=subprocess.run([str(self.root/'scripts/new-recipe.sh'),'linked-java',
+            '--language','java','--classifier','systemone','--agent','none'],
+            capture_output=True,text=True,timeout=30)
+        self.assertEqual(generated.returncode,0,generated.stderr)
+        implementation='recipes/linked-java/java/systemone'
+        source=self.root/implementation/(
+            'src/main/java/com/example/cadence/recipe/ClassifierFactory.java')
+        with tempfile.TemporaryDirectory(prefix='outside java ') as outside:
+            target=Path(outside)/'ClassifierFactory.java'
+            target.write_text(source.read_text())
+            source.unlink()
+            source.symlink_to(target)
+            recipe=next(r for r in self.explorer.snapshot()['recipes']
+                        if r['id']=='linked-java')
+            self.assertFalse(recipe['variants'][0]['supported'])
+            self.assertIn('must not be a symlink',recipe['variants'][0]['reason'])
+            request=dict(sample='linked-java',implementation=implementation,
+                         mode='live',classifier='jev-default')
+            with self.assertRaisesRegex(InvalidSelection,'must not be a symlink'):
+                self.explorer.resolve(request)
+            with self.assertRaisesRegex(InvalidSelection,'must not be a symlink'):
+                self.explorer.check(request)
+
+    def test_generated_java_rejects_symlinked_source_directory(self):
+        shutil.copytree(ROOT/'scripts',self.root/'scripts',
+                        ignore=shutil.ignore_patterns('__pycache__'))
+        shutil.copytree(ROOT/'templates',self.root/'templates',
+                        ignore=shutil.ignore_patterns('.venv','__pycache__'))
+        generated=subprocess.run([str(self.root/'scripts/new-recipe.sh'),'linked-java-dir',
+            '--language','java','--classifier','systemone','--agent','none'],
+            capture_output=True,text=True,timeout=30)
+        self.assertEqual(generated.returncode,0,generated.stderr)
+        implementation='recipes/linked-java-dir/java/systemone'
+        source_dir=self.root/implementation/'src/main/java'
+        with tempfile.TemporaryDirectory(prefix='outside java dir ') as outside:
+            target=Path(outside)/'java'
+            shutil.copytree(source_dir,target)
+            shutil.rmtree(source_dir)
+            source_dir.symlink_to(target,target_is_directory=True)
+            recipe=next(r for r in self.explorer.snapshot()['recipes']
+                        if r['id']=='linked-java-dir')
+            self.assertFalse(recipe['variants'][0]['supported'])
+            self.assertIn('must not be a symlink',recipe['variants'][0]['reason'])
+            request=dict(sample='linked-java-dir',implementation=implementation,
+                         mode='live',classifier='jev-default')
+            with self.assertRaisesRegex(InvalidSelection,'must not be a symlink'):
+                self.explorer.resolve(request)
+            with self.assertRaisesRegex(InvalidSelection,'must not be a symlink'):
+                self.explorer.check(request)
 
     def test_unfamiliar_validation_and_invalid_endpoints_fail_closed(self):
         model_file=self.root/'models.yaml'

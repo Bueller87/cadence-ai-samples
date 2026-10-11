@@ -3,9 +3,9 @@ Next steps (Go 1.23):
   go mod download
   go test ./...
 
-Run the offline mock demo:
-  go run . -mode worker
-  go run . -mode demo
+Run the offline mock path:
+  go run . worker -mode mock
+  go run . start -mode mock
 
 Then adapt recipes/__RECIPE_SLUG__/SPEC.md and workflow.go for the business
 decision. Live classifier setup and confirmation commands:

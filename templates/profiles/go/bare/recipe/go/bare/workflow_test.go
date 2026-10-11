@@ -77,31 +77,40 @@ func TestEmptyActivityInputIsNonRetriable(t *testing.T) {
 }
 
 func TestCommandDefaultsAndOverrides(t *testing.T) {
-	worker, err := parseCommand([]string{"-mode", "worker"})
+	worker, err := parseCommand([]string{"worker", "-mode", "mock"})
 	require.NoError(t, err)
+	require.Equal(t, "worker", worker.Action)
+	require.Equal(t, "mock", worker.Mode)
 	require.Equal(t, defaultDomain, worker.Domain)
 	require.Equal(t, defaultTaskList, worker.TaskList)
-	require.Equal(t, defaultWorkflowID, worker.WorkflowID)
 
 	start, err := parseCommand([]string{
-		"-mode", "start", "-domain", "test-domain", "-task-list", "test-task-list",
+		"start", "-mode", "live", "-domain", "test-domain", "-task-list", "test-task-list",
 		"-workflow-id", "test-workflow", "-text", "hello",
 	})
 	require.NoError(t, err)
+	require.Equal(t, "start", start.Action)
+	require.Equal(t, "live", start.Mode)
 	require.Equal(t, "test-domain", start.Domain)
 	require.Equal(t, "test-task-list", start.TaskList)
 	require.Equal(t, "test-workflow", start.WorkflowID)
 	require.Equal(t, "hello", start.Text)
+
 }
 
 func TestCommandRejectsInvalidConfiguration(t *testing.T) {
 	for _, args := range [][]string{
 		{},
-		{"-mode", "stop"},
-		{"-mode", "start", "-workflow-id", ""},
-		{"-mode", "start", "-text", " "},
-		{"-mode", "worker", "extra"},
-		{"-unknown"},
+		{"batch"},
+		{"acknowledge"},
+		{"worker"},
+		{"start"},
+		{"worker", "-mode", "stop"},
+		{"start", "-workflow-id", ""},
+		{"start", "-text", " "},
+		{"worker", "extra"},
+		{"worker", "-unknown"},
+		{"-mode", "worker"},
 	} {
 		_, err := parseCommand(args)
 		require.Errorf(t, err, "expected %v to fail", args)
@@ -127,7 +136,7 @@ func TestStartUsesStableIDAndAllowsReuseAfterClosure(t *testing.T) {
 
 	var output bytes.Buffer
 	err := startWorkflow(context.Background(), cadenceClient, Config{
-		Mode: "start", Address: defaultAddress, Domain: defaultDomain,
+		Action: "start", Mode: "mock", Address: defaultAddress, Domain: defaultDomain,
 		TaskList: defaultTaskList, WorkflowID: defaultWorkflowID, Text: defaultText,
 	}, &output)
 
@@ -142,7 +151,7 @@ func TestStartReportsDuplicateOpenRun(t *testing.T) {
 	).Return(nil, &shared.WorkflowExecutionAlreadyStartedError{}).Once()
 
 	err := startWorkflow(context.Background(), cadenceClient, Config{
-		Mode: "start", Address: defaultAddress, Domain: defaultDomain,
+		Action: "start", Mode: "mock", Address: defaultAddress, Domain: defaultDomain,
 		TaskList: defaultTaskList, WorkflowID: defaultWorkflowID, Text: defaultText,
 	}, &bytes.Buffer{})
 
@@ -157,7 +166,7 @@ func TestStartWrapsOtherFailures(t *testing.T) {
 	).Return(nil, errors.New("service unavailable")).Once()
 
 	err := startWorkflow(context.Background(), cadenceClient, Config{
-		Mode: "start", Address: defaultAddress, Domain: defaultDomain,
+		Action: "start", Mode: "mock", Address: defaultAddress, Domain: defaultDomain,
 		TaskList: defaultTaskList, WorkflowID: defaultWorkflowID, Text: defaultText,
 	}, &bytes.Buffer{})
 

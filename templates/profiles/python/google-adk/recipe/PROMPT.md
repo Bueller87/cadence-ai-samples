@@ -9,16 +9,19 @@ scenario in `SPEC.md`.
 
 Preserve these constraints:
 
-1. Keep mock mode as the default, fully offline, and deterministic.
+1. Keep mock mode fully offline and deterministic. Require an explicit
+   `--mode mock|live` on both `worker` and `start`.
 2. Keep model, agent, network, filesystem, clock, and other nondeterministic work
    inside Cadence Activities.
-3. Keep live provider clients and `MODEL_AI_KEY` in the Worker process. Do not put
-   credentials or endpoints in Workflow input or history.
-4. Read model selections from `models.yaml`; do not add classifier configuration
-   or read `classifiers.yaml`.
+3. Keep live catalog selection, provider clients, and `MODEL_AI_KEY` in the
+   Worker process. Start must remain configuration-free. Do not put model,
+   provider, credential, or endpoint configuration in Workflow input or history.
+4. Have only the live Worker read model selections from `models.yaml`; do not
+   add classifier configuration or read `classifiers.yaml`.
 5. Reject unsupported model IDs, provider mismatches, and unsafe endpoints before
-   the Worker polls or a live Workflow starts.
-6. Require `--confirm-live` before starting a live Worker.
+   the live Worker polls.
+6. Require `--confirm-live` before a live Worker reads catalogs or credentials
+   or builds provider clients. Do not expose this option on `start`.
 7. Preserve the stable demo Workflow ID, `ALLOW_DUPLICATE` reuse policy, and the
    clear duplicate-open-run error.
 8. Keep literal argparse `worker` and `start` commands compatible with the Local

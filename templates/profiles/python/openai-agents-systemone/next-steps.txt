@@ -1,0 +1,8 @@
+Next steps for __RECIPE_TITLE__:
+  cd recipes/__RECIPE_SLUG__/python/openai-agents-systemone
+  python3.12 -m venv .venv
+  .venv/bin/pip install -e .
+  .venv/bin/python -m unittest discover -s tests -v
+  .venv/bin/python main.py worker --mode mock
+  # In another terminal:
+  .venv/bin/python main.py start --mode mock

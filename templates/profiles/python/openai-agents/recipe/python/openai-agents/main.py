@@ -14,7 +14,7 @@ from cadence.contrib.pydantic import PydanticDataConverter
 from cadence.error import WorkflowExecutionAlreadyStartedError
 from cadence.worker import Worker
 
-from config import ModelConfig, load_model
+from config import load_model
 from workflow import WORKFLOW, RecipeInput, build_registry
 
 
@@ -32,15 +32,14 @@ def parser() -> argparse.ArgumentParser:
     cli.add_argument("--domain", default="cadence-ai-samples")
     cli.add_argument("--task-list", default=DEFAULT_TASK_LIST)
     cli.add_argument("--workflow-id", default=DEFAULT_WORKFLOW_ID)
-    cli.add_argument("--catalog-dir", type=Path, default=Path(__file__).parents[4])
-    cli.add_argument("--model-id", default="gemini-flash-lite")
-
     commands = cli.add_subparsers(dest="command", required=True)
     worker = commands.add_parser("worker")
-    worker.add_argument("--mode", choices=("mock", "live"), default="mock")
+    worker.add_argument("--mode", choices=("mock", "live"), required=True)
     worker.add_argument("--confirm-live", action="store_true")
+    worker.add_argument("--catalog-dir", type=Path, default=Path(__file__).parents[4])
+    worker.add_argument("--model-id", default="gemini-flash-lite")
     start = commands.add_parser("start")
-    start.add_argument("--mode", choices=("mock", "live"), default="mock")
+    start.add_argument("--mode", choices=("mock", "live"), required=True)
     start.add_argument("--text", default=DEFAULT_TEXT)
     return cli
 
@@ -53,18 +52,15 @@ def client(args: argparse.Namespace) -> cadence.Client:
     )
 
 
-async def run_worker(
-    args: argparse.Namespace, selection: ModelConfig | None
-) -> None:
+async def run_worker(args: argparse.Namespace) -> None:
     registry = build_registry()
     model_label = "offline-mock"
     if args.mode == "live":
         if not args.confirm_live:
             raise ValueError("live worker requires --confirm-live")
-        if selection is None:
-            raise ValueError("live worker requires a model selection")
         from live import live_model_activities
 
+        selection = load_model(args.catalog_dir, args.model_id)
         registry = build_registry(live_model_activities(selection, os.environ))
         model_label = selection.id
     worker = Worker(client(args), args.task_list, registry)
@@ -77,19 +73,7 @@ async def run_worker(
         await asyncio.Event().wait()
 
 
-async def start(
-    args: argparse.Namespace, selection: ModelConfig | None
-) -> None:
-    model_name = None
-    model_provider = None
-    if args.mode == "live":
-        if selection is None:
-            raise ValueError("live start requires a model selection")
-        from live import validate_live
-
-        validate_live(selection)
-        model_name = selection.model
-        model_provider = selection.provider
+async def start(args: argparse.Namespace) -> None:
     cadence_client = client(args)
     try:
         execution = await cadence_client.start_workflow(
@@ -97,8 +81,6 @@ async def start(
             RecipeInput(
                 text=args.text,
                 mode=args.mode,
-                model_name=model_name,
-                model_provider=model_provider,
             ),
             task_list=args.task_list,
             workflow_id=args.workflow_id,
@@ -123,13 +105,10 @@ async def main(argv: Sequence[str] | None = None) -> None:
     cli = parser()
     args = cli.parse_args(argv)
     try:
-        selection = None
-        if args.mode == "live":
-            selection = load_model(args.catalog_dir, args.model_id)
         if args.command == "worker":
-            await run_worker(args, selection)
+            await run_worker(args)
         else:
-            await start(args, selection)
+            await start(args)
     except ValueError as error:
         cli.error(str(error))
 

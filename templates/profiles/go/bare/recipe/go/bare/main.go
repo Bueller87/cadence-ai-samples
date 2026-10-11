@@ -31,6 +31,7 @@ const (
 )
 
 type Config struct {
+	Action     string
 	Mode       string
 	Address    string
 	Domain     string
@@ -40,10 +41,15 @@ type Config struct {
 }
 
 func (config Config) Validate() error {
-	switch config.Mode {
+	switch config.Action {
 	case "worker", "start":
 	default:
-		return fmt.Errorf("unsupported mode %q; use worker or start", config.Mode)
+		return fmt.Errorf("unsupported action %q; use worker or start", config.Action)
+	}
+	switch config.Mode {
+	case "mock", "live":
+	default:
+		return fmt.Errorf("unsupported mode %q; use mock or live", config.Mode)
 	}
 	for name, value := range map[string]string{
 		"address": config.Address, "domain": config.Domain, "task list": config.TaskList,
@@ -52,7 +58,7 @@ func (config Config) Validate() error {
 			return fmt.Errorf("%s is required", name)
 		}
 	}
-	if config.Mode == "start" {
+	if config.Action == "start" {
 		if strings.TrimSpace(config.WorkflowID) == "" {
 			return errors.New("workflow ID is required")
 		}
@@ -64,16 +70,21 @@ func (config Config) Validate() error {
 }
 
 func parseCommand(args []string) (Config, error) {
-	flags := flag.NewFlagSet("__RECIPE_SLUG__", flag.ContinueOnError)
+	if len(args) == 0 {
+		return Config{}, errors.New("action is required; use worker or start")
+	}
+	config := Config{Action: args[0]}
+	flags := flag.NewFlagSet(config.Action, flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
-	config := Config{}
-	flags.StringVar(&config.Mode, "mode", "", "run mode: worker or start")
+	flags.StringVar(&config.Mode, "mode", "", "execution mode: mock or live (required)")
 	flags.StringVar(&config.Address, "address", defaultAddress, "Cadence frontend address")
 	flags.StringVar(&config.Domain, "domain", defaultDomain, "Cadence domain")
 	flags.StringVar(&config.TaskList, "task-list", defaultTaskList, "Cadence task list")
-	flags.StringVar(&config.WorkflowID, "workflow-id", defaultWorkflowID, "Workflow ID for start")
-	flags.StringVar(&config.Text, "text", defaultText, "synthetic request text for start")
-	if err := flags.Parse(args); err != nil {
+	if config.Action == "start" {
+		flags.StringVar(&config.WorkflowID, "workflow-id", defaultWorkflowID, "Workflow ID")
+		flags.StringVar(&config.Text, "text", defaultText, "synthetic request text")
+	}
+	if err := flags.Parse(args[1:]); err != nil {
 		return Config{}, err
 	}
 	if flags.NArg() != 0 {
@@ -86,19 +97,8 @@ func parseCommand(args []string) (Config, error) {
 }
 
 func main() {
-	mode := flag.String("mode", "", "run mode: worker or start")
-	address := flag.String("address", defaultAddress, "Cadence frontend address")
-	domain := flag.String("domain", defaultDomain, "Cadence domain")
-	taskList := flag.String("task-list", defaultTaskList, "Cadence task list")
-	workflowID := flag.String("workflow-id", defaultWorkflowID, "Workflow ID for start")
-	text := flag.String("text", defaultText, "synthetic request text for start")
-	flag.Parse()
-
-	config := Config{
-		Mode: *mode, Address: *address, Domain: *domain, TaskList: *taskList,
-		WorkflowID: *workflowID, Text: *text,
-	}
-	if err := config.Validate(); err != nil {
+	config, err := parseCommand(os.Args[1:])
+	if err != nil {
 		log.Fatal(err)
 	}
 
@@ -108,9 +108,9 @@ func main() {
 	}
 	defer closeDispatcher()
 
-	switch *mode {
+	switch config.Action {
 	case "worker":
-		if err := runWorker(service, config.Domain, config.TaskList); err != nil {
+		if err := runWorker(service, config.Domain, config.TaskList, config.Mode); err != nil {
 			log.Fatal(err)
 		}
 	case "start":
@@ -121,7 +121,7 @@ func main() {
 	}
 }
 
-func runWorker(service workflowserviceclient.Interface, domain, taskList string) error {
+func runWorker(service workflowserviceclient.Interface, domain, taskList, mode string) error {
 	cadenceWorker, err := worker.NewV2(service, domain, taskList, worker.Options{})
 	if err != nil {
 		return fmt.Errorf("create worker: %w", err)
@@ -132,7 +132,7 @@ func runWorker(service workflowserviceclient.Interface, domain, taskList string)
 	)
 	cadenceWorker.RegisterActivityWithOptions(Assess, activity.RegisterOptions{Name: assessActivityName})
 	cadenceWorker.RegisterActivityWithOptions(FollowUp, activity.RegisterOptions{Name: followUpActivityName})
-	log.Printf("__RECIPE_SLUG__ worker polling domain=%s task-list=%s", domain, taskList)
+	log.Printf("__RECIPE_SLUG__ %s worker polling domain=%s task-list=%s with synthetic Activities", mode, domain, taskList)
 	return cadenceWorker.Run()
 }
 

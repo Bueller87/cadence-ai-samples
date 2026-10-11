@@ -14,8 +14,8 @@ first run, and opens `http://127.0.0.1:8765/`. The explorer itself requires Pyth
 3.10+ and venv support. The selected recipe retains its own runtime requirements
 (currently Python 3.12+ for Recurring AI Watch, or Go 1.23 for ticket routing).
 The first launcher run needs package-download access. Later launches reuse the
-environment. No Node.js, frontend build, provider keys, or Cadence server is
-needed to browse the explorer.
+environment. No Java, Gradle, Node.js, frontend build, provider keys, or Cadence
+server is needed to browse the explorer.
 
 ```bash
 ./scripts/explore.sh --no-browser       # print the URL, for a headless machine
@@ -36,9 +36,10 @@ hosting step. Use an SSH tunnel if you run the launcher on another machine.
 
 Applicable dropdowns stay visible even when they have only one choice, which is
 selected automatically. A selector is hidden when the concept does not apply.
-Python mock runs still show model/classifier IDs because the current CLI resolves
-those catalogs even in mock mode. Go mock actions show the built-in `mock`
-classifier and have no generative model or agent-framework selector.
+Generated profiles expose exactly `worker` and `start` with explicit `mock` and
+`live` modes. Mock mode needs no catalog selection. Live model/classifier
+selections and confirmation flags are Worker-only; generated start commands
+never contain inference configuration.
 
 The six numbered steps generate setup, Worker, and matching client commands. Commands
 include this checkout's absolute implementation directory so they can be pasted
@@ -62,9 +63,14 @@ an existing ticket, so it directs you to the README instead of inventing them.
 - **Python CLI:** a restricted AST reader examines literal `parser()` definitions
   and reads the recipe's selection guards. It never imports recipe modules or
   executes their code, and needs none of their agent/SDK dependencies.
-- **Go CLI:** a restricted source reader examines literal `flag.*` declarations,
-  the mode switch, classifier mode binding, and selection/batch guards. It does
-  not build or execute the Go sample.
+- **Go CLI:** a restricted source reader distinguishes the generated positional
+  `worker|start -mode mock|live` contract from Ticket Routing's specialized
+  global-flag mode switch. Its scenario modes and batch guards remain local to
+  that recipe and cannot weaken the generic contract.
+- **Java CLI:** a bounded source reader recognizes only the generated
+  positional `RecipeApplication.Command` contract and fixed Gradle invocation.
+  It rejects symlinked/out-of-checkout source paths before reading and does not
+  generalize arbitrary Java trees, run Gradle, or load Java classes.
 - **Evidence:** matching Workflow/run IDs come from each recipe's
   `MATRIX_RESULTS.md`, with the recorded model checked against the selected
   catalog model. These are historical records, not fresh validation of changed
@@ -155,10 +161,10 @@ tools/explorer/.venv/bin/python -m unittest discover -s tools/explorer/tests -v
 ```
 
 Tests use a temporary checkout and local stub services, without cloud AI,
-Cadence, or Terminal.app calls. They cover all 24 supported Watch selections,
-120 generated commands against both actual argparse parsers, Go actions and
-live-batch bounds, changed catalogs/CLI guards, new/incomplete recipes, a
-freshly generated `python/bare` recipe,
+Cadence, Gradle, or Terminal.app calls. They cover all 24 supported Watch
+selections, 120 generated commands against both actual argparse parsers, Go
+actions and live-batch bounds, changed catalogs/CLI guards, new/incomplete
+recipes, both modes and actions for every generated profile,
 non-execution of recipe modules, quoting of paths with spaces, probe/warm-up
 failures, Terminal handoff and fallback, action protection, HTTP refresh
 behavior, and source-file boundaries.

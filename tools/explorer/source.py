@@ -1,7 +1,8 @@
-"""Restricted source readers. Never import or execute recipe modules.
+"""Restricted source readers. Never import, build, or execute recipe modules.
 
-These readers accept the repository's literal argparse and Go flag interfaces.
-An unfamiliar expression raises Unsupported instead of guessing a capability.
+These readers accept the repository's literal argparse, Go flag, and generated
+Java Command interfaces. An unfamiliar expression raises Unsupported instead of
+guessing a capability.
 """
 from __future__ import annotations
 
@@ -163,7 +164,8 @@ def python_cli(path):
         if required not in root:
             raise Unsupported(f'CLI lacks {required}; no matching Worker/client commands can be generated.')
     for scope in [root, commands['worker'], commands['start']]:
-        if any(s.get('required') for s in scope.values()):
+        if any(spec.get('required') and flag != '--mode'
+               for flag, spec in scope.items()):
             raise Unsupported('CLI has required inputs beyond the current explorer flow; see the README.')
     mode_specs = [commands[c].get('--mode') for c in ('worker', 'start')]
     if any(mode_specs):
@@ -174,16 +176,23 @@ def python_cli(path):
             raise Unsupported('Unrecognized inference modes; see the README.')
     else:
         modes = []
-    if 'live' in modes and '--confirm-live' not in commands['worker']:
+    inference_flags = set(root) | set(commands['worker'])
+    if ('live' in modes
+            and {'--model-id', '--classifier-id'} & inference_flags
+            and '--confirm-live' not in commands['worker']):
         raise Unsupported('Live mode has no explicit Worker confirmation flag.')
-    return dict(kind='python', root=root, commands=commands, modes=modes)
+    generic = set(commands) == {'worker', 'start'}
+    if generic and set(modes) != {'mock', 'live'}:
+        raise Unsupported('Generic Python profiles require explicit mock and live modes.')
+    return dict(kind='python', root=root, commands=commands, modes=modes,
+                actions=list(commands), generic=generic)
 
 
-def python_guard(path, selection):
+def python_guard(path, selection, function='validate_live'):
     tree = ast.parse(path.read_text())
-    fn = next((n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'validate_live'), None)
+    fn = next((n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == function), None)
     if fn is None:
-        raise Unsupported('No readable validate_live() found; live combinations cannot be verified.')
+        raise Unsupported(f'No readable {function}() found; live combinations cannot be verified.')
     env = {**constants(tree), 'selection': selection, 'urlsplit': urlsplit}
     if fn.args.args:
         env[fn.args.args[0].arg] = selection
@@ -204,6 +213,99 @@ def python_guard(path, selection):
             else:
                 raise Unsupported('validate_live() uses an unfamiliar statement; see its source.')
     execute(fn.body)
+
+
+def java_cli(directory):
+    """Read only the generated Java profile's fixed RecipeApplication CLI."""
+    path = directory / 'src/main/java/com/example/cadence/recipe/RecipeApplication.java'
+    if not path.is_file():
+        raise Unsupported('No generated Java RecipeApplication CLI found.')
+    source = path.read_text()
+    if ('package com.example.cadence.recipe;' not in source
+            or 'public final class RecipeApplication' not in source
+            or 'record Command(' not in source
+            or 'static Command parse(String[] args)' not in source):
+        raise Unsupported('Java CLI does not match the generated profile contract.')
+
+    constants = dict(re.findall(
+        r'static final String (DEFAULT_[A-Z_]+) = "([^"]*)";', source))
+    default_names = {
+        '--address': 'DEFAULT_ADDRESS',
+        '--domain': 'DEFAULT_DOMAIN',
+        '--task-list': 'DEFAULT_TASK_LIST',
+        '--workflow-id': 'DEFAULT_WORKFLOW_ID',
+        '--text': 'DEFAULT_TEXT',
+        '--catalog-dir': 'DEFAULT_CATALOG_DIR',
+    }
+    flags = set(re.findall(r'flag\.equals\("(--[a-z-]+)"\)', source))
+    flags.update(re.findall(r'"(--[a-z-]+)"\.equals\(flag\)', source))
+    required = {'--mode', '--address', '--domain', '--task-list',
+                '--workflow-id', '--text'}
+    if not required <= set(flags):
+        raise Unsupported('Java adapter requires the generated mode, address, domain, task-list, workflow-id, and text flags.')
+    if flags - (required | {'--classifier-id', '--catalog-dir', '--confirm-live'}):
+        raise Unsupported('Java CLI exposes flags outside the generated profile contract.')
+
+    root = {}
+    for flag in flags:
+        spec = {'type': 'Bool' if flag == '--confirm-live' else 'String'}
+        if flag in default_names and default_names[flag] in constants:
+            spec['default'] = constants[default_names[flag]]
+        root[flag] = spec
+    if '--classifier-id' in flags:
+        mock = directory / 'src/main/java/com/example/cadence/recipe/MockClassifier.java'
+        if not mock.is_file():
+            raise Unsupported('Java SystemOne CLI has no readable mock classifier.')
+        match = re.search(r'static final String ID = "([^"]+)";', mock.read_text())
+        if not match:
+            raise Unsupported('Java SystemOne mock classifier ID is not literal.')
+        root['--classifier-id']['default'] = match[1]
+
+    actions = re.findall(r'!"([^"]+)"\.equals\(action\)', source)
+    modes = re.findall(r'!"([^"]+)"\.equals\(mode\)', source)
+    if set(actions) != {'worker', 'start'} or len(actions) != 2:
+        raise Unsupported('Generic Java profiles require exactly worker and start actions.')
+    if set(modes) != {'mock', 'live'} or len(modes) != 2:
+        raise Unsupported('Generic Java profiles require exactly mock and live modes.')
+    classifier = '--classifier-id' in flags
+    if classifier:
+        if '--confirm-live' not in flags:
+            raise Unsupported('Java SystemOne CLI has no explicit live Worker confirmation.')
+        catalog_path = directory / 'src/main/java/com/example/cadence/recipe/ClassifierCatalog.java'
+        if not catalog_path.is_file():
+            raise Unsupported('Java SystemOne CLI has no readable classifier catalog contract.')
+        catalog_source = catalog_path.read_text()
+        providers = set(re.findall(
+            r'static final String (?:TYPESAFE|LAYA) = "([^"]+)";', catalog_source))
+        required_checks = ('endpoint.getRawUserInfo() != null',
+                           'endpoint.getRawQuery() != null',
+                           'endpoint.getRawFragment() != null',
+                           'TYPESAFE.equals(config.provider()) && !"https".equals(scheme)',
+                           'LAYA.equals(config.provider()) && !isLoopback(endpoint.getHost())')
+        if providers != {'typesafe', 'laya'} or any(check not in catalog_source for check in required_checks):
+            raise Unsupported('Java classifier validation no longer matches the bounded adapter.')
+    else:
+        providers = set()
+    return dict(kind='java', root=root, modes=modes, actions=actions,
+                generic=True, source=source, providers=providers)
+
+
+def java_classifier(cli, config):
+    if config['provider'] not in cli['providers']:
+        raise InvalidSelection('The generated Java profile does not implement this classifier provider.')
+    endpoint = urlsplit(config['endpoint'])
+    try:
+        endpoint.port
+    except ValueError as error:
+        raise InvalidSelection('Classifier endpoint has an invalid URL or port.') from error
+    if (endpoint.scheme not in {'http', 'https'} or not endpoint.hostname
+            or endpoint.username or endpoint.password or endpoint.query or endpoint.fragment):
+        raise InvalidSelection('Classifier endpoint must be an HTTP URL without credentials, query, or fragment.')
+    if config['provider'] == 'typesafe' and endpoint.scheme != 'https':
+        raise InvalidSelection('Remote credential-bearing classifiers require an HTTPS endpoint.')
+    if (config['provider'] == 'laya'
+            and endpoint.hostname not in {'localhost', '127.0.0.1', '::1'}):
+        raise InvalidSelection('Laya requires a loopback endpoint.')
 
 
 def go_clean(source):
@@ -311,8 +413,54 @@ def go_validate(body, env):
             go_validate(inner, env)
 
 
+def generic_go_cli(source):
+    parse = go_function(source, 'parseCommand')
+    validate = go_function(source, 'Validate', receiver='Config')
+    action_switch = re.search(r'switch\s+config\.Action\s*\{', validate)
+    mode_switch = re.search(r'switch\s+config\.Mode\s*\{', validate)
+    if not action_switch or not mode_switch:
+        raise Unsupported('Generic Go CLI requires literal action and mode switches.')
+    actions = re.findall(
+        r'"([^"]+)"', block(validate, action_switch.end() - 1)[0].split('default:', 1)[0])
+    modes = re.findall(
+        r'"([^"]+)"', block(validate, mode_switch.end() - 1)[0].split('default:', 1)[0])
+    if set(actions) != {'worker', 'start'} or len(actions) != 2:
+        raise Unsupported('Generic Go profiles require exactly worker and start actions.')
+    if set(modes) != {'mock', 'live'} or len(modes) != 2:
+        raise Unsupported('Generic Go profiles require exactly mock and live modes.')
+    if 'config := Config{Action: args[0]}' not in parse:
+        raise Unsupported('Generic Go actions must be the first positional argument.')
+
+    flags = {}
+    env = go_constants(source)
+    pattern = (r'flags\.(String|Bool|Int|Float64|Duration)Var\('
+               r'&config\.(\w+),\s*"([^"]+)",\s*([^,]+),\s*'
+               r'"((?:\\.|[^"\\])*)"\)')
+    for match in re.finditer(pattern, parse):
+        kind, field, name, default, help_text = match.groups()
+        try:
+            default_value = go_expr(default, env)
+        except Unsupported:
+            default_value = None
+        flags['-' + name] = dict(
+            type=kind, default=default_value, help=help_text, field=field)
+    required = {'-mode', '-address', '-domain', '-task-list'}
+    if not required <= set(flags):
+        raise Unsupported('Generic Go adapter requires mode, address, domain, and task-list flags.')
+    allowed = required | {'-workflow-id', '-text', '-classifier-id',
+                          '-catalog-dir', '-confirm-live'}
+    if set(flags) - allowed:
+        raise Unsupported('Generic Go CLI exposes flags outside the profile contract.')
+    if '-classifier-id' in flags and '-confirm-live' not in flags:
+        raise Unsupported('Generic Go SystemOne CLI has no explicit live Worker confirmation.')
+    return dict(kind='go', root=flags, modes=modes, actions=actions,
+                generic=True, env=env, source=source)
+
+
 def go_cli(directory):
     source = go_clean('\n'.join(p.read_text() for p in sorted(directory.glob('*.go')) if not p.name.endswith('_test.go')))
+    if 'flag.NewFlagSet' in source and 'func parseCommand(' in source:
+        return generic_go_cli(source)
     main = go_function(source, 'main')
     flags = {}
     env = go_constants(source)
@@ -353,7 +501,8 @@ def go_cli(directory):
             )
         live_modes = []
         mock_modes = ['start']
-    return dict(kind='go', root=flags, modes=modes, live_modes=live_modes, mock_modes=mock_modes,
+    return dict(kind='go', root=flags, modes=modes, actions=modes,
+                live_modes=live_modes, mock_modes=mock_modes, generic=False,
                 env=env, source=source)
 
 

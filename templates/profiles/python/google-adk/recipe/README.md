@@ -9,12 +9,12 @@ Describe the business request this recipe's agent should handle.
 Replace the starter prompt and instruction with the smallest agent behavior that
 solves the problem. The scaffold runs a one-shot Cadence Workflow:
 
-`prompt → mock Activity or Google ADK model Activity → result`
+`prompt → mock Activity or Worker-configured Google ADK agent Activity → result`
 
-Mock mode is the default. It is deterministic, makes no network calls, reads no
-catalog, and needs no credentials. Live mode uses Google ADK with a model selected
-from `models.yaml`. This profile has no classifier integration and does not read
-`classifiers.yaml`.
+Mock mode is deterministic, makes no network calls, reads no catalog, and needs
+no credentials. Live mode uses Google ADK with a model selected from
+`models.yaml` by the Worker. This profile has no classifier integration and does
+not read `classifiers.yaml`.
 
 ## Requirements
 
@@ -43,13 +43,14 @@ python -m pip install -e .
 Start the Worker in terminal 1:
 
 ```bash
-python main.py worker
+python main.py worker --mode mock
 ```
 
 Start the example Workflow in terminal 2:
 
 ```bash
-python main.py start --prompt "Summarize the next step for this request."
+python main.py start --mode mock \
+  --prompt "Summarize the next step for this request."
 ```
 
 Both commands default to domain `cadence-ai-samples`, task list
@@ -73,24 +74,23 @@ The Worker passes that endpoint to Gemini's `base_url` or the selected LiteLLM
 transport. Remote credential-bearing providers require HTTPS; Ollama requires a
 loopback endpoint. No endpoint is stored in Workflow input or history.
 
-In terminal 1, set the credential only in the Worker environment, then explicitly
-confirm live provider use:
+In terminal 1, set the credential only in the Worker environment and explicitly
+confirm that the Worker may use a live provider:
 
 ```bash
 export MODEL_AI_KEY='your-provider-key'
-python main.py --model-id gemini-flash-lite \
-  --task-list __RECIPE_SLUG__-google-adk-live \
-  worker --mode live --confirm-live
+python main.py --task-list __RECIPE_SLUG__-google-adk-live \
+  worker --mode live --confirm-live --model-id gemini-flash-lite
 ```
 
 For local Ollama, start Ollama and make `llama3.2:latest` available, omit
 `MODEL_AI_KEY`, and select `--model-id llama3.2-local`.
 
-In terminal 2, use the same model and task list:
+In terminal 2, use the same task list. The starter has no catalog, model, or
+credential options:
 
 ```bash
-python main.py --model-id gemini-flash-lite \
-  --task-list __RECIPE_SLUG__-google-adk-live \
+python main.py --task-list __RECIPE_SLUG__-google-adk-live \
   start --mode live --prompt "Summarize the next step for this request."
 ```
 
@@ -108,9 +108,9 @@ how to select another `--workflow-id`.
 ## Activity and failure behavior
 
 The Workflow contains only deterministic orchestration. Mock behavior is a local
-Activity. In live mode, Google ADK's `CadenceAgentRunner` schedules model work
-through `GoogleADKActivities.generate_content_async`; provider clients and
-credentials exist only in the Worker.
+Activity. In live mode it schedules `__RECIPE_SLUG__.google-adk-agent`; that
+Worker Activity owns the Google ADK runner, selected model, provider client, and
+credential.
 
 Model Activities have a 30-second schedule-to-close timeout and at most three
 attempts with exponential backoff. Authentication, configuration, and response
@@ -128,7 +128,7 @@ python -m py_compile config.py workflow.py inference.py main.py
 
 The suite is offline. It tests Workflow and Activity behavior, catalog parsing,
 all supported live selections, endpoint and credential validation, literal CLI
-commands, mock defaults, Workflow ID reuse, duplicate-open-run reporting, and
+commands, Worker-local live configuration, Workflow ID reuse, duplicate-open-run reporting, and
 failure paths. It does not need a Cadence server or provider credentials.
 
 ## Copying this recipe

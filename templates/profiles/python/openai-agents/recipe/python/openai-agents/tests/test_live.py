@@ -1,19 +1,11 @@
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from agents import ModelResponse
-from agents.usage import Usage, serialize_usage
-from openai.types.responses import ResponseOutputMessage, ResponseOutputText
-
 from config import ModelConfig, load_model
-from inference import (
-    CHAT_ACTIVITY,
-    NATIVE_ACTIVITY,
-    build_model_activities,
-    generate_live_answer,
-)
+from inference import build_model_activities
 from live import (
     LiveConfigurationError,
     live_model_activities,
@@ -27,39 +19,6 @@ ROOT = next(
     if (parent / "models.yaml").is_file()
 )
 MODEL_IDS = ("gemini-flash-lite", "llama3.2-local", "openai-nano")
-
-
-def response() -> ModelResponse:
-    return ModelResponse(
-        output=[
-            ResponseOutputMessage(
-                id="offline-message",
-                type="message",
-                role="assistant",
-                status="completed",
-                content=[
-                    ResponseOutputText(
-                        type="output_text",
-                        text="Review retry limits.",
-                        annotations=[],
-                        logprobs=[],
-                    )
-                ],
-            )
-        ],
-        usage=Usage(),
-        response_id=None,
-    )
-
-
-def chat_result() -> dict[str, object]:
-    reply = response()
-    return {
-        "output": [item.model_dump(mode="json") for item in reply.output],
-        "usage": serialize_usage(reply.usage),
-        "response_id": None,
-    }
-
 
 class LiveValidationTests(unittest.TestCase):
     def test_root_catalog_supported_models_validate_without_provider_calls(self) -> None:
@@ -167,30 +126,28 @@ class LiveValidationTests(unittest.TestCase):
 
 
 class AgentBoundaryTests(unittest.IsolatedAsyncioTestCase):
-    async def test_agent_model_requests_use_only_cadence_activities(self) -> None:
+    async def test_worker_activity_owns_agent_model_selection(self) -> None:
         for model_id in MODEL_IDS:
             selection = load_model(ROOT, model_id)
-            expected_activity = (
-                NATIVE_ACTIVITY
-                if selection.provider == "openai"
-                else CHAT_ACTIVITY
-            )
-            result = (
-                response()
-                if selection.provider == "openai"
-                else chat_result()
-            )
-            with self.subTest(model_id=model_id), patch(
-                "inference.workflow.execute_activity",
-                new=AsyncMock(return_value=result),
-            ) as execute:
-                answer = await generate_live_answer(
-                    "Review retries.",
-                    selection.model,
-                    selection.provider,
+            with (
+                self.subTest(model_id=model_id),
+                patch("inference.AsyncOpenAI"),
+                patch(
+                    "inference.Runner.run",
+                    new=AsyncMock(
+                        return_value=SimpleNamespace(
+                            final_output="Review retry limits."
+                        )
+                    ),
+                ) as run,
+            ):
+                activities = build_model_activities(
+                    selection, {"MODEL_AI_KEY": "test-key"}
                 )
+                answer = await activities.run_agent("Review retries.")
             self.assertEqual(answer, "Review retry limits.")
-            self.assertEqual(execute.call_args.args[0], expected_activity)
+            run.assert_awaited_once()
+            self.assertEqual(activities._selection, selection)
 
 
 if __name__ == "__main__":

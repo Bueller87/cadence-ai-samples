@@ -15,7 +15,8 @@ Activity, and no agent framework:
 
 The default `mock` Activity is deterministic, offline, and credential-free.
 Live selections come from the repository-root `classifiers.yaml`. The Worker,
-not the starter, constructs the HTTP client and makes provider calls.
+not the starter, constructs the HTTP client and makes provider calls. Starters
+never read the catalog or credentials.
 
 ## Requirements
 
@@ -25,7 +26,7 @@ not the starter, constructs the HTTP client and makes provider calls.
 - For live runs, a supported `classifiers.yaml` entry and its local service or
   provider access.
 
-## Setup and offline demo
+## Setup and offline run
 
 From the repository root:
 
@@ -38,57 +39,58 @@ go test ./...
 Start the mock Worker in terminal 1:
 
 ```bash
-go run . -mode worker
+go run . worker -mode mock
 ```
 
 Start the mock Workflow in terminal 2:
 
 ```bash
-go run . -mode demo -text "Investigate this urgent example request."
+go run . start -mode mock -text "Investigate this urgent example request."
 ```
 
 Both commands default to domain `cadence-ai-samples`, task list
-`__RECIPE_SLUG__`, classifier `mock`, and Workflow ID
-`__RECIPE_SLUG__-demo`. When changing the domain or task list, pass the same
-values to the Worker and starter.
+`__RECIPE_SLUG__`, and Workflow ID `__RECIPE_SLUG__-demo`. Mock Workers
+register the local classifier without reading `classifiers.yaml` or
+`CLASSIFIER_AI_KEY`. When changing the domain or task list, pass the same values
+to the Worker and starter. Both actions require an explicit `-mode mock` or
+`-mode live`.
 
 ## Live SystemOne classifiers
 
 Only `typesafe` and `laya` catalog providers are implemented. Unknown
 providers are catalog candidates and are rejected. Endpoints cannot contain
 credentials, query strings, or fragments. TypeSafe requires HTTPS. Laya is
-restricted to a loopback host. Live Worker and starter commands both require
-`-confirm-live`.
+restricted to a loopback host. A live Worker requires `-confirm-live`; a live
+start does not because it makes no provider call and reads no live
+configuration.
 
-Use a dedicated task list and the same classifier ID for both processes.
+Use a dedicated task list for each live Worker and its starts.
 
 For local Laya:
 
 ```bash
-go run . -mode worker -classifier-id laya-local \
+go run . worker -mode live -classifier-id laya-local \
   -task-list __RECIPE_SLUG__-laya -confirm-live
 ```
 
 ```bash
-go run . -mode live-demo -classifier-id laya-local \
-  -task-list __RECIPE_SLUG__-laya -workflow-id __RECIPE_SLUG__-laya-demo \
-  -confirm-live
+go run . start -mode live -task-list __RECIPE_SLUG__-laya \
+  -workflow-id __RECIPE_SLUG__-laya-demo
 ```
 
 For TypeSafe Jev, export the key only in the Worker shell:
 
 ```bash
 export CLASSIFIER_AI_KEY='your-personal-key'
-go run . -mode worker -classifier-id jev-default \
+go run . worker -mode live -classifier-id jev-default \
   -task-list __RECIPE_SLUG__-jev -confirm-live
 ```
 
 The starter does not need the key:
 
 ```bash
-go run . -mode live-demo -classifier-id jev-default \
-  -task-list __RECIPE_SLUG__-jev -workflow-id __RECIPE_SLUG__-jev-demo \
-  -confirm-live
+go run . start -mode live -task-list __RECIPE_SLUG__-jev \
+  -workflow-id __RECIPE_SLUG__-jev-demo
 ```
 
 Unset the key afterward. The key is never placed in flags, logs, or Workflow
@@ -107,7 +109,7 @@ The starter uses Cadence's `ALLOW_DUPLICATE` policy. A closed Run may be
 followed by another Run with the same stable Workflow ID. Cadence still rejects
 a duplicate start while a Run is open. Wait for the open Run to close or pass a
 different `-workflow-id`. The live examples use classifier-specific Workflow
-IDs to keep demonstrations separate.
+IDs to keep runs separate.
 
 ## Failure and retry behavior
 

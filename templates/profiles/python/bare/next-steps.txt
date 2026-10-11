@@ -4,6 +4,10 @@ Next steps (Python 3.12 or 3.13):
   source .venv/bin/activate
   python -m pip install -e .
   python -m unittest discover -s tests -v
+  python main.py worker --mode mock
+  python main.py start --mode mock
 
 Then complete recipes/__RECIPE_SLUG__/SPEC.md and replace the starter Workflow.
+Both mock and live modes are synthetic scaffold lanes until you add an external
+Activity.
 Run instructions: recipes/__RECIPE_SLUG__/README.md

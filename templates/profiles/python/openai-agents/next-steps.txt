@@ -4,9 +4,10 @@ Next steps (Python 3.12 or 3.13, offline by default):
   source .venv/bin/activate
   python -m pip install -e .
   python -m unittest discover -s tests -v
-  python main.py worker
-  python main.py start --text "Review this example request."
+  python main.py worker --mode mock
+  python main.py start --mode mock --text "Review this example request."
 
 Then complete recipes/__RECIPE_SLUG__/SPEC.md and replace the starter agent task.
-Live mode is optional and requires a supported root models.yaml selection plus
-an explicitly confirmed Worker. See recipes/__RECIPE_SLUG__/README.md.
+Live mode is optional. Its Worker requires explicit confirmation and owns the
+supported root models.yaml selection and provider configuration. See
+recipes/__RECIPE_SLUG__/README.md.

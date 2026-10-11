@@ -29,16 +29,26 @@ VALID = {
 IMPLEMENTED = {
     "go/bare",
     "go/systemone",
+    "java/bare",
+    "java/systemone",
     "python/bare",
+    "python/systemone",
     "python/google-adk",
+    "python/google-adk-systemone",
     "python/openai-agents",
+    "python/openai-agents-systemone",
 }
 PROFILE_CHOICES = {
     "go/bare": ("go", "none", "none"),
     "go/systemone": ("go", "systemone", "none"),
+    "java/bare": ("java", "none", "none"),
+    "java/systemone": ("java", "systemone", "none"),
     "python/bare": ("python", "none", "none"),
+    "python/systemone": ("python", "systemone", "none"),
     "python/google-adk": ("python", "none", "google-adk"),
+    "python/google-adk-systemone": ("python", "systemone", "google-adk"),
     "python/openai-agents": ("python", "none", "openai-agents"),
+    "python/openai-agents-systemone": ("python", "systemone", "openai-agents"),
 }
 BARE = ("--language", "python", "--classifier", "none", "--agent", "none")
 MARKER = re.compile(rb"__[A-Z][A-Z0-9_]*__")
@@ -110,7 +120,9 @@ class NewRecipeTests(unittest.TestCase):
         self.assertEqual({(l, c, a): p for l, c, a, p in rows}, VALID)
         self.assertIn(
             "Implemented in this checkout: "
-            "go/bare go/systemone python/bare python/google-adk python/openai-agents",
+            "go/bare go/systemone java/bare java/systemone python/bare python/systemone "
+            "python/google-adk python/google-adk-systemone python/openai-agents "
+            "python/openai-agents-systemone",
             result.stdout,
         )
 
@@ -165,8 +177,12 @@ class NewRecipeTests(unittest.TestCase):
             "  source .venv/bin/activate\n"
             "  python -m pip install -e .\n"
             "  python -m unittest discover -s tests -v\n"
+            "  python main.py worker --mode mock\n"
+            "  python main.py start --mode mock\n"
             "\n"
             "Then complete recipes/invoice-review/SPEC.md and replace the starter Workflow.\n"
+            "Both mock and live modes are synthetic scaffold lanes until you add an external\n"
+            "Activity.\n"
             "Run instructions: recipes/invoice-review/README.md\n"))
         recipe = self.root / "recipes/invoice-review"
         self.assertEqual([p.name for p in (self.root / "recipes").iterdir()], ["invoice-review"])
@@ -211,14 +227,25 @@ class NewRecipeTests(unittest.TestCase):
                     self.assertIsNone(MARKER.search(name.encode()), name)
                 language, classifier, agent = choices
                 spec = (recipe / "SPEC.md").read_text()
-                self.assertIn(f"**Cadence language:** {language.title()}", spec)
+                self.assertTrue(
+                    f"**Cadence language:** {language.title()}" in spec
+                    or f"- Language: {language.title()}" in spec
+                )
                 classifier_name = "SystemOne" if classifier == "systemone" else "none"
                 agent_name = {
                     "google-adk": "Google ADK",
                     "openai-agents": "OpenAI Agents",
                 }.get(agent, "none")
-                self.assertIn(f"**Classifier integration:** {classifier_name}", spec)
-                self.assertIn(f"**Agent integration:** {agent_name}", spec)
+                self.assertTrue(
+                    f"**Classifier integration:** {classifier_name}" in spec
+                    or f"- Classifier: {classifier_name}" in spec
+                )
+                self.assertTrue(
+                    f"**Agent integration:** {agent_name}" in spec
+                    or f"- Agent: {agent_name}" in spec
+                )
+                if language == "java":
+                    self.assertTrue(os.access(implementation / "gradlew", os.X_OK))
 
     def test_generated_markdown_links_resolve_inside_the_recipe(self):
         self.assertEqual(self.run_script("alpha", *BARE).returncode, 0)
@@ -279,12 +306,14 @@ class NewRecipeTests(unittest.TestCase):
     def test_local_artifacts_in_a_template_are_not_copied(self):
         implementation = self.root / "templates/profiles/python/bare/recipe/python/bare"
         for artifact in (".venv/bin/python", "__pycache__/main.cpython-313.pyc",
+                         ".gradle/cache.bin", "build/classes/Recipe.class",
                          "x.egg-info/PKG-INFO", ".DS_Store"):
             (implementation / artifact).parent.mkdir(parents=True, exist_ok=True)
             (implementation / artifact).write_bytes(b"\x00__ARTIFACT__")
         self.assertEqual(self.run_script("alpha", *BARE).returncode, 0)
         names = set(tree(self.root / "recipes/alpha"))
-        self.assertFalse({n for n in names if re.search(r"\.venv|__pycache__|egg-info|DS_Store", n)})
+        self.assertFalse({n for n in names if re.search(
+            r"\.venv|__pycache__|\.gradle|(^|/)build/|egg-info|DS_Store", n)})
 
     def test_unresolved_placeholder_aborts_without_partial_output(self):
         template = self.root / "templates/profiles/python/bare/recipe"

@@ -20,6 +20,10 @@ Both starter Activities are synthetic. They make no network calls and need no
 credentials. Replace them with real Activities and keep a synthetic
 implementation for offline tests.
 
+Both `mock` and `live` modes register these same synthetic Activities. The
+`live` mode is a scaffold lane for adding a provider-backed Activity later; the
+generated bare recipe makes no provider calls in either mode.
+
 ## Requirements
 
 - Go 1.23.
@@ -40,18 +44,26 @@ go mod download
 Start the Worker in terminal 1:
 
 ```bash
-go run . -mode worker
+go run . worker -mode mock
 ```
 
 Start the example Workflow in terminal 2:
 
 ```bash
-go run . -mode start -text "Investigate this example request."
+go run . start -mode mock -text "Investigate this example request."
 ```
 
 Both commands default to domain `cadence-ai-samples`, task list
 `__RECIPE_SLUG__`, and Workflow ID `__RECIPE_SLUG__-demo`. Pass the same
-`-domain` and `-task-list` values to both commands when you change them.
+`-domain` and `-task-list` values to both commands when you change them. Both
+actions require an explicit `-mode mock` or `-mode live`.
+
+To exercise the scaffold lane without adding a provider:
+
+```bash
+go run . worker -mode live
+go run . start -mode live
+```
 
 ## Workflow ID reuse
 

@@ -6,8 +6,9 @@ Next steps (Python 3.12 or 3.13):
   python -m unittest discover -s tests -v
 
 Run the offline mock:
-  python main.py worker
-  python main.py start --prompt "Summarize the next step for this request."
+  python main.py worker --mode mock
+  python main.py start --mode mock --prompt "Summarize the next step for this request."
 
 Then customize recipes/__RECIPE_SLUG__/SPEC.md and the starter agent behavior.
-Live setup and supported models: recipes/__RECIPE_SLUG__/README.md
+Live Worker setup, required confirmation, and supported models:
+recipes/__RECIPE_SLUG__/README.md

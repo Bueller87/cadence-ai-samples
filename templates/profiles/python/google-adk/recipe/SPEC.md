@@ -10,7 +10,7 @@ with their approved business scenario.
 ## Goals
 
 - Run a one-shot prompt through durable Cadence orchestration.
-- Default to a deterministic offline Activity with no catalog or credentials.
+- Provide a deterministic offline Activity with no catalog or credentials.
 - Support only validated `models.yaml` selections in live mode.
 - Keep provider clients, credentials, and model calls at Activity boundaries.
 - Remain copyable without imports from another recipe.
@@ -33,10 +33,13 @@ Generated from the `python/google-adk` profile defined by the
 - **Implementation directory:** `python/google-adk`
 - **Mock behavior:** `__RECIPE_SLUG__.mock-agent` returns a deterministic response
   and performs no external work.
-- **Live behavior:** Google ADK dispatches the selected model through
-  `GoogleADKActivities.generate_content_async`.
-- **Runtime catalog use:** live Worker and start commands read only `models.yaml`.
-- **Live confirmation:** a live Worker requires `--mode live --confirm-live`.
+- **Live behavior:** the Worker-configured
+  `__RECIPE_SLUG__.google-adk-agent` Activity runs Google ADK with the selected
+  model.
+- **Runtime catalog use:** only the live Worker reads `models.yaml`; start is
+  configuration-free.
+- **Live confirmation:** a live Worker requires `--confirm-live` before reading
+  catalogs, credentials, or constructing provider clients.
 - **Workflow ID reuse:** the stable ID `__RECIPE_SLUG__-google-adk-demo` uses
   `ALLOW_DUPLICATE`; a closed Run may be followed by a new Run, while a duplicate
   start during an open Run is rejected.
@@ -56,9 +59,9 @@ implementation.
 ## Workflow architecture
 
 `__RECIPE_CLASS__Workflow` validates one `AgentInput`. In mock mode it executes
-the recipe-scoped mock Activity. In live mode, deterministic Google ADK runner
-logic schedules the provider request as a Cadence model Activity. The Workflow
-returns one `AgentResult` and closes.
+the recipe-scoped mock Activity. In live mode it schedules one stable Google ADK
+agent Activity whose Worker implementation owns model configuration and provider
+calls. The Workflow returns one `AgentResult` and closes.
 
 ## Agent responsibility
 
@@ -69,8 +72,8 @@ responsibility that ordinary deterministic code cannot perform adequately.
 ## Activity boundaries
 
 - `__RECIPE_SLUG__.mock-agent`: deterministic offline stand-in.
-- `GoogleADKActivities.generate_content_async`: live provider request performed
-  by the Worker with a Worker-local client and credential.
+- `__RECIPE_SLUG__.google-adk-agent`: live Google ADK execution and provider
+  request, performed with Worker-local catalog selection, client, and credential.
 
 Workflow code does not make network calls, read environment variables, or read
 catalog files. Retried provider calls may incur additional usage.
@@ -82,9 +85,7 @@ Workflow input:
 ```json
 {
   "prompt": "non-empty string",
-  "mode": "mock or live",
-  "model_name": "catalog model name, live only",
-  "model_provider": "catalog provider, live only"
+  "mode": "mock or live"
 }
 ```
 
@@ -97,7 +98,8 @@ Workflow output:
 }
 ```
 
-Endpoints, credentials, and model IDs are not stored in Workflow history.
+Model IDs, provider names, endpoints, and credentials are not stored in
+Workflow history.
 
 ## Configuration
 
@@ -105,8 +107,8 @@ Endpoints, credentials, and model IDs are not stored in Workflow history.
 - Task list: `__RECIPE_SLUG__-google-adk`.
 - Workflow ID: `__RECIPE_SLUG__-google-adk-demo`.
 - Target: `localhost:7833`.
-- Model ID: `gemini-flash-lite`.
-- Catalog directory: repository root, override with `--catalog-dir`.
+- Worker model ID: `gemini-flash-lite`.
+- Worker catalog directory: repository root, override with `--catalog-dir`.
 - Credential: `MODEL_AI_KEY`, required by Google and OpenAI, unused by Ollama.
 
 Supported ID/provider pairs are `gemini-flash-lite/google`,
@@ -131,13 +133,15 @@ proprietary material.
 
 ## Acceptance criteria
 
-- Mock Worker and start commands require no catalog, credential, or provider.
+- Mock Worker and both start modes require no catalog, credential, or provider
+  configuration.
 - All current supported model selections validate offline.
 - Safe catalog endpoint changes reach the Worker-local provider transport
   without live calls.
 - Unsupported IDs, provider mismatches, unsafe endpoints, and missing required
-  credentials fail before polling or Workflow start.
-- Live Worker startup requires explicit confirmation.
+  credentials fail before live Worker polling.
+- Live Worker startup fails before catalog access unless `--confirm-live` is
+  present.
 - Workflow, Activities, command parsing, retries, duplicate starts, and failure
   behavior have focused offline tests.
 - Generated files have no unresolved placeholders beyond generator-supported

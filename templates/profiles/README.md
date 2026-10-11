@@ -24,12 +24,43 @@ Implemented profiles:
   `recipes/<slug>/go/bare/`.
 - `go/systemone`: Go with a SystemOne classifier and no agent. Generates
   `recipes/<slug>/go/systemone/`.
+- `java/bare`: Java, no classifier, no agent. Generates
+  `recipes/<slug>/java/bare/`.
+- `java/systemone`: Java with a SystemOne classifier and no agent. Generates
+  `recipes/<slug>/java/systemone/`.
 - `python/bare`: Python, no classifier, no agent. Generates
   `recipes/<slug>/python/bare/`.
+- `python/systemone`: Python with a SystemOne classifier and no agent. Generates
+  `recipes/<slug>/python/systemone/`.
 - `python/google-adk`: Python with Google ADK and no classifier. Generates
   `recipes/<slug>/python/google-adk/`.
+- `python/google-adk-systemone`: Python with Google ADK and SystemOne. Generates
+  `recipes/<slug>/python/google-adk-systemone/`.
 - `python/openai-agents`: Python with OpenAI Agents and no classifier. Generates
   `recipes/<slug>/python/openai-agents/`.
+- `python/openai-agents-systemone`: Python with OpenAI Agents and SystemOne.
+  Generates `recipes/<slug>/python/openai-agents-systemone/`.
+
+## Generic command contract
+
+Every profile exposes exactly `worker` and `start`, each with an explicit
+`mock` or `live` mode. The language-specific shapes are:
+
+```text
+python main.py worker --mode mock
+go run . worker -mode mock
+./gradlew run --args='worker --mode mock'
+```
+
+Replace `worker` with `start` for the starter command. Inference selections,
+catalog paths, credentials, and live-confirmation flags belong only to live
+Workers. Start commands contain business input and Cadence routing values, never
+model, classifier, catalog, credential, or confirmation configuration.
+
+Generic profiles do not add scenario actions or modes such as `demo`,
+`live-demo`, `batch`, acknowledgment, or benchmark. Specialized recipes may
+define those under their own specifications; they do not change this profile
+contract.
 
 ## Placeholders
 
@@ -43,8 +74,8 @@ The generator replaces these markers in every file under `recipe/` and in
 | `__RECIPE_CLASS__` | `InvoiceReview` |
 
 Any other `__UPPER_CASE__` marker left in a file or path stops generation before
-anything is written. Local artifacts such as `.venv`, `__pycache__`, and
-`*.egg-info` are never copied.
+anything is written. Local artifacts such as `.venv`, `.gradle`, `build`,
+`__pycache__`, and `*.egg-info` are never copied.
 
 ## Adding a profile
 

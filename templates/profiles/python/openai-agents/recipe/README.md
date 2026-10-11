@@ -6,22 +6,21 @@ Describe the business problem that needs durable agent orchestration.
 
 ## Solution
 
-This starter accepts a text request and returns one concise answer. Mock mode is
-the default and runs entirely offline. Live mode uses OpenAI Agents for
-deterministic agent orchestration while every model request crosses a Cadence
-Activity boundary.
+This starter accepts a text request and returns one concise answer. Mock mode
+runs entirely offline. Live mode runs OpenAI Agents inside one Worker-configured
+Cadence Activity.
 
 ## Architecture
 
 This recipe uses the `python/openai-agents` profile: Python, no classifier, and
 OpenAI Agents.
 
-`request → Workflow → mock Activity or OpenAI Agents → model Activity → result`
+`request → Workflow → mock Activity or Worker-configured agent Activity → result`
 
-The Workflow contains no provider client, endpoint, or credential. Live Worker
-startup reads the selected entry from the repository-root `models.yaml` and
-constructs the provider client. The Workflow history carries only the provider
-name and model name needed to schedule the model Activity.
+The Workflow contains no provider client, endpoint, credential, or model
+selection. Live Worker startup reads the selected entry from the repository-root
+`models.yaml` and constructs the provider client. Workflow history carries only
+the request text and mode.
 
 ## Requirements
 
@@ -48,13 +47,13 @@ python -m pip install -e .
 Start the mock Worker in terminal 1:
 
 ```bash
-python main.py worker
+python main.py worker --mode mock
 ```
 
 Start the mock Workflow in terminal 2:
 
 ```bash
-python main.py start --text "Review this example request."
+python main.py start --mode mock --text "Review this example request."
 ```
 
 Mock mode does not read `models.yaml`, inspect credentials, or make network
@@ -80,22 +79,25 @@ base unchanged. The Workflow receives only the provider and model name needed
 for deterministic orchestration.
 
 Live Workers can contact a provider and may incur cost. Export the credential
-when needed, then pass the explicit confirmation:
+when needed, explicitly confirm live use, then select the Worker model:
 
 ```bash
 export MODEL_AI_KEY="replace-with-your-key"
-python main.py --model-id gemini-flash-lite worker --mode live --confirm-live
+python main.py worker --mode live --confirm-live \
+  --model-id gemini-flash-lite
 ```
 
 Start a matching live Workflow in another terminal:
 
 ```bash
-python main.py --model-id gemini-flash-lite start --mode live \
+python main.py start --mode live \
   --text "Review this request and suggest a next step."
 ```
 
-For local Ollama, select `llama3.2-local` and omit `MODEL_AI_KEY`. Worker and
-start commands must use the same `--model-id`, `--domain`, and `--task-list`.
+For local Ollama, select `llama3.2-local` on the Worker and omit `MODEL_AI_KEY`.
+The start command intentionally has no catalog, model, endpoint, or credential
+options. Worker and start commands must use the same `--domain` and
+`--task-list`.
 
 ## Workflow ID reuse
 
@@ -122,7 +124,8 @@ python -m unittest discover -s tests -v
 
 The suite is fully offline. It tests Workflow and Activity behavior, model
 catalog validation, all supported live selections without provider calls,
-command parsing, explicit live confirmation, Workflow ID reuse, and failures.
+command parsing, Worker-local live configuration, Workflow ID reuse, and
+failures.
 
 ## Copying this recipe
 
