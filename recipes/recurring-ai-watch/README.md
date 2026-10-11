@@ -118,13 +118,18 @@ did not test Worker restart replay.
 
 `inference.py` translates the logical catalog model only at the framework boundary.
 For OpenAI Agents, it derives Google's `/v1beta/openai/` and Ollama's `/v1/`
-Chat Completions URLs from their native catalog endpoints. Native Google requires
-the official endpoint, and Ollama requires a loopback endpoint. The OpenAI endpoint
-is used as supplied, including its `/v1` path. Ollama needs no `MODEL_AI_KEY`;
+Chat Completions URLs from their native catalog endpoints. Google ADK passes the
+configured Google base to native Gemini. Remote credential-bearing providers
+require HTTPS, Ollama requires a loopback endpoint, and the OpenAI endpoint is
+used as supplied, including its `/v1` path. Ollama needs no `MODEL_AI_KEY`;
 `CLASSIFIER_AI_KEY` is still required for Jev. Start the local Ollama server and
 make `llama3.2:latest` available before starting either Ollama Worker. The
 `laya-local` classifier needs no key. See [Local AI services](../../README.md#local-ai-services)
 for Laya and Ollama installation and warm-up commands.
+
+Mock Workers and starts do not read catalogs or credentials. Live catalog
+selection and credential lookup happen only when starting a live Worker or
+validating a live start.
 
 The selected provider and model name travel with the Workflow across
 Continue-As-New. Replay does not reread YAML. Endpoints and credential aliases

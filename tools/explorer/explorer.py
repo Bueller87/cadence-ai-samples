@@ -365,7 +365,7 @@ class Explorer:
         if classifier and classifier['provider']=='laya':
             credentials = [c for c in credentials if c!='CLASSIFIER_AI_KEY']
         prefix = 'cd '+shlex.quote(str(path))+' && '
-        if not cli['generic'] and cli['kind'] != 'java':
+        if cli['generic'] or cli['kind'] != 'java':
             for command in [worker]+([starter] if starter else [])+controls:
                 self.validate_command(cli,command)
         return dict(setup='\n'.join(setup),worker=prefix+shlex.join(worker),
@@ -646,12 +646,22 @@ class Explorer:
 
     def validate_command(self,cli,command):
         """Every generated argument must still exist in the current CLI source."""
-        args=command[2:] if cli['kind']=='python' else command[3:]
+        if cli['kind']=='python':
+            args=command[2:]
+        elif cli['kind']=='go':
+            args=command[3:]
+        else:
+            if len(command)!=3 or not command[2].startswith('--args='):
+                raise Unsupported('The generated Gradle command no longer matches the Java adapter.')
+            args=shlex.split(command[2].removeprefix('--args='))
         flags=cli['root']
+        if cli['generic'] and cli['kind'] in {'go','java'}:
+            if not args or args.pop(0) not in cli['actions']:
+                raise Unsupported('The generated action no longer matches the generic CLI.')
         while args:
             flag=args.pop(0)
             if cli['kind']=='python' and flag in cli['commands']:
-                flags=cli['commands'][flag]
+                flags={**cli['root'],**cli['commands'][flag]}
                 continue
             if flag not in flags:
                 raise Unsupported(f'The CLI no longer accepts {flag}. Command generation requires an adapter update.')

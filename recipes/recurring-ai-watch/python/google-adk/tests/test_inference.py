@@ -4,7 +4,7 @@ import os
 import json
 import traceback
 import unittest
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -25,7 +25,7 @@ from google.genai import types
 from google.genai.errors import ClientError
 
 from config import CatalogError, load_selection
-from inference import ADKActivities, runtime_model
+from inference import ADKActivities, build_model_activities, runtime_model
 from live import (
     LiveAuthenticationError, LiveConfigurationError, LiveSchemaError,
     live_activities, validate_live,
@@ -82,6 +82,44 @@ class InferenceTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(LLMRegistry.resolve(actual).__name__, cls)
         with self.assertRaises(LiveConfigurationError):
             runtime_model("anthropic", "model")
+
+    async def test_changed_google_catalog_endpoint_reaches_gemini_transport(self):
+        changed_endpoint = "https://google-gateway.example/v1beta"
+        selection = selected("gemini-flash-lite")
+        selection = replace(
+            selection,
+            model=replace(selection.model, endpoint=changed_endpoint),
+        )
+        activities = build_model_activities(
+            selection,
+            {"MODEL_AI_KEY": "test-model"},
+        )
+        captured = {}
+
+        class FakeGemini:
+            def __init__(self, *, model, base_url):
+                captured.update(model=model, base_url=base_url)
+
+            async def generate_content_async(self, *, llm_request, stream):
+                self.request = llm_request
+                self.stream = stream
+                yield LlmResponse(
+                    content=types.Content(
+                        role="model",
+                        parts=[types.Part(text="Review retries.")],
+                    )
+                )
+
+        with patch("inference.Gemini", FakeGemini):
+            responses = await activities.generate_content_async(
+                selection.model.model,
+                LlmRequest(model=selection.model.model),
+            )
+        self.assertEqual(captured, {
+            "model": selection.model.model,
+            "base_url": changed_endpoint,
+        })
+        self.assertEqual(responses[0].content.parts[0].text, "Review retries.")
 
     def test_supported_classifiers_and_unknown_ids(self):
         validate_live(selected("gemini-flash-lite", "jev-default"))

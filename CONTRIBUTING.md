@@ -56,3 +56,11 @@ When implementing a recipe:
 - Avoid unnecessary abstractions, shared integration layers, and premature refactoring.
 
 Modularization is optional. A workflow, its Activities, and related business logic may remain together in one file when that is the clearest presentation.
+
+When changing a generated profile or its contract, run the generator and
+Explorer suites documented in
+[`templates/profiles/README.md`](templates/profiles/README.md), plus the
+profile's generated offline tests. Keep its `SPEC.md` fields, README and setup
+commands, catalog names, credential environment-variable names, and actual CLI
+in sync. Live inference changes also need an offline safe-endpoint mutation test
+that reaches the selected transport without making a provider call.

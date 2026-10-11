@@ -16,9 +16,6 @@ from config import CatalogSelection
 from workflow import CLASSIFY_ACTIVITY, ClassificationDecision, ReleaseNote
 
 
-GOOGLE_ENDPOINT = "https://generativelanguage.googleapis.com"
-
-
 class LiveAuthenticationError(Exception):
     pass
 
@@ -42,25 +39,34 @@ def validate_live(selection: CatalogSelection) -> None:
             "supported classifiers are jev-default and laya-local; "
             "other classifiers are catalog candidates"
         )
-    if selection.classifier.id == "laya-local":
-        endpoint = urlsplit(selection.classifier.endpoint)
-        if (
-            endpoint.scheme not in {"http", "https"}
-            or endpoint.hostname not in {"localhost", "127.0.0.1", "::1"}
-            or endpoint.username
-            or endpoint.password
-            or endpoint.query
-            or endpoint.fragment
-        ):
-            raise LiveConfigurationError("laya-local requires a loopback HTTP endpoint")
+    classifier_endpoint = urlsplit(selection.classifier.endpoint)
+    if (
+        classifier_endpoint.scheme not in {"http", "https"}
+        or not classifier_endpoint.hostname
+        or classifier_endpoint.username
+        or classifier_endpoint.password
+        or classifier_endpoint.query
+        or classifier_endpoint.fragment
+    ):
+        raise LiveConfigurationError(
+            "classifier endpoint must be an HTTP URL without credentials, query, or fragment"
+        )
+    if (selection.classifier.provider == "typesafe"
+            and classifier_endpoint.scheme != "https"):
+        raise LiveConfigurationError(
+            "remote credential-bearing classifiers require an HTTPS endpoint"
+        )
+    if (selection.classifier.provider == "laya"
+            and classifier_endpoint.hostname not in {"localhost", "127.0.0.1", "::1"}):
+        raise LiveConfigurationError("laya-local requires a loopback HTTP endpoint")
     if selection.model.provider not in {"google", "ollama", "openai"}:
         raise LiveConfigurationError("unsupported model provider")
     endpoint = urlsplit(selection.model.endpoint)
     if (endpoint.scheme not in {"http", "https"} or not endpoint.hostname
             or endpoint.username or endpoint.password or endpoint.query or endpoint.fragment):
         raise LiveConfigurationError("model endpoint must be an HTTP URL without credentials, query, or fragment")
-    if selection.model.provider == "google" and selection.model.endpoint.rstrip("/") != GOOGLE_ENDPOINT:
-        raise LiveConfigurationError("live mode requires Google's official endpoint")
+    if selection.model.provider in {"google", "openai"} and endpoint.scheme != "https":
+        raise LiveConfigurationError("remote credential-bearing models require an HTTPS endpoint")
     if selection.model.provider == "ollama" and endpoint.hostname not in {"localhost", "127.0.0.1", "::1"}:
         raise LiveConfigurationError("Ollama requires a loopback endpoint")
 

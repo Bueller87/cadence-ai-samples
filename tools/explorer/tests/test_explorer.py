@@ -356,6 +356,31 @@ class ExplorerTests(unittest.TestCase):
                     confirm='--confirm-live' if language!='go' else '-confirm-live'
                     self.assertEqual(confirm in result['worker'],
                                      mode=='live' and inference)
+                    setup=result['setup'].splitlines()
+                    expected_setup={
+                        'go':['go mod download'],
+                        'java':['./gradlew test'],
+                        'python':['python3 -m venv .venv',
+                                  'source .venv/bin/activate',
+                                  'python -m pip install -e .'],
+                    }[language]
+                    self.assertEqual(setup[1:],expected_setup)
+
+                if classifier=='systemone' or agent!='none':
+                    request=dict(sample=slug,implementation=implementation,mode='live')
+                    expected_credentials=[]
+                    if classifier=='systemone':
+                        request['classifier']='jev-default'
+                        expected_credentials.append('CLASSIFIER_AI_KEY')
+                    if agent!='none':
+                        request['model']='gemini-flash-lite'
+                        expected_credentials.append('MODEL_AI_KEY')
+                    live_result=self.explorer.resolve(request)
+                    self.assertEqual(
+                        live_result['credentials'],
+                        sorted(expected_credentials),
+                        f'{profile}: credential-name drift',
+                    )
 
         java_systemone=self.explorer.resolve(dict(
             sample='generated-java-systemone',

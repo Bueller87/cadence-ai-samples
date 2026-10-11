@@ -115,38 +115,36 @@ class MainTests(unittest.TestCase):
         show_status.assert_awaited_once()
         self.assertEqual(send_signal.await_count, 2)
 
-    def test_worker_and_start_load_catalogs_and_mock_needs_no_credentials(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            directory = Path(temporary_directory)
-            for filename, contents in CATALOGS.items():
-                (directory / filename).write_text(contents, encoding="utf-8")
-            with (
-                patch.dict(os.environ, {}, clear=True),
-                patch("main.load_selection", wraps=load_selection) as load,
-                patch("main.run_worker", new=AsyncMock()) as worker,
-                patch("main.start", new=AsyncMock()) as start,
-            ):
-                asyncio.run(main(["--catalog-dir", str(directory), "worker"]))
-                asyncio.run(main(["--catalog-dir", str(directory), "start"]))
-            self.assertEqual(load.call_count, 2)
-            worker.assert_awaited_once()
-            start.assert_awaited_once()
-            selection = worker.call_args.args[1]
-            with (
-                patch.dict(os.environ, {}, clear=True),
-                patch("main.Worker", return_value=MagicMock()),
-                patch("main.client"),
-                patch("main.asyncio.Event") as event,
-                patch("live.live_activities", side_effect=AssertionError("mock selected AI")),
-            ):
-                event.return_value.wait = AsyncMock()
-                asyncio.run(run_worker(parser().parse_args(["worker"]), selection))
+    def test_mock_worker_and_start_read_neither_catalogs_nor_credentials(self) -> None:
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch("main.load_selection", side_effect=AssertionError("mock read catalogs")) as load,
+            patch("main.run_worker", new=AsyncMock()) as worker,
+            patch("main.start", new=AsyncMock()) as start,
+        ):
+            asyncio.run(main(["--catalog-dir", "/missing", "worker"]))
+            asyncio.run(main(["--catalog-dir", "/missing", "start"]))
+        load.assert_not_called()
+        self.assertIsNone(worker.call_args.args[1])
+        self.assertIsNone(start.call_args.args[1])
+
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch("main.Worker", return_value=MagicMock()),
+            patch("main.client"),
+            patch("main.asyncio.Event") as event,
+            patch("live.live_activities", side_effect=AssertionError("mock selected AI")),
+        ):
+            event.return_value.wait = AsyncMock()
+            asyncio.run(run_worker(parser().parse_args(["worker"])))
 
     def test_removed_classifier_is_unknown_before_worker_or_start(self) -> None:
         for classifier in ("von-local", "reflex-local", "kev-local"):
             for command in ("worker", "start"):
                 with redirect_stderr(StringIO()) as errors, self.assertRaises(SystemExit):
-                    asyncio.run(main(["--classifier-id", classifier, command]))
+                    asyncio.run(main([
+                        "--classifier-id", classifier, command, "--mode", "live",
+                    ]))
                 self.assertIn("unknown classifiers ID", errors.getvalue())
 
     def test_laya_classifier_is_accepted_for_worker_and_start(self) -> None:
@@ -154,8 +152,12 @@ class MainTests(unittest.TestCase):
             patch("main.run_worker", new=AsyncMock()) as worker,
             patch("main.start", new=AsyncMock()) as start,
         ):
-            asyncio.run(main(["--classifier-id", "laya-local", "worker"]))
-            asyncio.run(main(["--classifier-id", "laya-local", "start"]))
+            asyncio.run(main([
+                "--classifier-id", "laya-local", "worker", "--mode", "live",
+            ]))
+            asyncio.run(main([
+                "--classifier-id", "laya-local", "start", "--mode", "live",
+            ]))
         worker.assert_awaited_once()
         start.assert_awaited_once()
 

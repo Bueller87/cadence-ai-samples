@@ -62,11 +62,17 @@ class LiveConfigurationTests(unittest.TestCase):
         self.assertFalse(retryable(401))
         self.assertFalse(retryable(422))
 
-    def test_requires_official_google_endpoint(self) -> None:
-        validate_live(selection())
+    def test_google_accepts_safe_catalog_endpoint_changes(self) -> None:
+        validate_live(selection(model_endpoint="https://gateway.example/v1"))
 
-        with self.assertRaisesRegex(LiveConfigurationError, "official endpoint"):
-            validate_live(selection(model_endpoint="https://gateway.example/v1"))
+        with self.assertRaisesRegex(LiveConfigurationError, "HTTPS"):
+            validate_live(selection(model_endpoint="http://gateway.example/v1"))
+
+    def test_remote_classifier_requires_https(self) -> None:
+        with self.assertRaisesRegex(LiveConfigurationError, "HTTPS"):
+            validate_live(selection(
+                classifier_endpoint="http://api.typesafe.ai/v1/systemone",
+            ))
 
     def test_jev_worker_requires_both_application_credentials(self) -> None:
         with self.assertRaisesRegex(LiveConfigurationError, "MODEL_AI_KEY"):
