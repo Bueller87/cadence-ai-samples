@@ -97,10 +97,17 @@ AI Activities in Recurring AI Watch have a 30-second execution budget. A cold La
 
 Contributions are welcome. Start with a concrete real-world problem, write an
 implementation specification, and keep the resulting recipe focused and
-portable. See [CONTRIBUTING.md](CONTRIBUTING.md) and the reusable files in
-[templates/recipe](templates/recipe/).
+portable. See [CONTRIBUTING.md](CONTRIBUTING.md) and the implementation
+profiles in [templates/profiles](templates/profiles/).
 
-Create a Python recipe starter with `./scripts/new-recipe.sh your-recipe-name`.
+Create a recipe from an implementation profile. All three choices are required:
+
+```bash
+./scripts/new-recipe.sh your-recipe-name --language python --classifier none --agent none
+```
+
+Run `./scripts/new-recipe.sh --help` to list valid combinations and the profiles
+implemented in this checkout.
 
 Coding agents start with [AGENTS.md](AGENTS.md) and the
 [repository context map](agent-context/README.md). These files describe how work

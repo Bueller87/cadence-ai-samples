@@ -33,9 +33,10 @@ No chat transcript, agent memory, `STATUS.md`, or `TODO.md` is authoritative.
 - [models.yaml](../models.yaml) and [classifiers.yaml](../classifiers.yaml) are
   repository-wide runtime catalogs; an entry is not proof that every recipe
   implements it.
-- [templates/recipe/](../templates/recipe/) and
-  [scripts/new-recipe.sh](../scripts/new-recipe.sh) provide the current recipe
-  scaffold.
+- [templates/profiles/](../templates/profiles/) and
+  [scripts/new-recipe.sh](../scripts/new-recipe.sh) generate recipes from
+  explicit language, classifier, and agent choices. Each profile is a complete,
+  independent template tree.
 - [tools/explorer/](../tools/explorer/) is a loopback-only companion that reads
   this checkout, checks local dependencies, previews commands, and exposes only
   bounded explicit actions.
@@ -46,8 +47,8 @@ No chat transcript, agent memory, `STATUS.md`, or `TODO.md` is authoritative.
 
 - [StreamWave ticket routing](../recipes/ticket-routing/SPEC.md)
 - [Local Samples Explorer](../tools/explorer/SPEC-Explorer.md)
-- [Future recipe template system](../templates/SPEC-Recipe-Templates.md)
-- [Generated recipe specification template](../templates/recipe/SPEC.md)
+- [Recipe template system](../templates/SPEC-Recipe-Templates.md)
+- [Generated `python/bare` recipe specification template](../templates/profiles/python/bare/recipe/SPEC.md)
 
 Keep specifications colocated. Do not move them into this directory merely to
 centralize documentation.
@@ -59,7 +60,11 @@ centralize documentation.
 - [Ticket routing README](../recipes/ticket-routing/README.md)
 - [Recurring AI Watch README](../recipes/recurring-ai-watch/README.md)
 - [Explorer README](../tools/explorer/README.md)
-- [Recipe template README](../templates/recipe/README.md)
+- [Template profiles README](../templates/profiles/README.md)
+
+## Architecture decisions
+
+- [ADR 0001: Explicit recipe template profiles](decisions/0001-recipe-template-profiles.md)
 
 ## Evidence, not requirements
 

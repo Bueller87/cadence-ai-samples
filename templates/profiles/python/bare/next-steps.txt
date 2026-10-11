@@ -1,0 +1,9 @@
+Next steps (Python 3.12 or 3.13):
+  cd recipes/__RECIPE_SLUG__/python/bare
+  python3 -m venv .venv
+  source .venv/bin/activate
+  python -m pip install -e .
+  python -m unittest discover -s tests -v
+
+Then complete recipes/__RECIPE_SLUG__/SPEC.md and replace the starter Workflow.
+Run instructions: recipes/__RECIPE_SLUG__/README.md

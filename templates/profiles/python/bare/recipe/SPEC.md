@@ -20,22 +20,33 @@
 
 ## Repository implementation profile
 
-Record the composable choices defined by the
-[recipe template system specification](../../templates/SPEC-Recipe-Templates.md).
+Generated from the `python/bare` profile defined by the
+[recipe template system specification](https://github.com/cadence-workflow/cadence-ai-samples/blob/main/templates/SPEC-Recipe-Templates.md).
 
-- **Cadence language:** [Go, Java, Python, or another language with an implemented profile]
-- **Classifier integration:** [none or SystemOne]
-- **Agent integration:** [none, Google ADK, or OpenAI Agents]
-- **Mock and live behavior:** [Supported paths and confirmation boundaries]
-- **Runtime catalog use:** [Model/classifier catalogs used, or not applicable]
-- **Profile deviations:** [Intentional differences from the standard profile
-  contract and why they are needed]
+- **Cadence language:** Python
+- **Classifier integration:** none
+- **Agent integration:** none
+- **Implementation directory:** `python/bare`
+- **Mock and live behavior:** The starter Activities are synthetic and make no
+  external calls. There is no live mode. [If you add an external Activity, keep
+  a synthetic implementation for offline tests and describe any live
+  confirmation boundary here.]
+- **Runtime catalog use:** Not applicable. [Update if the recipe adds model or
+  classifier Activities that read `models.yaml` or `classifiers.yaml`.]
+- **Workflow ID reuse:** `start` uses the stable demo Workflow ID
+  `__RECIPE_SLUG__-demo` with `ALLOW_DUPLICATE`. A new Run may start after the
+  previous Run closes; a start while a Run is open is rejected and reported.
+- **Profile deviations:** None. [Record intentional differences from the
+  profile contract and why they are needed.]
 
 ## Language and dependencies
 
-- **Language:** [Selected implemented language profile, with any minimal hybrid noted]
-- **Runtime version:** [Version]
-- **Dependencies:** [Required packages and why each is needed]
+- **Language:** Python
+- **Runtime version:** Python 3.12 or 3.13
+- **Dependencies:** `cadence-python-client` 0.4.1 (published release) for the
+  Worker, client, and offline test environment; `pydantic` for the data
+  converter.
+  [Add recipe-specific dependencies and why each is needed.]
 
 ## Workflow architecture
 
@@ -43,11 +54,11 @@ Record the composable choices defined by the
 
 ## AI model or agent responsibilities
 
-[Describe which tasks, if any, require a specialized decision model, generative model, or agent. Say what ordinary code cannot decide reliably. Do not assume a particular provider or framework.]
+[Describe which tasks, if any, require a specialized decision model, generative model, or agent. Say what ordinary code cannot decide reliably. The bare profile prescribes no framework; write "None" if the recipe needs no AI.]
 
 ## Activity boundaries
 
-[List Activities and their responsibilities. Identify external calls and side effects, along with any idempotency requirements. All nondeterministic operations, including AI model calls, must run in Activities, never in Workflow code.]
+[List Activities and their responsibilities. Identify external calls and side effects, along with any idempotency requirements. All nondeterministic operations, including AI model calls, must run in Activities, never in workflow code.]
 
 ## Input and output schemas
 

@@ -1,8 +1,11 @@
 # Recipe template system specification
 
-Status: future design for prioritization. This document records the intended
-template model; it does not authorize implementation, sample ports, or Explorer
-generalization.
+Status: approved. Phase 1
+([Issue #9](https://github.com/cadence-workflow/cadence-ai-samples/issues/9))
+delivers the profile generator and the `python/bare` profile. Each remaining
+profile, sample port, or Explorer change still requires its own approved Issue.
+The template architecture is recorded in
+[ADR 0001](../agent-context/decisions/0001-recipe-template-profiles.md).
 
 ## Purpose
 
@@ -74,18 +77,18 @@ independent: a Python recipe may use SystemOne before invoking an agent.
 | Python | none | none | `python/bare` |
 | Python | SystemOne | none | `python/systemone` |
 | Python | none | Google ADK | `python/google-adk` |
-| Python | SystemOne | Google ADK | `python/google-adk` with SystemOne |
+| Python | SystemOne | Google ADK | `python/google-adk-systemone` |
 | Python | none | OpenAI Agents | `python/openai-agents` |
-| Python | SystemOne | OpenAI Agents | `python/openai-agents` with SystemOne |
+| Python | SystemOne | OpenAI Agents | `python/openai-agents-systemone` |
 
 The generator must reject an agent integration for Go, Java, or another language
 without a supported Cadence agent integration. It must also reject unknown
 languages or integrations rather than generating an approximate scaffold.
 
-## Conceptual generator interface
+## Generator interface
 
-The future generator should accept orthogonal choices rather than one growing
-list of combined template names. A representative interface is:
+The generator accepts orthogonal choices rather than one growing list of
+combined template names:
 
 ```text
 ./scripts/new-recipe.sh <recipe-slug> \
@@ -94,9 +97,24 @@ list of combined template names. A representative interface is:
   --agent none|google-adk|openai-agents
 ```
 
-The exact argument order, defaults, compatibility behavior, and help text belong
-to implementation planning. Generation must remain deterministic and must fail
-before writing a partial recipe when a combination is invalid.
+- All three options are required. There is no default profile, and slug-only
+  usage fails with help that lists the valid combinations.
+- Options may appear in any order as `--name value` or `--name=value`.
+- One matrix in the generator defines the valid combinations. Help output and
+  validation both read it.
+- A valid profile that has no template in the checkout fails explicitly and
+  names the implemented profiles.
+- The generator writes nothing for missing, repeated, or unknown options;
+  unknown values; combinations outside the matrix; unimplemented profiles;
+  invalid slugs; or an existing destination, including a file or symlink.
+- Generation is deterministic. The recipe is assembled in a hidden staging
+  directory under `recipes/` and renamed into place only after every
+  `__UPPER_CASE__` placeholder in file contents and paths is resolved.
+- On success the generator prints `created recipes/<slug> from profile
+  <profile>` followed by the profile's next steps.
+
+Profile templates live under `templates/profiles/`; see its
+[README](profiles/README.md) for the source layout and how to add a profile.
 
 ## Generated recipe contract
 
@@ -149,15 +167,15 @@ commands for them.
 
 ### First scaffold families
 
-Remaining implementation is tracked in
-[Issue #9](https://github.com/cadence-workflow/cadence-ai-samples/issues/9).
-Prioritize these families when that work is approved:
+[Issue #9](https://github.com/cadence-workflow/cadence-ai-samples/issues/9)
+delivered the generator and `python/bare`, which generates its implementation
+in `recipes/<slug>/python/bare/`. The remaining first families are tracked in
+[Issue #25](https://github.com/cadence-workflow/cadence-ai-samples/issues/25):
 
-1. `python/bare`
-2. `go/bare`
-3. `python/google-adk`
-4. `python/openai-agents`
-5. `go/systemone`
+1. `go/bare`
+2. `python/google-adk`
+3. `python/openai-agents`
+4. `go/systemone`
 
 Classifier and agent dimensions remain composable even if every valid combination
 is not delivered in the first phase.
@@ -201,7 +219,10 @@ decision; it is not added merely to exercise a permutation.
 
 ## Validation expectations
 
-Future implementation must test:
+Generator behavior is tested in
+[scripts/tests/test_new_recipe.py](../scripts/tests/test_new_recipe.py). Each
+delivered profile must also pass its generated offline suite and the Explorer
+discovery test. Implementation must test:
 
 - Every advertised combination and every rejected combination.
 - Generation into a clean destination and refusal to overwrite an existing one.
@@ -214,9 +235,10 @@ Future implementation must test:
 
 ## Non-goals
 
-This specification does not currently authorize:
+This specification does not authorize work beyond approved Issues. In
+particular, it does not authorize:
 
-- Implementing or expanding the generator.
+- Adding profiles beyond `python/bare` without their approved Issue.
 - Porting the three OpenAI samples.
 - Adding Java or another language to the repository.
 - Generalizing the Explorer's current source readers.

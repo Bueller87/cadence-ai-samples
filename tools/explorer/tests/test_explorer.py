@@ -246,6 +246,38 @@ class ExplorerTests(unittest.TestCase):
         self.assertEqual(recipe['variants'][0]['framework'],None)
         self.assertTrue(recipe['variants'][0]['supported'])
 
+    def test_generated_python_bare_recipe_is_discovered_and_resolved(self):
+        shutil.copytree(ROOT/'scripts',self.root/'scripts',ignore=shutil.ignore_patterns('__pycache__'))
+        shutil.copytree(ROOT/'templates',self.root/'templates',ignore=shutil.ignore_patterns('.venv','__pycache__'))
+        generated=subprocess.run([str(self.root/'scripts/new-recipe.sh'),'invoice-review','--language','python',
+            '--classifier','none','--agent','none'],capture_output=True,text=True,timeout=30)
+        self.assertEqual(generated.returncode,0,generated.stderr)
+        recipe=next(r for r in self.explorer.snapshot()['recipes'] if r['id']=='invoice-review')
+        self.assertEqual(recipe['title'],'Invoice Review');self.assertTrue(recipe['readme'])
+        implementation='recipes/invoice-review/python/bare'
+        self.assertEqual([v['id'] for v in recipe['variants']],[implementation])
+        variant=recipe['variants'][0]
+        self.assertTrue(variant['supported'],variant['reason'])
+        self.assertEqual((variant['framework'],variant['modes'],variant['model'],variant['classifier']),(None,[],False,False))
+        self.assertEqual(variant['defaults']['--domain'],'cadence-ai-samples')
+        result=self.explorer.resolve(dict(sample='invoice-review',implementation=implementation))
+        self.assertEqual((result['live'],result['credentials'],result['controls']),(False,[],[]))
+        path=self.root/implementation/'main.py'
+        tree=ast.parse(path.read_text())
+        body=[n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='parser' or
+            isinstance(n,ast.Assign) and n.targets[0].id.startswith('DEFAULT_')]
+        scope=dict(argparse=argparse,__doc__='CLI validation')
+        exec(compile(ast.Module(body=body,type_ignores=[]),str(path),'exec'),scope)
+        commands=[]
+        for line in (result['worker'],result['start']):
+            tokens=shlex.split(line)
+            self.assertEqual(tokens[:5],['cd',str((self.root/implementation).resolve()),'&&','.venv/bin/python','main.py'])
+            args=scope['parser']().parse_args(tokens[5:])
+            self.assertEqual((args.domain,args.task_list,args.workflow_id),
+                (result['domain'],result['task_list'],result['workflow_id']))
+            commands.append(args.command)
+        self.assertEqual(commands,['worker','start'])
+
     def test_unfamiliar_validation_and_invalid_endpoints_fail_closed(self):
         model_file=self.root/'models.yaml'
         model_file.write_text(model_file.read_text().replace('http://localhost:11434','http://example.com:11434'))
