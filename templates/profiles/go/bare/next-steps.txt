@@ -1,0 +1,7 @@
+Next steps (Go 1.23):
+  cd recipes/__RECIPE_SLUG__/go/bare
+  go mod download
+  go test ./...
+
+Then complete recipes/__RECIPE_SLUG__/SPEC.md and replace the starter Workflow.
+Run instructions: recipes/__RECIPE_SLUG__/README.md

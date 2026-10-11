@@ -20,8 +20,16 @@ between profiles when that keeps each generated recipe independently copyable.
 
 Implemented profiles:
 
+- `go/bare`: Go, no classifier, no agent. Generates
+  `recipes/<slug>/go/bare/`.
+- `go/systemone`: Go with a SystemOne classifier and no agent. Generates
+  `recipes/<slug>/go/systemone/`.
 - `python/bare`: Python, no classifier, no agent. Generates
   `recipes/<slug>/python/bare/`.
+- `python/google-adk`: Python with Google ADK and no classifier. Generates
+  `recipes/<slug>/python/google-adk/`.
+- `python/openai-agents`: Python with OpenAI Agents and no classifier. Generates
+  `recipes/<slug>/python/openai-agents/`.
 
 ## Placeholders
 
