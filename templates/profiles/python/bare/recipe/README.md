@@ -20,6 +20,10 @@ Both starter Activities are synthetic. They make no network calls and need no
 credentials. Replace them with your real Activities and keep a synthetic version
 for offline tests.
 
+This is a scaffold lane, so both `mock` and `live` currently run the same
+synthetic Activities. The `live` name reserves the generic CLI shape for the
+external Activities you add later; it does not enable a provider call.
+
 ## Requirements
 
 - Python 3.12 or 3.13. The recipe uses the published `cadence-python-client`
@@ -41,18 +45,20 @@ python -m pip install -e .
 Start the Worker in terminal 1:
 
 ```bash
-python main.py worker
+python main.py worker --mode mock
 ```
 
 Start the example Workflow in terminal 2:
 
 ```bash
-python main.py start --text "Investigate this example request."
+python main.py start --mode mock --text "Investigate this example request."
 ```
 
 Both commands default to domain `cadence-ai-samples`, task list
 `__RECIPE_SLUG__`, and Workflow ID `__RECIPE_SLUG__-demo`. Pass the same
 `--domain` and `--task-list` to both commands when you change them.
+Use `--mode live` on both commands to exercise the identical synthetic scaffold
+through the generic live lane.
 
 ## Workflow ID reuse
 

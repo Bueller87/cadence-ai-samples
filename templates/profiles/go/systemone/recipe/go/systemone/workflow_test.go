@@ -143,18 +143,13 @@ func TestConfiguredClassifierValidatesKeysWithoutCallingProvider(t *testing.T) {
     endpoint: http://localhost:8008/v1/systemone
 `)
 	t.Setenv("CLASSIFIER_AI_KEY", "")
-	_, _, err := configuredClassifier("worker", "jev-default", directory)
+	_, _, err := configuredClassifier("live", "jev-default", directory)
 	require.ErrorContains(t, err, "CLASSIFIER_AI_KEY")
 
-	selected, activity, err := configuredClassifier("worker", "laya-local", directory)
+	selected, activity, err := configuredClassifier("live", "laya-local", directory)
 	require.NoError(t, err)
 	require.Equal(t, "laya-local", selected)
 	require.NotNil(t, activity)
-
-	selected, activity, err = configuredClassifier("live-demo", "jev-default", directory)
-	require.NoError(t, err)
-	require.Equal(t, "jev-default", selected)
-	require.Nil(t, activity, "starters must not construct or call provider clients")
 }
 
 func TestChangedCatalogEndpointReachesClassifierTransport(t *testing.T) {
@@ -177,7 +172,7 @@ func TestChangedCatalogEndpointReachesClassifierTransport(t *testing.T) {
 		"    provider: laya\n"+
 		"    model: changed-model\n"+
 		"    endpoint: "+server.URL+"/changed-systemone\n")
-	_, activity, err := configuredClassifier("worker", "laya-local", directory)
+	_, activity, err := configuredClassifier("live", "laya-local", directory)
 	require.NoError(t, err)
 	classify, ok := activity.(func(context.Context, RecipeInput) (Classification, error))
 	require.True(t, ok)
@@ -187,27 +182,55 @@ func TestChangedCatalogEndpointReachesClassifierTransport(t *testing.T) {
 	require.Equal(t, "changed-model", result.Model)
 }
 
-func TestModesRequireMatchingClassifierAndLiveConfirmation(t *testing.T) {
-	directory := writeCatalog(t, `classifiers:
-  - id: laya-local
-    provider: laya
-    model: convaiinnovations/laya
-    endpoint: http://localhost:8008/v1/systemone
-`)
-	_, _, err := configuredClassifier("live-demo", mockClassifierID, directory)
-	require.ErrorContains(t, err, "explicit live")
-	_, _, err = configuredClassifier("demo", "laya-local", directory)
-	require.ErrorContains(t, err, "mock-only")
-	require.ErrorContains(t, validateMode("worker", "laya-local", false), "-confirm-live")
-	require.ErrorContains(t, validateMode("live-demo", "laya-local", false), "-confirm-live")
-	require.NoError(t, validateMode("worker", "laya-local", true))
-	require.NoError(t, validateMode("demo", mockClassifierID, false))
-	require.Error(t, validateMode("unknown", mockClassifierID, false))
+func TestCommandUsesOnlyWorkerAndStartActions(t *testing.T) {
+	worker, err := parseCommand([]string{"worker", "-mode", "mock"})
+	require.NoError(t, err)
+	require.Equal(t, "worker", worker.Action)
+	require.Equal(t, "mock", worker.Mode)
+
+	start, err := parseCommand([]string{"start", "-mode", "live", "-text", "hello"})
+	require.NoError(t, err)
+	require.Equal(t, "start", start.Action)
+	require.Equal(t, "live", start.Mode)
+	require.Equal(t, "hello", start.Text)
+	require.Empty(t, start.ClassifierID)
+	require.Empty(t, start.CatalogDir)
+	require.False(t, start.ConfirmLive)
+
+	for _, args := range [][]string{
+		{},
+		{"batch"},
+		{"acknowledge"},
+		{"worker"},
+		{"start"},
+		{"worker", "-mode", "unknown"},
+		{"worker", "-mode", "live"},
+		{"start", "-mode", "live", "-classifier-id", "laya-local"},
+		{"-mode", "worker"},
+	} {
+		_, err := parseCommand(args)
+		require.Errorf(t, err, "expected %v to fail", args)
+	}
+	_, err = parseCommand([]string{
+		"worker", "-mode", "live", "-classifier-id", "laya-local", "-confirm-live",
+	})
+	require.NoError(t, err)
+}
+
+func TestMockWorkerReadsNoCatalogOrCredentials(t *testing.T) {
+	t.Setenv("CLASSIFIER_AI_KEY", "")
+	selected, activity, err := configuredClassifier("mock", "ignored", t.TempDir())
+	require.NoError(t, err)
+	require.Equal(t, mockClassifierID, selected)
+	require.NotNil(t, activity)
+
+	_, _, err = configuredClassifier("unknown", "ignored", t.TempDir())
+	require.ErrorContains(t, err, "unsupported mode")
 }
 
 func TestStartOptionsAllowClosedRunReuseAndRejectOpenDuplicates(t *testing.T) {
-	options := startOptions("custom-task-list", "__RECIPE_SLUG__-demo")
-	require.Equal(t, "__RECIPE_SLUG__-demo", options.ID)
+	options := startOptions("custom-task-list", defaultWorkflowID)
+	require.Equal(t, defaultWorkflowID, options.ID)
 	require.Equal(t, "custom-task-list", options.TaskList)
 	require.Equal(t, client.WorkflowIDReusePolicyAllowDuplicate, options.WorkflowIDReusePolicy)
 	// Cadence's ALLOW_DUPLICATE policy permits a new Run only after the previous
@@ -223,7 +246,7 @@ func TestStartReportsDuplicateOpenRun(t *testing.T) {
 
 	err := start(
 		context.Background(), cadenceClient, "test-task-list",
-		"__RECIPE_SLUG__-demo", "Synthetic request.",
+		defaultWorkflowID, "Synthetic request.",
 	)
 
 	require.ErrorContains(t, err, "already has an open Run")

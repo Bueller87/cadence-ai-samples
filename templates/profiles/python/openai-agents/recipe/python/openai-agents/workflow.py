@@ -9,6 +9,7 @@ from cadence.worker import Registry
 
 WORKFLOW = "__RECIPE_CLASS__Workflow"
 MOCK_AGENT_ACTIVITY = "__RECIPE_SLUG__.mock-agent"
+LIVE_AGENT_ACTIVITY = "__RECIPE_SLUG__.openai-agents-agent"
 FATAL_AI_ERRORS = {
     "LiveAuthenticationError",
     "LiveConfigurationError",
@@ -29,8 +30,6 @@ AI_ACTIVITY_OPTIONS = {
 class RecipeInput:
     text: str
     mode: str = "mock"
-    model_name: str | None = None
-    model_provider: str | None = None
 
 
 @dataclass(frozen=True)
@@ -54,12 +53,11 @@ class __RECIPE_CLASS__Workflow:
         if recipe_input.mode not in {"mock", "live"}:
             raise ValueError("mode must be 'mock' or 'live'")
         if recipe_input.mode == "live":
-            from inference import generate_live_answer
-
-            answer = await generate_live_answer(
+            answer = await workflow.execute_activity(
+                LIVE_AGENT_ACTIVITY,
+                str,
                 recipe_input.text,
-                recipe_input.model_name,
-                recipe_input.model_provider,
+                **AI_ACTIVITY_OPTIONS,
             )
         else:
             answer = await workflow.execute_activity(
@@ -74,8 +72,7 @@ class __RECIPE_CLASS__Workflow:
 def build_registry(model_activities: object | None = None) -> Registry:
     registry = Registry()
     registry.workflow(__RECIPE_CLASS__Workflow)
-    if model_activities is None:
-        registry.register_activity(mock_agent)
-    else:
+    registry.register_activity(mock_agent)
+    if model_activities is not None:
         registry.register_activities(model_activities)
     return registry

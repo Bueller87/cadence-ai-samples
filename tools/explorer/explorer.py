@@ -16,7 +16,8 @@ from urllib.parse import quote, urlsplit, urlunsplit
 import yaml
 
 from source import (InvalidSelection, Unsupported, go_classifier, go_cli,
-                    go_function, go_validate, python_cli, python_guard, value)
+                    go_function, go_validate, java_classifier, java_cli,
+                    python_cli, python_guard, value)
 
 
 SKIP = {'tests', 'testdata', 'perf', '.venv', 'venv', '__pycache__', 'node_modules'}
@@ -76,7 +77,47 @@ class Explorer:
         self.workflow_timeout = workflow_timeout
 
     def inside(self, path):
-        return path.resolve().is_relative_to(self.root) and not path.is_symlink()
+        path = Path(path).absolute()
+        try:
+            if not path.resolve().is_relative_to(self.root):
+                return False
+        except OSError:
+            return False
+        current = path
+        while current != self.root:
+            if current.is_symlink():
+                return False
+            parent = current.parent
+            if parent == current:
+                return False
+            current = parent
+        return not self.root.is_symlink()
+
+    def read_cli(self, path, kind):
+        entry = path / {
+            'python': 'main.py',
+            'go': 'main.go',
+            'java': 'src/main/java/com/example/cadence/recipe/RecipeApplication.java',
+        }.get(kind, 'main')
+        if not entry.is_file() or not self.inside(entry):
+            raise Unsupported('Implementation source must stay inside the checkout and must not be a symlink.')
+        pattern = {
+            'python': '*.py',
+            'go': '*.go',
+            'java': 'src/main/java/**/*.java',
+        }.get(kind)
+        if pattern is None:
+            raise Unsupported('No readable CLI adapter for this implementation yet. See the recipe README.')
+        sources = list(path.glob(pattern))
+        if any(not self.inside(source) for source in sources):
+            raise Unsupported('Implementation source must stay inside the checkout and must not be a symlink.')
+        if kind == 'python':
+            cli = python_cli(path/'main.py')
+        elif kind == 'go':
+            cli = go_cli(path)
+        else:
+            cli = java_cli(path)
+        return cli, sources
 
     def implementations(self, recipe):
         variants = []
@@ -85,7 +126,12 @@ class Explorer:
             candidates = [language]
             candidates.extend(p for p in sorted(language.iterdir()) if p.is_dir() and p.name not in SKIP and not p.name.startswith('.'))
             for path in candidates:
-                entry = path / ('main.py' if language.name == 'python' else 'main.go' if language.name == 'go' else 'main')
+                entry = path / (
+                    'main.py' if language.name == 'python' else
+                    'main.go' if language.name == 'go' else
+                    'src/main/java/com/example/cadence/recipe/RecipeApplication.java'
+                    if language.name == 'java' else 'main'
+                )
                 if path == language and not entry.exists() and len(candidates) > 1:
                     continue
                 if not self.inside(path):
@@ -94,21 +140,21 @@ class Explorer:
                 variant = dict(id=str(path.relative_to(self.root)), language=language.name, framework=framework,
                     source=source_link(entry.relative_to(self.root)), supported=False, reason=None)
                 try:
-                    if any(not self.inside(file) for file in path.glob('*.py' if language.name=='python' else '*.go')):
-                        raise Unsupported('Implementation source must stay inside the checkout.')
-                    if language.name == 'python' and entry.is_file():
-                        cli = python_cli(entry)
-                    elif language.name == 'go' and entry.is_file():
-                        cli = go_cli(path)
-                    else:
+                    if language.name not in {'python', 'go', 'java'} or not entry.is_file():
                         raise Unsupported('No readable CLI adapter for this implementation yet. See the recipe README.')
+                    cli, _ = self.read_cli(path, language.name)
+                    accepted_flags = set(cli['root'])
+                    if cli['kind'] == 'python':
+                        accepted_flags.update(cli['commands']['worker'])
                     variant.update(supported=True, kind=cli['kind'], modes=cli['modes'],
-                        model=('--model-id' if cli['kind'] == 'python' else '-model-id') in cli['root'],
-                        classifier=('--classifier-id' if cli['kind'] == 'python' else '-classifier-id') in cli['root'],
+                        actions=cli['actions'], generic=cli['generic'],
+                        model='--model-id' in accepted_flags,
+                        classifier=('--classifier-id' if cli['kind'] in {'python','java'}
+                                    else '-classifier-id') in accepted_flags,
                         defaults={key:spec.get('default') for key,spec in cli['root'].items() if spec.get('default') is not None})
-                    if cli['kind'] == 'go':
+                    if cli['kind'] == 'go' and not cli['generic']:
                         variant.update(live_modes=cli['live_modes'], mock_modes=cli['mock_modes'],
-                            batch_limits={key:cli['env'].get(key) for key in ('maximumLiveBatchCount','maximumLiveConcurrency')})
+                            batch_limits={key:cli.get('env',{}).get(key) for key in ('maximumLiveBatchCount','maximumLiveConcurrency')})
                 except (OSError, SyntaxError, ValueError, TypeError, AttributeError) as error:
                     variant['reason'] = str(error)
                 variants.append(variant)
@@ -162,23 +208,32 @@ class Explorer:
             raise InvalidSelection('Choose an execution mode explicitly.')
         path = self.root / variant['id']
         # Reread the same source at resolution time; never reuse stale capabilities.
-        cli = python_cli(path/'main.py') if variant['kind'] == 'python' else go_cli(path)
-        model = self.selected_catalog(state,'models',request.get('model')) if variant['model'] else None
-        live = mode == 'live' if cli['kind'] == 'python' else mode in cli['live_modes']
-        if cli['kind'] == 'go' and variant['classifier'] and mode == 'worker':
-            live = request.get('classifier') != cli['env'].get('mockClassifierID')
+        cli, source_files = self.read_cli(path, variant['kind'])
+        live = mode == 'live' if cli['generic'] or cli['kind'] == 'python' else mode in cli['live_modes']
+        model = (self.selected_catalog(state,'models',request.get('model'))
+                 if variant['model'] and (live or not cli['generic']) else None)
+        if not cli['generic'] and cli['kind'] == 'go' and variant['classifier'] and mode == 'worker':
+            worker_mock = cli.get('env',{}).get('mockClassifierID')
+            live = request.get('classifier') != worker_mock
         mock_id = cli.get('env',{}).get('mockClassifierID')
         classifier = None
-        if variant['classifier'] and not (cli['kind'] == 'go' and not live):
+        if (variant['classifier']
+                and (live or (not cli['generic'] and cli['kind'] != 'go'))):
             classifier = self.selected_catalog(state,'classifiers',request.get('classifier'))
         if cli['kind'] == 'python' and (variant['model'] or variant['classifier']):
             selection = SimpleNamespace(model=SimpleNamespace(**model) if model else None,
                                         classifier=SimpleNamespace(**classifier) if classifier else None)
             if live:
+                classifier_guard = path / 'classifier.py'
+                if classifier and classifier_guard.is_file():
+                    python_guard(classifier_guard, selection.classifier, 'validate_classifier')
                 guard = path / 'live.py'
                 if not guard.is_file():
                     guard = path / 'inference.py'
-                python_guard(guard, selection if classifier else selection.model)
+                if classifier and not classifier_guard.is_file():
+                    python_guard(guard, selection)
+                elif model:
+                    python_guard(guard, selection.model)
             else:
                 # Read the CLI's classifier restriction even though mock mode makes no AI calls.
                 main = ast.parse((path/'main.py').read_text())
@@ -191,32 +246,61 @@ class Explorer:
                                 raise InvalidSelection('This classifier is a catalog candidate, not implemented by the selected CLI.')
         if cli['kind'] == 'go' and live and classifier:
             go_classifier(cli,classifier)
+        if cli['kind'] == 'java' and live and classifier:
+            java_classifier(cli,classifier)
         parts = [recipe['id'],variant['language'],variant.get('framework') or 'bare',mode or 'default']
         parts.extend(e['id'] for e in (model,classifier) if e)
         task_list = '-'.join(parts)
         workflow_id = task_list+'-demo'
         flags = cli['root']
-        domain_flag = '--domain' if cli['kind'] == 'python' else '-domain'
+        domain_flag = '--domain' if cli['kind'] in {'python','java'} else '-domain'
         domain = flags[domain_flag].get('default')
         if not isinstance(domain,str) or not domain:
             raise Unsupported('No readable default Cadence domain in this CLI.')
-        if cli['kind'] == 'python':
-            base = ['.venv/bin/python','main.py',domain_flag,domain,'--task-list',task_list,'--workflow-id',workflow_id]
+        if cli['kind'] == 'python' and cli['generic']:
+            common = ['.venv/bin/python','main.py',domain_flag,domain,
+                      '--task-list',task_list]
+            worker = list(common)
+            worker_scope = cli['commands']['worker']
+            for flag,config in (('--model-id',model),('--classifier-id',classifier)):
+                if config and flag in flags:
+                    worker += [flag,config['id']]
+            worker += ['worker','--mode',mode]
+            for flag,config in (('--model-id',model),('--classifier-id',classifier)):
+                if config and flag in worker_scope:
+                    worker += [flag,config['id']]
+            if live and '--confirm-live' in worker_scope:
+                worker += ['--confirm-live']
+            starter = common+['--workflow-id',workflow_id,'start','--mode',mode]
+            controls = []
+        elif cli['kind'] == 'python':
+            base = ['.venv/bin/python','main.py',domain_flag,domain,
+                    '--task-list',task_list,'--workflow-id',workflow_id]
             for flag,config in (('--model-id',model),('--classifier-id',classifier)):
                 if config:
                     base += [flag,config['id']]
-            worker = base+['worker']
-            starter = base+['start']
-            if mode:
-                worker += ['--mode',mode]
-                starter += ['--mode',mode]
-            if live:
+            worker = base+['worker','--mode',mode]
+            starter = base+['start','--mode',mode]
+            if live and '--confirm-live' in cli['commands']['worker']:
                 worker += ['--confirm-live']
             controls = []
             for command in cli['commands']:
                 if command not in {'worker','start'} and not any(s.get('required') for s in cli['commands'][command].values()):
                     controls.append(['.venv/bin/python','main.py',domain_flag,domain,'--workflow-id',workflow_id,command])
-        else:
+        elif cli['kind'] == 'go' and cli['generic']:
+            common = [domain_flag,domain,'-task-list',task_list]
+            worker_args = ['worker','-mode',mode]+common
+            if live and classifier:
+                worker_args += ['-classifier-id',classifier['id']]
+            if live and '-confirm-live' in flags:
+                worker_args += ['-confirm-live']
+            starter_args = ['start','-mode',mode]+common
+            if '-workflow-id' in flags:
+                starter_args += ['-workflow-id',workflow_id]
+            worker = ['go','run','.']+worker_args
+            starter = ['go','run','.']+starter_args
+            controls = []
+        elif cli['kind'] == 'go':
             if mode not in cli['live_modes'] + cli['mock_modes'] + ['worker']:
                 raise InvalidSelection('This action needs identifiers from a running ticket. Follow the manual acknowledgment section in the README.' if mode=='acknowledge' else
                     'No safe generated command flow is available for this action. Follow the recipe README.')
@@ -248,46 +332,68 @@ class Explorer:
                     go_validate(go_function(cli['source'],'Validate',receiver='LiveBatchConfig'),env)
                     go_validate(go_function(cli['source'],'Validate',receiver='BatchConfig'),env)
                     starter += ['-count',str(count),'-concurrency',str(concurrency),'-confirm-live']
+        else:
+            common = [domain_flag,domain,'--task-list',task_list]
+            worker_args = ['worker','--mode',mode]+common
+            if live and classifier:
+                worker_args += ['--classifier-id',classifier['id']]
+            if live and '--confirm-live' in flags:
+                worker_args += ['--confirm-live']
+            starter_args = ['start','--mode',mode]+common+[
+                '--workflow-id',workflow_id]
+            worker = ['./gradlew','run','--args='+shlex.join(worker_args)]
+            starter = ['./gradlew','run','--args='+shlex.join(starter_args)]
+            controls = []
         setup = ['cd '+shlex.quote(str(path))]
         if cli['kind'] == 'python':
             setup += ['python3 -m venv .venv','source .venv/bin/activate','python -m pip install -e .']
-        else:
+        elif cli['kind'] == 'go':
             setup += ['go mod download']
+        else:
+            setup += ['./gradlew test']
         record = next((e for e in evidence(self.root/'recipes'/recipe['id']) if live and
             e['framework']==variant['framework'] and model and e['model_id']==model['id'] and classifier and
             e['classifier_id']==classifier['id'] and model['model'] in e['model_description']),None)
         if record:
             record = {**record,'source':source_link(Path(record['source']).relative_to(self.root))}
-        source_files = list(path.glob('*.py' if cli['kind']=='python' else '*.go'))
-        credentials = sorted(set(re.findall(r'(?:get\(|Getenv\()"([A-Z_]+AI_KEY)"', '\n'.join(p.read_text() for p in source_files)))) if live else []
+        credential_pattern = r'(?:get\(|Getenv\(|environment\.read\()"([A-Z_]+AI_KEY)"'
+        credentials = sorted(set(re.findall(
+            credential_pattern, '\n'.join(p.read_text() for p in source_files)))) if live else []
         # The source validators identify which selections are keyless.
         if model and model['provider']=='ollama':
             credentials = [c for c in credentials if c!='MODEL_AI_KEY']
         if classifier and classifier['provider']=='laya':
             credentials = [c for c in credentials if c!='CLASSIFIER_AI_KEY']
         prefix = 'cd '+shlex.quote(str(path))+' && '
-        for command in [worker]+([starter] if starter else [])+controls:
-            self.validate_command(cli,command)
+        if not cli['generic'] and cli['kind'] != 'java':
+            for command in [worker]+([starter] if starter else [])+controls:
+                self.validate_command(cli,command)
         return dict(setup='\n'.join(setup),worker=prefix+shlex.join(worker),
             client='\n'.join(prefix+shlex.join(c) for c in ([starter] if starter else [])+controls),
             start=prefix+shlex.join(starter) if starter else '',
             controls=[dict(name=c[-1],command=prefix+shlex.join(c)) for c in controls],
             domain=domain,task_list=task_list,
-            workflow_id=workflow_id if cli['kind']=='python' or '-workflow-id' in flags else None,
+            workflow_id=workflow_id if ('--workflow-id' in flags or '-workflow-id' in flags) else None,
             cadence_web_url=self.cadence_web_url, cadence_cluster=self.cadence_cluster,
             implementation=variant['id'],mode=mode,live=live,model=model,classifier=classifier,
             evidence=record,credentials=credentials,local=self.local_commands(model,classifier) if live else [],
-            mock=(mode=='mock' if cli['kind']=='python' else mode in cli['mock_modes'] or (mode=='worker' and not live)),
+            mock=(mode=='mock' if cli['generic'] or cli['kind']=='python'
+                  else mode in cli['mock_modes'] or (mode=='worker' and not live)),
             read_at=state['read_at'],note='Recorded live evidence is historical, not a fresh run of this checkout. Read the evidence file for scope and limitations.' if record else
                 'No matching full live execution record found in this recipe’s MATRIX_RESULTS.md.' if live else
-                'Mock execution makes no provider calls. Python catalog IDs remain explicit because the CLI still resolves them.')
+                'Mock execution makes no provider calls.')
 
     def check(self, request):
         resolved = self.resolve(request)
         checked_at = datetime.now(timezone.utc).isoformat(timespec='seconds')
         path = self.root / resolved['implementation']
-        cli = python_cli(path/'main.py') if path.joinpath('main.py').is_file() else go_cli(path)
-        address_flag = '--target' if cli['kind'] == 'python' else '-address'
+        cli, _ = self.read_cli(path, 'python'
+                               if path.joinpath('main.py').is_file() else
+                               'java' if path.joinpath(
+                                   'src/main/java/com/example/cadence/recipe/RecipeApplication.java').is_file()
+                               else 'go')
+        address_flag = ('--target' if cli['kind'] == 'python' else
+                        '--address' if cli['kind'] == 'java' else '-address')
         address = cli['root'].get(address_flag, {}).get('default')
         services = [self.tcp_probe('Cadence', address)]
         services.append(self.http_probe('Cadence-Web', 'http://localhost:8088', expect_json=False))
@@ -583,7 +689,8 @@ class Explorer:
 
     def source_path(self, relative):
         path = self.root / relative
-        allowed_names = {'README.md','MATRIX_RESULTS.md','main.py','main.go','models.yaml','classifiers.yaml'}
+        allowed_names = {'README.md','MATRIX_RESULTS.md','main.py','main.go',
+                         'RecipeApplication.java','models.yaml','classifiers.yaml'}
         if (not self.inside(path) or path.name not in allowed_names or
             any(part.startswith('.') or part in SKIP for part in Path(relative).parts) or
             not path.is_file()):

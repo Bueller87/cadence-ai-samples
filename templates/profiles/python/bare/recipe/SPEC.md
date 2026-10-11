@@ -27,10 +27,10 @@ Generated from the `python/bare` profile defined by the
 - **Classifier integration:** none
 - **Agent integration:** none
 - **Implementation directory:** `python/bare`
-- **Mock and live behavior:** The starter Activities are synthetic and make no
-  external calls. There is no live mode. [If you add an external Activity, keep
-  a synthetic implementation for offline tests and describe any live
-  confirmation boundary here.]
+- **Mock and live behavior:** Both CLI modes run the same synthetic Activities
+  and make no external calls. This scaffold lane reserves `live` for external
+  Activities added by the recipe author. [If you add one, keep the mock mode
+  synthetic and describe the Worker-local live configuration here.]
 - **Runtime catalog use:** Not applicable. [Update if the recipe adds model or
   classifier Activities that read `models.yaml` or `classifiers.yaml`.]
 - **Workflow ID reuse:** `start` uses the stable demo Workflow ID

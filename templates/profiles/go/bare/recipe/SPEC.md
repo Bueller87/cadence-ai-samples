@@ -34,8 +34,9 @@ Generated from the `go/bare` profile defined by the
 - **Agent integration:** none
 - **Implementation directory:** `go/bare`
 - **Mock and live behavior:** The starter Activities are synthetic and make no
-  external calls. There is no live mode. If an external Activity is added, keep
-  a synthetic implementation for offline tests and document the live
+  external calls in either mode. `live` is a scaffold lane for adding a
+  provider-backed Activity later. If an external Activity is added, keep a
+  synthetic implementation for offline tests and document the live
   confirmation boundary.
 - **Runtime catalog use:** Not applicable. Update this field if the recipe adds
   model or classifier Activities that read repository catalogs.
@@ -99,10 +100,13 @@ None. The bare profile prescribes no model, classifier, or agent framework.
 
 ## Configuration
 
-The CLI accepts `-mode`, `-address`, `-domain`, `-task-list`, `-workflow-id`,
-and `-text`. It defaults to Cadence at `127.0.0.1:7933`, domain
-`cadence-ai-samples`, task list `__RECIPE_SLUG__`, and Workflow ID
-`__RECIPE_SLUG__-demo`. No environment variables or secrets are required.
+The CLI has exactly two positional actions, `worker` and `start`. Both require
+`-mode mock|live`. Common options are `-address`, `-domain`, and `-task-list`;
+`start` also accepts `-workflow-id` and `-text`. It defaults to Cadence at
+`127.0.0.1:7933`, domain `cadence-ai-samples`, task list `__RECIPE_SLUG__`, and
+Workflow ID `__RECIPE_SLUG__-demo`. No environment variables or secrets are
+required. Both modes use the same synthetic Activities and make no provider
+calls.
 
 ## Failure handling and retry behavior
 
@@ -124,7 +128,8 @@ credentials, or paid access is required.
 - `go test ./...` passes with no Cadence server.
 - Routine text skips follow-up, and investigation text records follow-up.
 - Empty text is non-retriable, and Activity failures fail the Workflow.
-- Worker and start commands share documented defaults and accept overrides.
+- `worker` and `start` are the only actions, and both accept `mock` and `live`.
+- Both bare modes retain synthetic Activities and make no provider calls.
 - Start uses the stable Workflow ID with `AllowDuplicate`.
 - A duplicate start while a Run is open reports a specific actionable error.
 

@@ -4,7 +4,7 @@ set -euo pipefail
 languages="go java python"
 classifiers="none systemone"
 agents="none google-adk openai-agents"
-implemented_profiles="go/bare go/systemone python/bare python/google-adk python/openai-agents"
+implemented_profiles="go/bare go/systemone java/bare java/systemone python/bare python/systemone python/google-adk python/google-adk-systemone python/openai-agents python/openai-agents-systemone"
 
 # The single source of valid combinations. Help output and validation both use it.
 profile_for() {
@@ -198,9 +198,13 @@ trap 'rm -rf -- "$staging"' EXIT
 
 cp -R -- "$template/recipe/." "$staging/"
 find "$staging" \( -name .venv -o -name venv -o -name __pycache__ -o -name .pytest_cache \
-  -o -name '*.egg-info' -o -name .DS_Store \) -prune -exec rm -rf -- {} +
+  -o -name .gradle -o -name build -o -name '*.egg-info' -o -name .DS_Store \) \
+  -prune -exec rm -rf -- {} +
 while IFS= read -r -d '' file; do
   render "$file" > "$file.tmp"
+  if [[ -x $file ]]; then
+    chmod +x "$file.tmp"
+  fi
   mv -- "$file.tmp" "$file"
 done < <(find "$staging" -type f -print0)
 

@@ -4,6 +4,7 @@ from cadence.contrib.pydantic import PydanticDataConverter
 from cadence.testing import TestActivityEnvironment, TestWorkflowEnvironment
 
 from workflow import (
+    LIVE_AGENT_ACTIVITY,
     MOCK_AGENT_ACTIVITY,
     WORKFLOW,
     RecipeInput,
@@ -45,6 +46,29 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
             result,
             RecipeResult("Mock agent reviewed: Review retries.", "mock"),
         )
+
+    async def test_live_workflow_schedules_stable_worker_activity(self) -> None:
+        calls: list[str] = []
+
+        def live_agent(text: str) -> str:
+            calls.append(text)
+            return "Review retry limits."
+
+        with TestWorkflowEnvironment(
+            build_registry(), data_converter=PydanticDataConverter()
+        ) as environment:
+            environment.on_activity(LIVE_AGENT_ACTIVITY, fn=live_agent)
+            execution = await environment.client.start_workflow(
+                WORKFLOW,
+                RecipeInput("Review retries.", "live"),
+                workflow_id="live-success",
+                task_list="test-task-list",
+            )
+            result = environment.get_workflow_result(
+                RecipeResult, execution.workflow_id, execution.run_id
+            )
+        self.assertEqual(calls, ["Review retries."])
+        self.assertEqual(result, RecipeResult("Review retry limits.", "live"))
 
     async def test_activity_failure_fails_workflow(self) -> None:
         def unavailable(text: str) -> str:

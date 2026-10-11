@@ -30,8 +30,10 @@ def parser() -> argparse.ArgumentParser:
     cli.add_argument("--workflow-id", default=DEFAULT_WORKFLOW_ID)
 
     commands = cli.add_subparsers(dest="command", required=True)
-    commands.add_parser("worker")
+    worker = commands.add_parser("worker")
+    worker.add_argument("--mode", choices=("mock", "live"), required=True)
     start = commands.add_parser("start")
+    start.add_argument("--mode", choices=("mock", "live"), required=True)
     start.add_argument("--text", default=DEFAULT_TEXT)
     return cli
 
@@ -48,7 +50,10 @@ async def run_worker(args: argparse.Namespace) -> None:
     worker = Worker(client(args), args.task_list, build_registry())
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     async with worker:
-        print(f"worker polling domain={args.domain} task-list={args.task_list}")
+        print(
+            f"{args.mode} scaffold worker polling domain={args.domain} "
+            f"task-list={args.task_list}"
+        )
         await asyncio.Event().wait()
 
 
@@ -71,7 +76,10 @@ async def start(args: argparse.Namespace) -> None:
         ) from error
     finally:
         await cadence_client.close()
-    print(f"started workflow-id={execution.workflow_id} run-id={execution.run_id}")
+    print(
+        f"started {args.mode} scaffold workflow-id={execution.workflow_id} "
+        f"run-id={execution.run_id}"
+    )
 
 
 async def main(argv: Sequence[str] | None = None) -> None:

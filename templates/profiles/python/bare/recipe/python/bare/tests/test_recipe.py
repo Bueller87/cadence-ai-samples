@@ -88,20 +88,32 @@ class ActivityTests(unittest.TestCase):
 
 class CommandTests(unittest.IsolatedAsyncioTestCase):
     def test_worker_and_start_share_defaults(self) -> None:
-        worker = main.parser().parse_args(["worker"])
-        start = main.parser().parse_args(["start"])
+        worker = main.parser().parse_args(["worker", "--mode", "mock"])
+        start = main.parser().parse_args(["start", "--mode", "live"])
         for args in (worker, start):
             self.assertEqual(args.domain, "cadence-ai-samples")
             self.assertEqual(args.task_list, "__RECIPE_SLUG__")
             self.assertEqual(args.workflow_id, "__RECIPE_SLUG__-demo")
+        self.assertEqual(worker.mode, "mock")
+        self.assertEqual(start.mode, "live")
         self.assertEqual(start.text, main.DEFAULT_TEXT)
 
     def test_overrides_and_invalid_commands(self) -> None:
         args = main.parser().parse_args(
-            ["--task-list", "tl", "--workflow-id", "wf", "start", "--text", "hi"]
+            [
+                "--task-list", "tl", "--workflow-id", "wf",
+                "start", "--mode", "mock", "--text", "hi",
+            ]
         )
         self.assertEqual((args.task_list, args.workflow_id, args.text), ("tl", "wf", "hi"))
-        for argv in ([], ["stop"], ["worker", "--text", "hi"]):
+        for argv in (
+            [],
+            ["stop"],
+            ["worker"],
+            ["start"],
+            ["worker", "--mode", "other"],
+            ["worker", "--mode", "mock", "--text", "hi"],
+        ):
             with self.subTest(argv=argv), self.assertRaises(SystemExit), \
                     patch("sys.stderr"):
                 main.parser().parse_args(argv)
@@ -111,7 +123,7 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
             return_value=SimpleNamespace(workflow_id="__RECIPE_SLUG__-demo", run_id="r1")
         )
         with patch("main.client", return_value=cadence_client), patch("builtins.print"):
-            await main.start(main.parser().parse_args(["start"]))
+            await main.start(main.parser().parse_args(["start", "--mode", "mock"]))
         options = cadence_client.start_workflow.call_args.kwargs
         self.assertEqual(options["workflow_id"], "__RECIPE_SLUG__-demo")
         self.assertEqual(options["task_list"], "__RECIPE_SLUG__")
@@ -127,7 +139,7 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         with patch("main.client", return_value=cadence_client), \
                 patch("sys.stderr", new_callable=io.StringIO) as stderr, \
                 self.assertRaises(SystemExit) as exit_info:
-            await main.main(["start"])
+            await main.main(["start", "--mode", "mock"])
         self.assertEqual(exit_info.exception.code, 2)
         self.assertIn("workflow-id=__RECIPE_SLUG__-demo already has an open Run",
                       stderr.getvalue())

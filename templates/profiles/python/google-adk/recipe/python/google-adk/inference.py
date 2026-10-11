@@ -1,21 +1,19 @@
-"""Google ADK model dispatch; provider clients are created only by Workers."""
+"""Worker-local Google ADK agent Activity and provider configuration."""
 
-from collections.abc import AsyncGenerator, MutableMapping
+from collections.abc import MutableMapping
 from urllib.parse import urlsplit
+from uuid import uuid4
 
-from cadence import activity, workflow
-from cadence.contrib.google_adk import CadenceAgentRunner, GoogleADKActivities
-from cadence.contrib.google_adk.cadence_model import CadenceModel
+from cadence import activity
 from google.adk.agents import LlmAgent
 from google.adk.models.google_llm import Gemini
-from google.adk.models.llm_request import LlmRequest
-from google.adk.models.llm_response import LlmResponse
+from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import errors as genai_errors
 from google.genai import types
 
 from config import ModelConfig
-from workflow import AGENT_ACTIVITY_OPTIONS
+from workflow import LIVE_AGENT_ACTIVITY
 
 
 SUPPORTED_MODELS = {
@@ -83,7 +81,7 @@ def runtime_model(provider: str, model: str) -> str:
 
 def build_model_activities(
     model: ModelConfig, environ: MutableMapping[str, str]
-) -> "ADKActivities":
+) -> "GoogleADKAgentActivities":
     validate_live(model)
     key = environ.get("MODEL_AI_KEY", "").strip()
     if model.provider != "ollama" and not key:
@@ -107,101 +105,63 @@ def build_model_activities(
         litellm.num_retries = 0
         litellm.telemetry = False
         litellm.suppress_debug_info = True
-    return ADKActivities(model.provider, endpoint)
+    return GoogleADKAgentActivities(model)
 
 
-class ADKActivities(GoogleADKActivities):
-    def __init__(self, provider: str, endpoint: str) -> None:
-        self._provider = provider
-        self._endpoint = endpoint
+class GoogleADKAgentActivities:
+    """Own the selected model and execute the ADK integration on the Worker."""
 
-    @activity.override(GoogleADKActivities.generate_content_async)
-    async def generate_content_async(
-        self, model_name: str, llm_request: LlmRequest
-    ) -> list[LlmResponse]:
-        try:
-            if self._provider == "google":
-                model = Gemini(model=model_name, base_url=self._endpoint)
-                responses: list[LlmResponse] = []
-                async for response in model.generate_content_async(
-                    llm_request=llm_request,
-                    stream=False,
-                ):
-                    responses.append(response)
-                return responses
-            return await super().generate_content_async(model_name, llm_request)
-        except genai_errors.APIError as error:
-            body = error.details if isinstance(error.details, dict) else {}
-            body = body.get("error", body)
-            details = body.get("details", []) if isinstance(body, dict) else []
-            invalid_key = any(
-                isinstance(detail, dict) and detail.get("reason") == "API_KEY_INVALID"
-                for detail in (details if isinstance(details, list) else [])
+    def __init__(self, selection: ModelConfig) -> None:
+        self._selection = selection
+
+    def _model(self) -> object:
+        if self._selection.provider == "google":
+            return Gemini(
+                model=self._selection.model,
+                base_url=self._selection.endpoint,
             )
-            if error.code in {401, 403} or invalid_key:
-                raise LiveAuthenticationError("Google rejected MODEL_AI_KEY") from None
-            if _retryable(error.code):
-                raise RuntimeError(f"Google temporary failure: HTTP {error.code}") from None
-            raise LiveSchemaError(
-                f"Google rejected the request: HTTP {error.code}"
-            ) from None
-        except (TypeError, ValueError):
-            raise LiveSchemaError("model configuration or schema is invalid") from None
+        return runtime_model(self._selection.provider, self._selection.model)
+
+    @activity.method(name=LIVE_AGENT_ACTIVITY)
+    async def run_agent(self, prompt: str) -> str:
+        if not prompt.strip():
+            raise LiveConfigurationError("prompt must not be empty")
+        sessions = InMemorySessionService()
+        agent = LlmAgent(
+            name="recipe_agent",
+            model=self._model(),
+            instruction=INSTRUCTION,
+        )
+        runner = Runner(
+            app_name="recipe-starter",
+            agent=agent,
+            session_service=sessions,
+        )
+        session_id = str(uuid4())
+        await sessions.create_session(
+            app_name=runner.app_name,
+            user_id="recipe-user",
+            session_id=session_id,
+        )
+        response_text = ""
+        try:
+            async for event in runner.run_async(
+                user_id="recipe-user",
+                session_id=session_id,
+                new_message=types.Content(
+                    role="user",
+                    parts=[types.Part.from_text(text=prompt)],
+                ),
+            ):
+                if event.is_final_response() and event.content and event.content.parts:
+                    response_text = "".join(
+                        part.text or "" for part in event.content.parts
+                    ).strip()
         except Exception as error:
             _raise_model_error(error)
-
-
-class RetryingCadenceModel(CadenceModel):
-    async def generate_content_async(
-        self, llm_request: LlmRequest, stream: bool = False
-    ) -> AsyncGenerator[LlmResponse, None]:
-        if stream:
-            raise LiveConfigurationError("streaming is not supported")
-        call = self._google_adk_activities.generate_content_async.with_options(
-            **AGENT_ACTIVITY_OPTIONS
-        )
-        for response in await call(model_name=self.model, llm_request=llm_request):
-            yield response
-
-
-async def generate_live_response(
-    prompt: str, model_name: str | None, provider: str | None
-) -> str:
-    if not model_name or not provider:
-        raise LiveConfigurationError("live mode requires a model selection")
-    agent = LlmAgent(
-        name="recipe_agent",
-        model=RetryingCadenceModel(model=runtime_model(provider, model_name)),
-        instruction=INSTRUCTION,
-    )
-    sessions = InMemorySessionService()
-    runner = CadenceAgentRunner(
-        app_name="recipe-starter",
-        agent=agent,
-        session_service=sessions,
-    )
-    workflow_id = workflow.WorkflowContext.get().info().workflow_id
-    await sessions.create_session(
-        app_name=runner.app_name,
-        user_id="recipe-user",
-        session_id=workflow_id,
-    )
-    response_text = ""
-    async for event in runner.run_async(
-        user_id="recipe-user",
-        session_id=workflow_id,
-        new_message=types.Content(
-            role="user",
-            parts=[types.Part.from_text(text=prompt)],
-        ),
-    ):
-        if event.is_final_response() and event.content and event.content.parts:
-            response_text = "".join(
-                part.text or "" for part in event.content.parts
-            ).strip()
-    if not response_text:
-        raise LiveSchemaError("model returned no response")
-    return response_text
+        if not response_text:
+            raise LiveSchemaError("model returned no response")
+        return response_text
 
 
 def _retryable(status: int) -> bool:
@@ -209,6 +169,16 @@ def _retryable(status: int) -> bool:
 
 
 def _raise_model_error(error: Exception) -> None:
+    if isinstance(error, genai_errors.APIError):
+        status = error.code
+        if status in {401, 403} or _contains_invalid_key(error.details):
+            raise LiveAuthenticationError("model rejected MODEL_AI_KEY") from None
+        if _retryable(status):
+            raise RuntimeError(
+                f"temporary model request failure: HTTP {status}"
+            ) from None
+        raise LiveSchemaError(f"model rejected request: HTTP {status}") from None
+
     status = getattr(error, "status_code", None)
     if status in {401, 403}:
         raise LiveAuthenticationError("model rejected MODEL_AI_KEY") from None
@@ -217,3 +187,15 @@ def _raise_model_error(error: Exception) -> None:
     if isinstance(error, (TypeError, ValueError)):
         raise LiveSchemaError("model configuration or schema is invalid") from None
     raise RuntimeError("temporary model request failure") from None
+
+
+def _contains_invalid_key(value: object) -> bool:
+    if isinstance(value, dict):
+        return any(
+            (key == "reason" and item == "API_KEY_INVALID")
+            or _contains_invalid_key(item)
+            for key, item in value.items()
+        )
+    if isinstance(value, list):
+        return any(_contains_invalid_key(item) for item in value)
+    return False

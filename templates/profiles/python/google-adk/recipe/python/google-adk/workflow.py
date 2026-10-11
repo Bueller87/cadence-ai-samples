@@ -9,6 +9,7 @@ from cadence.worker import Registry
 
 WORKFLOW = "__RECIPE_CLASS__Workflow"
 MOCK_AGENT_ACTIVITY = "__RECIPE_SLUG__.mock-agent"
+LIVE_AGENT_ACTIVITY = "__RECIPE_SLUG__.google-adk-agent"
 FATAL_AGENT_ERRORS = {
     "LiveAuthenticationError",
     "LiveConfigurationError",
@@ -30,8 +31,6 @@ AGENT_ACTIVITY_OPTIONS = {
 class AgentInput:
     prompt: str
     mode: str = "mock"
-    model_name: str | None = None
-    model_provider: str | None = None
 
 
 @dataclass(frozen=True)
@@ -61,12 +60,11 @@ class __RECIPE_CLASS__Workflow:
                 **AGENT_ACTIVITY_OPTIONS,
             )
         else:
-            from inference import generate_live_response
-
-            response = await generate_live_response(
+            response = await workflow.execute_activity(
+                LIVE_AGENT_ACTIVITY,
+                str,
                 agent_input.prompt,
-                agent_input.model_name,
-                agent_input.model_provider,
+                **AGENT_ACTIVITY_OPTIONS,
             )
         return AgentResult(response=response, mode=agent_input.mode)
 
@@ -76,10 +74,6 @@ class __RECIPE_CLASS__Workflow:
             raise ValueError("prompt must not be empty")
         if agent_input.mode not in {"mock", "live"}:
             raise ValueError("mode must be 'mock' or 'live'")
-        if agent_input.mode == "live" and (
-            not agent_input.model_name or not agent_input.model_provider
-        ):
-            raise ValueError("live mode requires a model selection")
 
 
 def build_registry(model_activities: object | None = None) -> Registry:

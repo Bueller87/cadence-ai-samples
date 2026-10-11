@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -23,65 +25,130 @@ import (
 
 const (
 	cadenceServiceName = "cadence-frontend"
+	defaultAddress     = "127.0.0.1:7933"
+	defaultDomain      = "cadence-ai-samples"
 	defaultWorkflowID  = "__RECIPE_SLUG__-demo"
 	defaultText        = "Investigate this urgent example request."
 )
 
-func main() {
-	mode := flag.String("mode", "demo", "run mode: worker, demo, or live-demo")
-	address := flag.String("address", "127.0.0.1:7933", "Cadence frontend address")
-	domain := flag.String("domain", "cadence-ai-samples", "Cadence domain")
-	taskList := flag.String("task-list", TaskList, "Cadence task list")
-	workflowID := flag.String("workflow-id", defaultWorkflowID, "stable Workflow ID")
-	text := flag.String("text", defaultText, "text to classify")
-	classifierID := flag.String("classifier-id", mockClassifierID, "classifier: mock, or a classifiers.yaml ID such as jev-default or laya-local")
-	catalogDir := flag.String("catalog-dir", defaultCatalogDir, "directory containing classifiers.yaml")
-	confirmLive := flag.Bool("confirm-live", false, "confirm that this process may cause live classifier API usage")
-	flag.Parse()
+type Config struct {
+	Action       string
+	Mode         string
+	Address      string
+	Domain       string
+	TaskList     string
+	WorkflowID   string
+	Text         string
+	ClassifierID string
+	CatalogDir   string
+	ConfirmLive  bool
+}
 
-	selectedClassifier, classifierActivity, err := configuredClassifier(*mode, *classifierID, *catalogDir)
+func (config Config) Validate() error {
+	switch config.Action {
+	case "worker", "start":
+	default:
+		return fmt.Errorf("unsupported action %q; use worker or start", config.Action)
+	}
+	switch config.Mode {
+	case "mock", "live":
+	default:
+		return fmt.Errorf("unsupported mode %q; use mock or live", config.Mode)
+	}
+	for name, value := range map[string]string{
+		"address": config.Address, "domain": config.Domain, "task list": config.TaskList,
+	} {
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("%s is required", name)
+		}
+	}
+	if config.Action == "worker" && config.Mode == "live" {
+		if strings.TrimSpace(config.ClassifierID) == "" {
+			return errors.New("live worker requires -classifier-id")
+		}
+		if strings.TrimSpace(config.CatalogDir) == "" {
+			return errors.New("live worker requires -catalog-dir")
+		}
+		if !config.ConfirmLive {
+			return errors.New("live worker requires -confirm-live")
+		}
+	}
+	if config.Action == "start" {
+		if strings.TrimSpace(config.WorkflowID) == "" {
+			return errors.New("workflow ID is required")
+		}
+		if strings.TrimSpace(config.Text) == "" {
+			return errors.New("text must not be empty")
+		}
+	}
+	return nil
+}
+
+func parseCommand(args []string) (Config, error) {
+	if len(args) == 0 {
+		return Config{}, errors.New("action is required; use worker or start")
+	}
+	config := Config{Action: args[0]}
+	flags := flag.NewFlagSet(config.Action, flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	flags.StringVar(&config.Mode, "mode", "", "execution mode: mock or live (required)")
+	flags.StringVar(&config.Address, "address", defaultAddress, "Cadence frontend address")
+	flags.StringVar(&config.Domain, "domain", defaultDomain, "Cadence domain")
+	flags.StringVar(&config.TaskList, "task-list", TaskList, "Cadence task list")
+	switch config.Action {
+	case "worker":
+		flags.StringVar(&config.ClassifierID, "classifier-id", "laya-local", "classifiers.yaml ID for live mode")
+		flags.StringVar(&config.CatalogDir, "catalog-dir", defaultCatalogDir, "directory containing classifiers.yaml")
+		flags.BoolVar(&config.ConfirmLive, "confirm-live", false, "confirm live classifier API usage")
+	case "start":
+		flags.StringVar(&config.WorkflowID, "workflow-id", defaultWorkflowID, "stable Workflow ID")
+		flags.StringVar(&config.Text, "text", defaultText, "text to classify")
+	}
+	if err := flags.Parse(args[1:]); err != nil {
+		return Config{}, err
+	}
+	if flags.NArg() != 0 {
+		return Config{}, fmt.Errorf("unexpected arguments: %s", strings.Join(flags.Args(), " "))
+	}
+	if err := config.Validate(); err != nil {
+		return Config{}, err
+	}
+	return config, nil
+}
+
+func main() {
+	config, err := parseCommand(os.Args[1:])
 	if err != nil {
 		log.Fatal(err)
 	}
-	if err := validateMode(*mode, selectedClassifier, *confirmLive); err != nil {
-		log.Fatal(err)
+
+	var selectedClassifier string
+	var classifierActivity interface{}
+	if config.Action == "worker" {
+		selectedClassifier, classifierActivity, err = configuredClassifier(
+			config.Mode, config.ClassifierID, config.CatalogDir,
+		)
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
 
-	service, closeDispatcher, err := newServiceClient(*address)
+	service, closeDispatcher, err := newServiceClient(config.Address)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer closeDispatcher()
 
-	switch *mode {
+	switch config.Action {
 	case "worker":
-		if err := runWorker(service, *domain, *taskList, selectedClassifier, classifierActivity); err != nil {
+		if err := runWorker(service, config.Domain, config.TaskList, selectedClassifier, classifierActivity); err != nil {
 			log.Fatal(err)
 		}
-	case "demo":
-		if err := start(context.Background(), client.NewClient(service, *domain, nil), *taskList, *workflowID, *text); err != nil {
+	case "start":
+		if err := start(context.Background(), client.NewClient(service, config.Domain, nil), config.TaskList, config.WorkflowID, config.Text); err != nil {
 			log.Fatal(err)
 		}
-	case "live-demo":
-		if err := start(context.Background(), client.NewClient(service, *domain, nil), *taskList, *workflowID, *text); err != nil {
-			log.Fatal(err)
-		}
-	default:
-		fmt.Fprintf(os.Stderr, "unsupported mode %q; use worker, demo, or live-demo\n", *mode)
-		os.Exit(2)
 	}
-}
-
-func validateMode(mode, classifierID string, confirmLive bool) error {
-	switch mode {
-	case "worker", "demo", "live-demo":
-	default:
-		return fmt.Errorf("unsupported mode %q; use worker, demo, or live-demo", mode)
-	}
-	if classifierID != mockClassifierID && !confirmLive {
-		return fmt.Errorf("%s with classifier %q requires -confirm-live", mode, classifierID)
-	}
-	return nil
 }
 
 func runWorker(service workflowserviceclient.Interface, domain, taskList, classifierID string, classifierActivity interface{}) error {
@@ -126,32 +193,20 @@ func startOptions(taskList, workflowID string) client.StartWorkflowOptions {
 }
 
 // configuredClassifier returns the selected classifier and Worker Activity.
-// Starters validate catalog selections but never construct an HTTP client.
+// Mock mode returns before reading catalogs or credentials.
 func configuredClassifier(mode, classifierID, catalogDir string) (string, interface{}, error) {
+	if mode == "mock" {
+		return mockClassifierID, ClassifyText, nil
+	}
+	if mode != "live" {
+		return "", nil, fmt.Errorf("unsupported mode %q; use mock or live", mode)
+	}
+
 	classifierID = strings.TrimSpace(classifierID)
-	if classifierID == "" {
-		classifierID = mockClassifierID
-	}
-	live := classifierID != mockClassifierID
-
-	if (mode == "live-demo") && !live {
-		return "", nil, fmt.Errorf("%s requires an explicit live -classifier-id such as jev-default or laya-local", mode)
-	}
-	if (mode == "demo") && live {
-		return "", nil, fmt.Errorf("%s is mock-only; use live-demo with -confirm-live for a live classifier", mode)
-	}
-	if !live {
-		return classifierID, ClassifyText, nil
-	}
-
 	config, err := loadClassifier(catalogDir, classifierID)
 	if err != nil {
 		return "", nil, err
 	}
-	if mode != "worker" {
-		return classifierID, nil, nil
-	}
-
 	apiKey := ""
 	if config.Provider == classifierProviderTypeSafe {
 		apiKey = strings.TrimSpace(os.Getenv("CLASSIFIER_AI_KEY"))

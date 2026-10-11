@@ -148,6 +148,27 @@ The contract describes behavior, not one universal source layout or shared
 runtime library. Profile implementations may use language-appropriate command
 syntax while exposing the same concepts.
 
+### Generic command contract
+
+Every generic implementation profile exposes exactly two actions:
+
+- `worker --mode mock|live`
+- `start --mode mock|live`
+
+Languages may use their idiomatic subcommand and option syntax, but the action
+names and mode values remain `worker`, `start`, `mock`, and `live`. Generic
+profiles do not expose scenario-specific actions or modes such as `demo`,
+`live-demo`, `batch`, acknowledgment, or benchmark.
+
+Bare profiles accept both modes for interface consistency. Their starter
+Activities remain synthetic in both modes until the generated recipe replaces
+the live path with its own external Activity integration.
+
+Specialized recipes may expose additional scenario-specific commands when their
+own specification requires them. In particular, Ticket Routing remains a
+specialized reference recipe; its command surface does not define the generic
+template contract.
+
 ### Inference as configuration
 
 For profiles with live inference, `models.yaml` is the source of model provider,

@@ -16,7 +16,7 @@
 
 - Classifier integration. This profile intentionally has classifier `none`.
 - Tools, handoffs, or structured output in the starter agent.
-- Automatic live provider access without explicit Worker confirmation.
+- Provider access outside an explicitly selected live Worker mode.
 
 ## Business scenario
 
@@ -31,12 +31,14 @@ Generated from the `python/openai-agents` profile defined by the
 - **Classifier integration:** none
 - **Agent integration:** OpenAI Agents
 - **Implementation directory:** `python/openai-agents`
-- **Mock and live behavior:** Mock is the default and uses one deterministic
-  Activity without credentials or provider calls. Live mode requires a
-  supported `models.yaml` selection, and the Worker requires `--confirm-live`
-  before constructing provider Activities.
-- **Runtime catalog use:** Live mode reads only repository-root `models.yaml`.
-  This profile neither reads nor requires `classifiers.yaml`.
+- **Mock and live behavior:** Mock uses one deterministic Activity without
+  credentials or provider calls. Live mode requires the Worker to select a
+  supported `models.yaml` entry before constructing the agent Activity.
+- **Runtime catalog use:** Only the live Worker reads repository-root
+  `models.yaml`. Start is configuration-free. This profile neither reads nor
+  requires `classifiers.yaml`.
+- **Live confirmation:** a live Worker requires `--confirm-live` before reading
+  catalogs, credentials, or constructing provider clients.
 - **Workflow ID reuse:** `start` uses
   `__RECIPE_SLUG__-openai-agents-demo` with `ALLOW_DUPLICATE`. A new Run may
   start after the previous Run closes; an open duplicate is rejected.
@@ -54,9 +56,10 @@ Generated from the `python/openai-agents` profile defined by the
 ## Workflow architecture
 
 The starter Workflow validates `mode`, then schedules the deterministic mock
-Activity or runs the no-tool OpenAI Agents loop. The live `CadenceModel`
-implementation turns every provider model request into a Cadence Activity. The
-Workflow does not construct HTTP clients or read environment variables.
+Activity or the stable live agent Activity. The live Activity runs the no-tool
+OpenAI Agents loop with the model and provider client selected by its Worker.
+The Workflow does not construct HTTP clients, read catalogs, or read environment
+variables.
 
 ## AI model or agent responsibilities
 
@@ -68,9 +71,8 @@ ordinary code.
 ## Activity boundaries
 
 - `__RECIPE_SLUG__.mock-agent`: deterministic offline answer used by default.
-- `OpenAIActivities.invoke_model`: typed native OpenAI Responses Activity.
-- `OpenAICompatibleChatCompletions.invoke_model`: JSON-safe Google and Ollama
-  compatibility Activity.
+- `__RECIPE_SLUG__.openai-agents-agent`: live OpenAI Agents execution and model
+  request with Worker-local configuration.
 
 Provider clients, credentials, endpoints, model calls, and provider errors stay
 on the Worker side of these boundaries.
@@ -82,9 +84,7 @@ Workflow input:
 ```json
 {
   "text": "non-empty request text",
-  "mode": "mock or live",
-  "model_name": "catalog model name in live mode, otherwise null",
-  "model_provider": "google, ollama, or openai in live mode, otherwise null"
+  "mode": "mock or live"
 }
 ```
 
@@ -97,7 +97,7 @@ Workflow output:
 }
 ```
 
-Credentials and endpoints are never Workflow fields.
+Model IDs, provider names, credentials, and endpoints are never Workflow fields.
 
 ## Configuration
 
@@ -105,11 +105,10 @@ Credentials and endpoints are never Workflow fields.
 - `--task-list`: defaults to `__RECIPE_SLUG__-openai-agents`.
 - `--workflow-id`: defaults to
   `__RECIPE_SLUG__-openai-agents-demo`.
-- `--catalog-dir`: defaults to the generated checkout root.
-- `--model-id`: defaults to `gemini-flash-lite`.
+- Worker `--catalog-dir`: defaults to the generated checkout root.
+- Worker `--model-id`: defaults to `gemini-flash-lite`.
 - `MODEL_AI_KEY`: required by Google and OpenAI live Workers, unused by mock and
   local Ollama modes.
-- `--confirm-live`: required on live Worker startup.
 
 Supported IDs are `gemini-flash-lite`, `llama3.2-local`, and `openai-nano`.
 Catalog candidates outside that set, unsafe endpoints, unknown IDs, duplicate
@@ -137,13 +136,14 @@ Workflow starts, and transient Activity failures.
 
 ## Tests and acceptance criteria
 
-- Mock Worker and start commands are the defaults and do not load a catalog.
+- Mock Worker and both start modes do not load a catalog.
 - Mock Workflow and Activity tests run without Cadence server or credentials.
 - Every supported live catalog entry validates without provider calls.
 - Safe catalog endpoint changes reach the Worker-local provider client without
   live calls.
-- Live agent tests schedule only the expected model Activity.
-- Live Worker startup fails without `--confirm-live`.
+- Live agent tests schedule only the stable Worker-owned agent Activity.
+- Live Worker startup fails before catalog access unless `--confirm-live` is
+  present.
 - Classifier catalogs and classifier flags are absent.
 - A closed demo ID may be reused, while an open duplicate is reported.
 - Generated files contain no unresolved placeholders or cross-recipe imports.
