@@ -14,7 +14,9 @@ or contradict it.
 - Chat history and proprietary agent memory are never authoritative.
 
 Read [agent-context/README.md](agent-context/README.md) for the repository map,
-reading order, and handoff commands.
+reading order, and handoff commands. Use the
+[contribution workflow cheat sheet](WORKFLOW.md) for short intent phrases;
+this file remains authoritative.
 
 ## Startup
 
@@ -24,9 +26,13 @@ reading order, and handoff commands.
    the current contributor's fork; never assume a particular fork owner.
 3. Read only the assigned Issue/PR, linked specification, relevant README, code,
    and tests. Do not read the whole repository by default.
-4. Implement only an open Issue labeled `status:agent-ready`. If authorization
-   begins in conversation, record it in an upstream Issue and wait for that label
-   so the next agent can reconstruct the decision without chat.
+4. Begin new implementation only for an open Issue labeled
+   `status:agent-ready`. Resume `status:in-progress` work only when the Issue
+   claim or assignee identifies the contributor whose fork and checkout are in
+   use, and a matching local or remote `issue-N-short-slug` branch exists. If
+   authorization begins in conversation, record it in an upstream Issue and wait
+   for `status:agent-ready` so the next agent can reconstruct the decision
+   without chat.
 5. Before editing, restate the problem, acceptance criteria, scope, non-goals,
    and decisions that require human authority.
 
@@ -37,13 +43,15 @@ reading order, and handoff commands.
 - Every Issue and label command must explicitly target
   `cadence-workflow/cadence-ai-samples`; never infer the target from `origin`.
 - Only a human may promote an Issue to `status:agent-ready`, approve architecture
-  or priority, approve a PR, or merge.
+  or priority, approve a PR, or authorize a merge.
 - Any contributor may claim an unassigned `status:agent-ready` Issue. Immediately
   before claiming, recheck its assignee, comments, labels, and active linked PRs.
 - Claim in this order: comment intent, remove `status:agent-ready`, add
   `status:in-progress`, then create the branch.
-- Skip assigned, claimed, linked-PR, or `status:in-progress` work. Do not open
-  competing implementation PRs without agreement.
+- Skip work assigned to or claimed by another contributor, including work with a
+  linked PR or `status:in-progress`. Resume only the current contributor's
+  matching claimed Issue and branch. Do not open competing implementation PRs
+  without agreement.
 - If abandoning work, comment the reason and current state, remove
   `status:in-progress`, and restore `status:agent-ready`. Preserve or delete the
   branch only with human direction.
@@ -65,6 +73,22 @@ reading order, and handoff commands.
 - Do not run paid inference, secret-bearing Workers, destructive git commands, or
   external writes beyond the authorized scope.
 
+## Local implementation completion
+
+Before reporting implementation done, ready for review, or ready to commit, post
+a durable comment to the claimed Issue containing:
+
+- the branch and changed paths;
+- exact validation commands and actual results;
+- untested behavior, limitations, and blockers;
+- working-tree, commit, and push state; and
+- the exact next step.
+
+Re-read the Issue, open the comment URL, and verify that the Issue remains
+`status:in-progress` before reporting completion. This checkpoint is required
+before a commit or PR exists and applies whether the contributor or an authorized
+agent creates the commit. Chat and terminal output do not satisfy it.
+
 ## Git and pull requests
 
 - Branches and pushes use the contributor's verified `origin` fork.
@@ -73,8 +97,16 @@ reading order, and handoff commands.
 - PRs use the contributor fork as head and
   `cadence-workflow/cadence-ai-samples:main` as base.
 - Sign every commit with DCO using lowercase `-s`.
-- Never force-push, merge, mark ready, or self-approve unless the repository owner
-  explicitly directs it. Every PR requires repository-owner approval.
+- Follow the contributor's declared commit policy. Do not create a commit unless
+  authorized. When the contributor owns commits, provide the conventional commit
+  message, remind them to create the commit with lowercase `-s`, and stop.
+- `Write the PR description` returns text only and authorizes no GitHub write.
+- `The branch is committed and pushed. Prepare the PR` requires verification of
+  the committed and pushed state before creating or updating a draft PR.
+- Never force-push or mark a PR ready unless the repository owner explicitly
+  directs it. Agents never self-approve. An agent may execute a merge only after
+  explicit repository-owner direction and verification of required approval and
+  checks; without merge authorization, report the remaining gate and stop.
 - Link the Issue and include summary, spec/ADR impact, exact validation evidence,
   untested behavior, and known limitations.
 
@@ -89,16 +121,16 @@ reading order, and handoff commands.
 - Run instructions or user-visible behavior change: update the relevant README.
 - No trigger: do not churn context documents.
 
-## Handoff
+## Post-push PR handoff
 
-Before handing work to another machine or agent:
+After the signed commit is pushed:
 
-1. Preserve the branch and working tree; push only when authorized.
-2. Open or update the draft PR and linked Issue.
-3. Record changed paths, commits, actual tests/results, limitations, blockers, and
-   exact next steps.
-4. Finalize the PR description after the signed commit is pushed so its commit,
-   branch, checklist, and validation state are not stale.
+1. Verify the committed branch is pushed to the contributor's `origin`.
+2. Open or update the draft PR and link the Issue.
+3. Finalize the PR description from committed Git and the durable Issue evidence
+   so its commit, branch, checklist, and validation state are current.
+4. Record commits, actual tests/results, limitations, blockers, and exact next
+   steps.
 5. Update specs/ADRs only when their triggers apply.
 6. Leave the next agent able to resume from a fresh checkout, this file, the
    context map, and the linked Issue/PR without conversational history.

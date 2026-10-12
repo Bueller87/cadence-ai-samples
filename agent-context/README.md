@@ -58,6 +58,7 @@ centralize documentation.
 
 - [Project README](../README.md)
 - [Contributing](../CONTRIBUTING.md)
+- [Contribution workflow cheat sheet](../WORKFLOW.md)
 - [Ticket routing README](../recipes/ticket-routing/README.md)
 - [Human-in-the-loop README](../recipes/human-in-the-loop/README.md)
 - [Recurring AI Watch README](../recipes/recurring-ai-watch/README.md)
@@ -151,17 +152,33 @@ recipe. Agents add `source:agent` explicitly; human-created web forms do not.
 Never add `status:agent-ready`, assign priority, or create the Issue in a
 contributor fork.
 
-## Contribution and handoff
+## Local completion and handoff
 
-1. Branch from the agreed upstream base and push to the contributor's `origin`.
-2. Keep one implementation PR per Issue.
-3. Open a draft cross-fork PR with upstream `main` as base.
-4. Link the Issue and record summary, spec/ADR impact, exact tests/results,
-   untested behavior, and limitations.
+Before reporting implementation ready for review or commit, post the evidence
+required by [AGENTS.md](../AGENTS.md) to the claimed Issue. Re-read the Issue,
+open the new comment URL, and verify `status:in-progress`. This checkpoint does
+not require a commit, push, or PR.
+
+A fresh agent may resume pre-commit work from the claimed Issue and its preserved
+matching local checkout. Cross-computer recovery additionally requires a signed
+commit and pushed branch; the PR records the later review and merge state.
+
+After local completion:
+
+1. Follow the contributor's policy for creating the DCO-signed commit.
+2. Push only when authorized, using the contributor's verified `origin`.
+3. Verify the committed branch is pushed, then open or update one draft
+   cross-fork PR with upstream `main` as base.
+4. Link the Issue and finalize the PR body from committed Git and Issue evidence,
+   including spec/ADR impact, exact tests/results, untested behavior, and
+   limitations.
 5. Update the Issue with the PR link and blockers.
-6. The repository owner reviews and approves every PR; contributors and agents do
-   not self-approve or merge.
-7. The next agent resumes from the branch, Issue, PR, linked spec, and this map.
+6. The repository owner reviews and approves every PR and is the only merge
+   authority. Agents never self-approve. An agent may execute a merge only after
+   explicit repository-owner direction and verification of required approval and
+   checks; without authorization, it reports the remaining gate and stops.
+7. The next agent resumes from the branch, Issue, PR, linked spec, and this map,
+   without chat or terminal history.
 
 ## When context documents change
 
