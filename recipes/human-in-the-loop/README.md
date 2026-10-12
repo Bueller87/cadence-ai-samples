@@ -88,6 +88,21 @@ The approve Run finishes `APPROVED_COMPLETED`; the reject Run finishes
 Cadence Web can run the `get_interruptions` query. Its markdown result includes
 buttons for the same approve and reject Signals.
 
+### Explorer approval and rejection
+
+The optional recipe-root [`explorer.yaml`](explorer.yaml) declares
+`approve_tool_call` and `reject_tool_call` for the Local Samples Explorer. After
+starting a Run, use **Open queries** or `python main.py status` to obtain the
+pending `call_id`. Resolve the exact current Run in the Explorer, enter that ID
+in the rendered field, choose approve or reject, and complete the separate
+confirmation step. The Explorer sends the value as the Signal handler's one
+positional string argument.
+
+The call ID is submitted in a same-origin POST body. It is not added to Explorer
+URLs, logs, saved browser state, durable validation evidence, or sanitized error
+text. Cadence-Web acceptance still does not prove the Workflow processed the
+decision; confirm the resulting status or history.
+
 ## Local Ollama live walkthrough
 
 Install and start Ollama, then make sure the catalog model is available:
@@ -176,3 +191,10 @@ Copy the entire `recipes/human-in-the-loop` directory and retain the
 Keep provider calls and tools at Activity boundaries, and replace the synthetic
 booking with a real integration only after adding an idempotency key, secret
 handling, retry policy, and explicit authorization controls.
+
+Retain `explorer.yaml` only if the copied Workflow keeps the exact approve and
+reject Signal names, one positional string `call_id`, and the same confirmation
+semantics. Modify and test the declaration with any handler change, or remove it
+to keep the copied recipe runnable without Explorer Signal controls. The file
+must not contain commands, Workflow IDs, model or provider configuration,
+endpoints, credentials, query results, or raw JSON templates.

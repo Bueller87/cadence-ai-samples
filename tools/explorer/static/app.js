@@ -34,8 +34,8 @@
     $("workflow-id-help").textContent="";$("web-cluster").textContent="";
     $("workflow-run-status").textContent="Run not resolved.";$("workflow-run-status").className="small";
     for(const id of ["workflow-history","workflow-queries"]){$(id).hidden=true;$(id).removeAttribute("href");}
-    $("watch-signals").hidden=true;$("signal-status").textContent="";
-    for(const id of ["signal-check-now","signal-stop-watch"]){const button=$(id);button.disabled=false;button.textContent=button.dataset.signal==="check-now"?"Send check-now":"Send stop-watch";button.classList.remove("copied","failed");}
+    $("workflow-signals").hidden=true;$("signal-controls").replaceChildren();$("signal-status").textContent="";
+    $("signal-metadata-status").hidden=true;$("signal-metadata-status").textContent="";
     $("workflow-run-scope").textContent=message;
   }
 
@@ -135,6 +135,9 @@
       $("workflow-id-help").textContent=recipe?.id==="ticket-routing"?"Enter an exact parent, child, or batch Workflow ID. The Explorer will not choose one.":"Enter the exact Workflow ID produced by this recipe. The Explorer will not choose one.";
       $("workflow-run-scope").textContent="This selection does not expose one safe Workflow ID. Enter the exact Workflow before resolving a run.";
     }
+    renderSignalControls();
+    $("signal-metadata-status").textContent=result.signal_metadata_error||"";
+    $("signal-metadata-status").hidden=!result.signal_metadata_error;
     $("read-at").textContent="Recipe files read at "+new Date(result.read_at).toLocaleTimeString()+".";
   }
 
@@ -194,12 +197,97 @@
     finally{if(version===requestVersion)button.disabled=false;}
   }
 
+  function signalFieldValue(control,argument,field){
+    const raw=field.value;
+    if(raw===""){
+      if(argument.required)throw Error(`Enter ${argument.label}.`);
+      return [false,null];
+    }
+    let value=raw;
+    if(argument.type==="integer"){
+      value=Number(raw);if(!Number.isInteger(value))throw Error(`${argument.label} must be an integer.`);
+    }else if(argument.type==="number"){
+      value=Number(raw);if(!Number.isFinite(value))throw Error(`${argument.label} must be a number.`);
+    }else if(argument.type==="boolean"){
+      value=raw==="true";
+    }
+    const constraints=argument.constraints||{};
+    if(argument.type==="string"&&((constraints.min_length??0)>value.length||value.length>(constraints.max_length??4096)))throw Error(`${argument.label} does not satisfy its length limits.`);
+    if(["integer","number"].includes(argument.type)&&((constraints.minimum??-1e12)>value||value>(constraints.maximum??1e12)))throw Error(`${argument.label} is outside its allowed range.`);
+    return [true,value];
+  }
+
+  function signalArguments(control,card){
+    const values={};
+    for(const argument of control.arguments){
+      const field=card.querySelector(`[data-signal-argument="${argument.name}"]`);
+      const [present,value]=signalFieldValue(control,argument,field);
+      if(present)values[argument.name]=value;
+    }
+    return values;
+  }
+
+  function resetSignalForms(clearValues=true){
+    for(const card of $("signal-controls").querySelectorAll(".signal-control")){
+      for(const field of card.querySelectorAll("button,input,select"))field.disabled=false;
+      if(clearValues)for(const field of card.querySelectorAll("[data-signal-argument]"))field.value="";
+      const confirmation=card.querySelector(".signal-confirmation");if(confirmation)confirmation.hidden=true;
+      const send=card.querySelector(".signal-send");if(send){send.disabled=false;send.textContent=send.dataset.defaultLabel;send.classList.remove("copied","failed");}
+    }
+  }
+
+  function setSignalControlsDisabled(disabled){
+    for(const field of $("signal-controls").querySelectorAll("button,input,select"))field.disabled=disabled;
+  }
+
+  function renderSignalControls(){
+    $("signal-controls").replaceChildren();
+    for(const control of result?.signals||[]){
+      const card=node("article");card.className="signal-control";card.dataset.signalId=control.id;
+      const heading=node("div");heading.className="signal-control-heading";heading.append(node("strong",control.label));
+      if(control.intent!=="normal"){const intent=node("span",control.intent);intent.className="signal-intent "+control.intent;heading.append(intent);}
+      card.append(heading,node("p",control.description));
+      for(const argument of control.arguments){
+        const fieldId=`signal-${control.id}-${argument.name}`;
+        const label=node("label",argument.label+(argument.required?"":" (optional)"));label.htmlFor=fieldId;
+        let field;
+        if(argument.type==="boolean"){
+          field=node("select");const empty=node("option","Choose…");empty.value="";field.append(empty);
+          for(const value of ["true","false"]){const option=node("option",value);option.value=value;field.append(option);}
+        }else{
+          field=node("input");field.type=argument.type==="string"?"text":"number";
+          if(argument.type==="integer")field.step="1";else if(argument.type==="number")field.step="any";
+          if(argument.constraints?.max_length!==undefined)field.maxLength=argument.constraints.max_length;
+          if(argument.constraints?.minimum!==undefined)field.min=argument.constraints.minimum;
+          if(argument.constraints?.maximum!==undefined)field.max=argument.constraints.maximum;
+        }
+        field.id=fieldId;field.dataset.signalArgument=argument.name;field.autocomplete="off";field.spellcheck=false;
+        field.addEventListener("input",()=>{const confirmation=card.querySelector(".signal-confirmation");if(confirmation)confirmation.hidden=true;$("signal-status").textContent="";});
+        card.append(label,field,node("p",argument.help));
+      }
+      const actions=node("div");actions.className="button-group signal-actions";
+      const send=node("button",`Send ${control.label}`);send.type="button";send.className="signal-send"+(control.intent==="destructive"?" danger":"");send.dataset.defaultLabel=send.textContent;
+      if(control.intent==="normal")send.addEventListener("click",()=>sendWorkflowSignal(control,card,send));
+      else{
+        const confirmation=node("div");confirmation.className="signal-confirmation";confirmation.hidden=true;
+        const message=node("p",`${control.label} requires confirmation.`);
+        const confirm=node("button",`Confirm ${control.label}`);confirm.type="button";if(control.intent==="destructive")confirm.className="danger";
+        const cancel=node("button","Cancel");cancel.type="button";cancel.className="secondary";
+        send.addEventListener("click",()=>{try{signalArguments(control,card);confirmation.hidden=false;$("signal-status").textContent="";}catch(error){$("signal-status").className="small error";$("signal-status").textContent=error.message;}});
+        confirm.addEventListener("click",()=>sendWorkflowSignal(control,card,send));
+        cancel.addEventListener("click",()=>{confirmation.hidden=true;});
+        confirmation.append(message,confirm,cancel);card.append(confirmation);
+      }
+      actions.append(send);card.append(actions);$("signal-controls").append(card);
+    }
+  }
+
   function updateRunLinks(source="entered",message=""){
     const runId=$("run-id").value.trim();
     const workflowId=$("web-workflow-id").value.trim();
     signalRequestVersion++;resolvedRunId=source==="resolved"?runId:"";
-    $("watch-signals").hidden=source!=="resolved"||!runId||recipe?.id!=="recurring-ai-watch";$("signal-status").textContent="";
-    if(source==="resolved"&&runId)for(const id of ["signal-check-now","signal-stop-watch"]){const button=$(id);button.disabled=false;button.textContent=button.dataset.signal==="check-now"?"Send check-now":"Send stop-watch";button.classList.remove("copied","failed");}
+    $("workflow-signals").hidden=source!=="resolved"||!runId||!result?.signals?.length;$("signal-status").textContent="";
+    resetSignalForms(true);
     if(!result||!workflowId||!runId){
       for(const id of ["workflow-history","workflow-queries"]){$(id).hidden=true;$(id).removeAttribute("href");}
       $("workflow-run-status").textContent="Run not resolved.";$("workflow-run-status").className="small";
@@ -227,25 +315,32 @@
     finally{if(selectionVersion===requestVersion&&version===runRequestVersion)$("resolve-run").disabled=false;}
   }
 
-  async function sendWorkflowSignal(action,button){
+  async function sendWorkflowSignal(control,card,button){
     if(!result||!resolvedRunId||$("run-id").value.trim()!==resolvedRunId)return;
+    let argumentValues;
+    try{argumentValues=signalArguments(control,card);}
+    catch(error){$("signal-status").className="small error";$("signal-status").textContent=error.message;return;}
+    const confirmation=card.querySelector(".signal-confirmation");if(confirmation)confirmation.hidden=true;
     const selectionVersion=requestVersion,runVersion=runRequestVersion,version=++signalRequestVersion;
-    const buttons=[$("signal-check-now"),$("signal-stop-watch")],original=button.dataset.signal==="check-now"?"Send check-now":"Send stop-watch";
-    for(const control of buttons)control.disabled=true;
-    $("signal-status").className="small";$("signal-status").textContent=`Sending ${action} through Cadence-Web…`;
+    const original=button.dataset.defaultLabel;
+    setSignalControlsDisabled(true);
+    $("signal-status").className="small";$("signal-status").textContent=`Sending ${control.label} through Cadence-Web…`;
     try{
-      const payload={...Object.fromEntries(query()),action,run_id:resolvedRunId};
+      const payload={...Object.fromEntries(query()),signal_id:control.id,
+        signal_metadata_revision:result.signal_metadata_revision,
+        arguments:argumentValues,run_id:resolvedRunId};
       const response=await fetch("/api/workflow-signal",{method:"POST",headers:{"Content-Type":"application/json","Origin":location.origin},body:JSON.stringify(payload)});
       const body=await response.json();if(selectionVersion!==requestVersion||runVersion!==runRequestVersion||version!==signalRequestVersion)return;
       if(!response.ok)throw Error(body.error||body.detail||"Signal request failed.");
       const accepted=body.state==="accepted";
       button.textContent=accepted?"Signal sent ✓":"Send failed";button.classList.add(accepted?"copied":"failed");
       $("signal-status").className=accepted?"small ready":"small error";$("signal-status").textContent=body.detail||"Signal request failed.";
-      if(body.state==="stale run"||body.state==="no execution"){resolvedRunId="";$("workflow-run-status").className="small error";$("workflow-run-status").textContent=body.detail;for(const control of buttons)control.disabled=true;}
+      if(accepted)for(const field of card.querySelectorAll("[data-signal-argument]"))field.value="";
+      if(body.state==="stale run"||body.state==="no execution"){resolvedRunId="";$("workflow-signals").hidden=true;$("workflow-run-status").className="small error";$("workflow-run-status").textContent=body.detail;}
       setTimeout(()=>{if(selectionVersion===requestVersion&&runVersion===runRequestVersion){button.textContent=original;button.classList.remove("copied","failed");}},2000);
     }catch(error){
       if(selectionVersion===requestVersion&&runVersion===runRequestVersion&&version===signalRequestVersion){button.textContent="Send failed";button.classList.add("failed");$("signal-status").className="small error";$("signal-status").textContent=error.message;setTimeout(()=>{if(selectionVersion===requestVersion&&runVersion===runRequestVersion){button.textContent=original;button.classList.remove("failed");}},2000);}
-    }finally{if(selectionVersion===requestVersion&&runVersion===runRequestVersion&&version===signalRequestVersion&&resolvedRunId)for(const control of buttons)control.disabled=false;}
+    }finally{if(selectionVersion===requestVersion&&runVersion===runRequestVersion&&version===signalRequestVersion&&resolvedRunId)setSignalControlsDisabled(false);}
   }
 
   async function refresh(runChecks=false){
@@ -263,7 +358,6 @@
   $("refresh").addEventListener("click",()=>refresh(true));$("warmup").addEventListener("click",warmup);
   $("resolve-run").addEventListener("click",resolveWorkflowRun);$("run-id").addEventListener("input",()=>{runRequestVersion++;$("resolve-run").disabled=!$("web-workflow-id").value.trim();updateRunLinks("entered");});
   $("web-workflow-id").addEventListener("input",()=>{if($("web-workflow-id").readOnly)return;runRequestVersion++;$("run-id").value="";$("resolve-run").disabled=!$("web-workflow-id").value.trim();updateRunLinks("entered");});
-  document.querySelectorAll("[data-signal]").forEach(button=>button.addEventListener("click",()=>sendWorkflowSignal(button.dataset.signal,button)));
   document.querySelectorAll("[data-copy]").forEach(button=>button.addEventListener("click",()=>{if(result)copyText(result[button.dataset.copy],button);}));
   document.querySelectorAll("[data-terminal]").forEach(button=>button.addEventListener("click",()=>openTerminal(button.dataset.terminal,button)));
   refresh(false);

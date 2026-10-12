@@ -148,17 +148,33 @@ output; the Explorer does not choose an arbitrary Workflow. A manually entered
 Workflow ID and Run ID can open exact History and Queries links without first
 resolving the latest Run.
 
-After a successful latest-run resolution, Recurring AI Watch also shows
-payload-free **Send check-now** and **Send stop-watch** controls. The Explorer
-revalidates that the displayed run is still current, maps only those two
-allowlisted actions, and proxies the Signal through Cadence-Web. Button feedback
-means Cadence-Web accepted or rejected the request; it does not prove the
-Workflow processed the Signal. Editing the Run ID disables the controls until the
-latest run is resolved again. The copyable CLI controls remain available.
+After a successful latest-run resolution, a recipe with valid optional
+`explorer.yaml` Signal metadata shows its declared controls. Recurring AI Watch
+provides payload-free **Check now** and confirmed **Stop watch** controls. Human
+in the Loop provides confirmed approve and reject controls with one required
+call-ID field. Editing the Workflow or Run ID hides the controls until the
+latest run is resolved again.
 
-Queries continue to run in Cadence-Web through **Open queries**. Generic Signal
-discovery and payload forms are future work; the Explorer does not accept
-arbitrary Signal names, raw JSON payloads, or browser-provided serialization.
+The browser sends the rendered metadata revision, a stable control ID, and field
+values. Before contacting Cadence-Web, the backend reloads the selected recipe's
+declaration and rejects missing or changed revisions with an instruction to
+refresh the Explorer. It validates the control and values, revalidates that the
+displayed Run is still current, and checks the metadata revision again before
+the Signal POST. Confirm and destructive controls require a separate
+confirmation click. Button feedback means Cadence-Web accepted or rejected the
+request; it does not prove the Workflow processed the Signal.
+
+Queries continue to run in Cadence-Web through **Open queries**. The Explorer
+does not accept arbitrary Signal names, raw JSON payloads, or browser-provided
+schemas and serialization. Recipes without `explorer.yaml` remain usable and
+show no Signal panel. Invalid metadata also suppresses the panel and reports a
+bounded validation error without disabling the recipe's commands or links.
+
+See the [Explorer specification](SPEC-Explorer.md#recipe-owned-signal-metadata)
+for the exact v1 schema and limits. When copying a recipe, copy its
+`explorer.yaml` only if the copied Workflow retains those exact Signal handlers.
+Update the declaration with the handler contract, or remove it to disable
+Explorer Signal controls.
 
 ## Validation
 
@@ -173,7 +189,8 @@ actions and live-batch bounds, changed catalogs/CLI guards, new/incomplete
 recipes, both modes and actions for every generated profile,
 non-execution of recipe modules, quoting of paths with spaces, probe/warm-up
 failures, Terminal handoff and fallback, action protection, HTTP refresh
-behavior, and source-file boundaries.
+behavior, source-file boundaries, strict Signal metadata, backend Signal
+serialization, and exact-current-Run revalidation.
 
 The optional DOM workflow check requires Node.js and jsdom 26.1.0, solely for
 development; these are not explorer runtime dependencies. Install jsdom into a
