@@ -158,14 +158,47 @@ class ExplorerTests(unittest.TestCase):
 
     def test_current_discovery_and_modes(self):
         state=self.explorer.snapshot()
-        self.assertEqual([r['id'] for r in state['recipes']],['recurring-ai-watch','ticket-routing'])
-        watch,ticket=state['recipes']
+        self.assertEqual([r['id'] for r in state['recipes']],
+                         ['human-in-the-loop','recurring-ai-watch','ticket-routing'])
+        hitl,watch,ticket=state['recipes']
+        self.assertEqual([v['framework'] for v in hitl['variants']],['openai-agents'])
         self.assertEqual([v['framework'] for v in watch['variants']],['google-adk','openai-agents'])
-        self.assertTrue(all(v['supported'] for v in watch['variants']+ticket['variants']))
+        self.assertTrue(all(v['supported'] for v in
+                            hitl['variants']+watch['variants']+ticket['variants']))
+        self.assertEqual(hitl['variants'][0]['modes'],['mock','live'])
         self.assertEqual(watch['variants'][0]['modes'],['mock','live'])
         self.assertEqual(ticket['variants'][0]['live_modes'],['live-demo','live-batch'])
         self.assertEqual(ticket['variants'][0]['mock_modes'],['demo','start-ticket','batch'])
         self.assertEqual([entry['id'] for entry in state['classifiers']],['jev-default','laya-local'])
+
+    def test_human_in_the_loop_resolves_worker_and_start_without_imports(self):
+        implementation='recipes/human-in-the-loop/python/openai-agents'
+        variant=next(r for r in self.explorer.snapshot()['recipes']
+                     if r['id']=='human-in-the-loop')['variants'][0]
+        self.assertFalse(variant['generic'])
+        self.assertEqual(set(variant['actions']),
+                         {'worker','start','status','approve','reject'})
+        result=self.explorer.resolve(dict(sample='human-in-the-loop',
+            implementation=implementation,mode='live',model='llama3.2-local'))
+        self.assertEqual([control['name'] for control in result['controls']],['status'])
+        path=self.root/implementation/'main.py'
+        tree=ast.parse(path.read_text())
+        body=[n for n in tree.body if
+              isinstance(n,ast.FunctionDef) and n.name=='parser' or
+              isinstance(n,ast.Assign) and isinstance(n.targets[0],ast.Name)
+              and n.targets[0].id.startswith('DEFAULT_')]
+        scope=dict(argparse=argparse,Path=Path,__file__=str(path),__doc__='CLI validation')
+        exec(compile(ast.Module(body=body,type_ignores=[]),str(path),'exec'),scope)
+        parsed={}
+        for name,line in (('worker',result['worker']),('start',result['start'])):
+            tokens=shlex.split(line)
+            args=scope['parser']().parse_args(tokens[tokens.index('main.py')+1:])
+            parsed[name]=args
+        self.assertEqual(parsed['worker'].model_id,'llama3.2-local')
+        self.assertEqual(parsed['worker'].mode,'live')
+        self.assertTrue(parsed['worker'].confirm_live)
+        self.assertEqual(parsed['start'].mode,'live')
+        self.assertFalse(hasattr(parsed['start'],'model_id'))
 
     def test_every_watch_combination_and_actual_cli_parser(self):
         accepted=blocked=evidenced=commands=0
@@ -215,11 +248,13 @@ class ExplorerTests(unittest.TestCase):
     def test_modes_and_flags_follow_source_edits(self):
         path=self.root/'recipes/recurring-ai-watch/python/google-adk/main.py'
         path.write_text(path.read_text().replace('choices=("mock", "live")','choices=("mock",)'))
-        variant=self.explorer.snapshot()['recipes'][0]['variants'][0]
+        variant=next(r for r in self.explorer.snapshot()['recipes']
+                     if r['id']=='recurring-ai-watch')['variants'][0]
         self.assertEqual(variant['modes'],['mock'])
         with self.assertRaises(InvalidSelection):self.watch()
         path.write_text(path.read_text().replace('cli.add_argument("--workflow-id", default=DEFAULT_WORKFLOW_ID)',''))
-        variant=self.explorer.snapshot()['recipes'][0]['variants'][0]
+        variant=next(r for r in self.explorer.snapshot()['recipes']
+                     if r['id']=='recurring-ai-watch')['variants'][0]
         self.assertFalse(variant['supported']);self.assertIn('--workflow-id',variant['reason'])
 
     def test_live_validation_follows_source_instead_of_id_list(self):

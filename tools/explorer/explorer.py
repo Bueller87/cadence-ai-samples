@@ -277,10 +277,14 @@ class Explorer:
             base = ['.venv/bin/python','main.py',domain_flag,domain,
                     '--task-list',task_list,'--workflow-id',workflow_id]
             for flag,config in (('--model-id',model),('--classifier-id',classifier)):
-                if config:
+                if config and flag in flags:
                     base += [flag,config['id']]
             worker = base+['worker','--mode',mode]
             starter = base+['start','--mode',mode]
+            worker_scope = cli['commands']['worker']
+            for flag,config in (('--model-id',model),('--classifier-id',classifier)):
+                if config and flag in worker_scope:
+                    worker += [flag,config['id']]
             if live and '--confirm-live' in cli['commands']['worker']:
                 worker += ['--confirm-live']
             controls = []
