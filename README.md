@@ -112,3 +112,5 @@ implemented in this checkout.
 Coding agents start with [AGENTS.md](AGENTS.md) and the
 [repository context map](agent-context/README.md). These files describe how work
 is approved, discovered, validated, and handed off across tools and machines.
+Use the [contribution workflow cheat sheet](WORKFLOW.md) for the short intent
+phrases that move work from an idea through review and merge.

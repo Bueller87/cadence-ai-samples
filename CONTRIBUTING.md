@@ -11,12 +11,18 @@ Start a contribution with a specific problem or use case, not a library feature.
    PR. Recheck immediately before claiming, comment your intent, replace
    `status:agent-ready` with `status:in-progress`, then create an
    `issue-N-short-slug` branch.
-4. Work on that branch in your fork and open a draft PR against
+4. Work on that branch, then post and verify the local-completion evidence
+   required by [AGENTS.md](AGENTS.md) before calling it ready for review or commit.
+5. Follow the contributor's commit policy. Every commit requires DCO sign-off
+   with lowercase `git commit -s`, regardless of who creates it.
+6. After the signed commit is pushed, open a draft PR against
    `cadence-workflow/cadence-ai-samples:main`.
-5. Link the Issue and include actual test commands/results, untested behavior, and
+7. Link the Issue and include actual test commands/results, untested behavior, and
    known limitations.
-6. Sign every commit for DCO with `git commit -s`.
-7. Wait for repository-owner approval. Do not approve or merge your own PR.
+8. Wait for repository-owner approval. Never self-approve. A coding agent may
+   execute a merge only after explicit repository-owner direction and after
+   verifying required approval and checks; without authorization, it reports the
+   remaining gate and stops.
 
 Anyone may propose work. Unapproved ideas use `status:needs-triage`; only a human
 maintainer promotes them to `status:agent-ready`.
@@ -31,9 +37,10 @@ the Issue, not the coding tool, because work may move between agents.
 Agent-assisted changes follow the same Issue, branch, PR, review, and validation
 requirements as human-written changes. Coding agents must begin with
 [AGENTS.md](AGENTS.md) and the
-[repository context map](agent-context/README.md). Agents may create upstream
-`status:needs-triage` proposals but may not approve priority, architecture, PRs,
-or merges.
+[repository context map](agent-context/README.md). The
+[contribution workflow cheat sheet](WORKFLOW.md) maps short intent phrases to
+these gates. Agents may create upstream `status:needs-triage` proposals but may
+not approve priority or architecture, approve PRs, or authorize merges.
 
 ## Recipe contributions
 
