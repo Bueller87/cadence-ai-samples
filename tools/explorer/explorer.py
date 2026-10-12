@@ -413,11 +413,24 @@ class Explorer:
 
     def workflow_run(self, request):
         resolved = self.resolve(request)
-        if request.get('sample') != 'recurring-ai-watch':
-            raise Unsupported('Direct run links currently support Recurring AI Watch only.')
         workflow_id = resolved.get('workflow_id')
         if not isinstance(workflow_id, str) or not workflow_id:
-            raise Unsupported('The selected recipe does not expose one Workflow ID.')
+            workflow_id = request.get('workflow_id')
+            if not isinstance(workflow_id, str) or not workflow_id.strip():
+                raise Unsupported(
+                    'Enter one exact Workflow ID before resolving a run.')
+            workflow_id = workflow_id.strip()
+            if (len(workflow_id) > 255
+                    or any(ord(character) < 32 for character in workflow_id)):
+                raise InvalidSelection('Enter a valid Workflow ID.')
+        previous_run_id = request.get('run_id')
+        if previous_run_id:
+            if (not isinstance(previous_run_id, str)
+                    or len(previous_run_id) > 255
+                    or any(ord(character) < 32
+                        for character in previous_run_id)):
+                raise InvalidSelection('Enter a valid previous Run ID.')
+            previous_run_id = previous_run_id.strip()
         checked_at = datetime.now(timezone.utc).isoformat(timespec='seconds')
         result = dict(state='unreachable', domain=resolved['domain'],
             cluster=self.cadence_cluster, workflow_id=workflow_id,
@@ -447,6 +460,10 @@ class Explorer:
             elif len(run_id) > 255 or any(ord(character) < 32 for character in run_id):
                 result.update(state='malformed response',
                     detail='Cadence-Web returned an invalid Run ID.')
+            elif previous_run_id and previous_run_id != run_id:
+                result.update(state='stale run', run_id=run_id,
+                    detail=('The previous Run ID is stale. The current Run ID '
+                        'changed, which can happen after Continue-As-New.'))
             else:
                 result.update(state='found', run_id=run_id,
                     detail='Resolved the current Run ID through Cadence-Web.')
@@ -473,6 +490,9 @@ class Explorer:
         action = request.get('action')
         if action not in signals:
             raise InvalidSelection('Workflow Signal action must be check-now or stop-watch.')
+        if request.get('sample') != 'recurring-ai-watch':
+            raise Unsupported(
+                'Workflow Signal controls currently support Recurring AI Watch only.')
         displayed_run = request.get('run_id')
         if (not isinstance(displayed_run, str) or not displayed_run.strip()
                 or len(displayed_run) > 255

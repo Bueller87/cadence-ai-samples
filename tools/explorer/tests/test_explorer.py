@@ -603,6 +603,11 @@ class ExplorerTests(unittest.TestCase):
             stub.shutdown();stub.server_close();thread.join()
 
     def test_workflow_run_resolution_states_and_http_route(self):
+        generic=self.root/'recipes/generic-single/python'
+        generic.mkdir(parents=True)
+        watch_source=self.root/'recipes/recurring-ai-watch/python/google-adk'
+        shutil.copy(watch_source/'main.py',generic/'main.py')
+        shutil.copy(watch_source/'live.py',generic/'live.py')
         stub=ThreadingHTTPServer(('127.0.0.1',0),WorkflowStub)
         thread=threading.Thread(target=stub.serve_forever,daemon=True);thread.start()
         base=f'http://127.0.0.1:{stub.server_port}'
@@ -620,7 +625,56 @@ class ExplorerTests(unittest.TestCase):
                 '/api/domains/cadence-ai-samples/cluster0/workflows/'
                 'recurring-ai-watch-python-google-adk-mock-gemini-flash-lite-jev-default-demo')
             WorkflowStub.run_id='run-continued'
-            self.assertEqual(self.explorer.workflow_run(request)['run_id'],'run-continued')
+            continued=self.explorer.workflow_run({**request,'run_id':'run-current'})
+            self.assertEqual((continued['state'],continued['run_id']),
+                ('stale run','run-continued'))
+            self.assertIn('Continue-As-New',continued['detail'])
+
+            hitl=dict(sample='human-in-the-loop',
+                implementation='recipes/human-in-the-loop/python/openai-agents',
+                mode='mock',model='gemini-flash-lite')
+            WorkflowStub.run_id='run-hitl'
+            hitl_result=self.explorer.workflow_run(hitl)
+            self.assertEqual((hitl_result['state'],hitl_result['workflow_id'],
+                hitl_result['run_id']),('found',
+                    'human-in-the-loop-python-openai-agents-mock-gemini-flash-lite-demo',
+                    'run-hitl'))
+
+            generic_request=dict(sample='generic-single',
+                implementation='recipes/generic-single/python',mode='mock',
+                model='gemini-flash-lite',classifier='jev-default')
+            WorkflowStub.run_id='run-generic'
+            generic_result=self.explorer.workflow_run(generic_request)
+            self.assertEqual((generic_result['state'],
+                generic_result['workflow_id'],generic_result['run_id']),
+                ('found',
+                    'generic-single-python-bare-mock-gemini-flash-lite-jev-default-demo',
+                    'run-generic'))
+
+            ticket=dict(sample='ticket-routing',
+                implementation='recipes/ticket-routing/go',mode='demo',
+                classifier='mock')
+            for workflow_id in ('ticket-routing-parent-001',
+                    'ticket-routing-parent-001-child-billing',
+                    'ticket-routing-batch-token-ticket-001'):
+                WorkflowStub.run_id='run-ticket'
+                selected=self.explorer.workflow_run(
+                    {**ticket,'workflow_id':workflow_id})
+                self.assertEqual((selected['state'],selected['workflow_id']),
+                    ('found',workflow_id))
+                self.assertTrue(WorkflowStub.paths[-1].endswith(
+                    '/workflows/'+workflow_id))
+            encoded=self.explorer.workflow_run(
+                {**ticket,'workflow_id':'ticket parent/001'})
+            self.assertEqual(encoded['workflow_id'],'ticket parent/001')
+            self.assertTrue(WorkflowStub.paths[-1].endswith(
+                '/workflows/ticket%20parent%2F001'))
+            with self.assertRaises(Unsupported):
+                self.explorer.workflow_run(ticket)
+            with self.assertRaises(InvalidSelection):
+                self.explorer.workflow_run(
+                    {**ticket,'workflow_id':'bad\nworkflow'})
+
             for mode,state in [('not-found','no execution'),('auth','authentication required'),
                     ('malformed','malformed response'),('missing','no execution')]:
                 WorkflowStub.mode=mode
@@ -632,9 +686,6 @@ class ExplorerTests(unittest.TestCase):
             port=refused.getsockname()[1];refused.close()
             closed=Explorer(self.root,cadence_web_url=f'http://127.0.0.1:{port}')
             self.assertEqual(closed.workflow_run(request)['state'],'unreachable')
-            with self.assertRaises(Unsupported):
-                self.explorer.workflow_run(dict(sample='ticket-routing',
-                    implementation='recipes/ticket-routing/go',mode='demo',classifier='mock'))
 
             WorkflowStub.mode='found';WorkflowStub.run_id='run-http'
             terminal=TerminalStub()

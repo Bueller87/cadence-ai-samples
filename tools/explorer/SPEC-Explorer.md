@@ -134,8 +134,19 @@ omission, and keep the earlier working path reliable.
 
 - Provide a link to the configured Cadence-Web instance and correct domain.
 - Keep the link available regardless of advisory health-check results.
+- When the validated resolver provides one safe Workflow ID, show it and allow
+  the user to resolve the current Run through Cadence-Web.
+- When one safe Workflow ID cannot be derived, require the user to enter one
+  exact Workflow ID before resolving a Run. Never choose an arbitrary parent,
+  child, batch item, or historical execution.
+- Build History and Queries links only from the exact domain, cluster, Workflow
+  ID, and resolved or manually entered Run ID.
+- Report missing, unreachable, stale, and Continue-As-New-related run changes
+  without guessing. Keep domain navigation available after lookup failures.
 - Do not claim a Workflow has started merely because its command was generated.
-- Opening a specific Workflow history is future work, not a demo requirement.
+- Keep recipe Signal discovery and typed payload controls deferred to
+  [Issue #6](https://github.com/cadence-workflow/cadence-ai-samples/issues/6).
+  Existing Recurring AI Watch Signal controls remain recipe-specific.
 
 ## Page simplification
 
@@ -167,7 +178,7 @@ and longer teaching explanations in READMEs and the presentation.
 
 - Fresh/repeated Mac launcher runs work; README clearly states explorer prerequisites
   separately from recipe prerequisites. Failure gives a useful next step.
-- Both samples have correct selection flows; applicable single-choice dropdowns stay
+- All discovered recipes have correct selection flows; applicable single-choice dropdowns stay
   visible. Mock mode avoids irrelevant inference checks/warm-up.
 - Checkout/catalog changes appear on Refresh; invalid selections clear commands.
 - Verify classifier implementation before removing candidates; preserve model catalog.
@@ -232,11 +243,12 @@ ownership. This section preserves requirements and historical delivered scope.
      catalog or generalized authoring platform by default.
    - Explorer web-client portability is separate future work.
 3. **Workflow-history deep link ([Issue #3](https://github.com/cadence-workflow/cadence-ai-samples/issues/3)):**
-   the delivered Recurring AI Watch slice explicitly
-   resolves the current Run ID through the local Cadence-Web read-only API and
-   provides exact History and Queries links plus a manual Run ID override. Resolve
-   again after Continue-As-New. Ticket Routing and other multi-Workflow recipes
-   remain future work and require explicit Workflow selection; never guess a run.
+   exact-run navigation is generic whenever the validated resolver provides one
+   safe Workflow ID. The Explorer resolves the current Run ID through the local
+   Cadence-Web read-only API and provides exact History and Queries links plus a
+   manual Run ID override. When an action can produce zero or several Workflows,
+   the user must enter one exact Workflow ID before resolution. Resolve again
+   after Continue-As-New; never guess a Workflow or Run.
 4. **Signal control plane ([Issue #6](https://github.com/cadence-workflow/cadence-ai-samples/issues/6)):**
    the delivered Recurring AI Watch slice exposes payload-free,
    allowlisted `check-now` and `stop-watch` actions only after latest-run

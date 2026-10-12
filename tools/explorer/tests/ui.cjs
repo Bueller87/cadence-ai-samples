@@ -18,6 +18,10 @@ async function waitFor(predicate,message){
 async function main(){
   fs.cpSync(path.join(root,'recipes'),path.join(fixture,'recipes'),{recursive:true,
     filter:source=>!['.venv','venv','__pycache__'].includes(path.basename(source))});
+  const generic=path.join(fixture,'recipes/generic-single');
+  fs.mkdirSync(path.join(generic,'python'),{recursive:true});
+  fs.cpSync(path.join(root,'recipes/recurring-ai-watch/python/google-adk'),path.join(generic,'python/google-adk'),{recursive:true});
+  fs.writeFileSync(path.join(generic,'README.md'),'# Generic single Workflow\n');
   for(const file of ['README.md','models.yaml','classifiers.yaml'])fs.copyFileSync(path.join(root,file),path.join(fixture,file));
   const tools=path.join(fixture,'tools/explorer');fs.mkdirSync(tools,{recursive:true});
   for(const file of ['source.py','explorer.py','server.py','terminal.py'])fs.copyFileSync(path.join(root,'tools/explorer',file),path.join(tools,file));
@@ -27,7 +31,7 @@ async function main(){
   let output='';server.stdout.on('data',chunk=>output+=chunk);server.stderr.on('data',chunk=>errors.push(String(chunk)));
   await waitFor(()=>/http:\/\/127\.0\.0\.1:\d+\//.test(output),'server startup');
   const url=output.match(/http:\/\/127\.0\.0\.1:\d+\//)[0];
-  const copies=[],terminalRequests=[],terminalEvents=[],runRequests=[],signalRequests=[];const runIds=['run-current','run-continued'];
+  const copies=[],terminalRequests=[],terminalEvents=[],runRequests=[],signalRequests=[];const watchRunIds=['run-current','run-continued'];
   let rejectClipboard=false,terminalState='prefilled',holdTerminal=false,releaseTerminal,holdRun=false,releaseRun,signalState='accepted',holdSignal=false,releaseSignal;
   const virtualConsole=new VirtualConsole();virtualConsole.on('jsdomError',error=>errors.push(error.message));
   dom=await JSDOM.fromURL(url,{runScripts:'dangerously',resources:'usable',pretendToBeVisual:true,virtualConsole,
@@ -42,7 +46,10 @@ async function main(){
         }
         if(target.pathname==='/api/workflow-run'){
           runRequests.push(target);
-          const response=()=>new Response(JSON.stringify({state:'found',run_id:runIds.shift(),detail:'resolved'}),{status:200,headers:{'Content-Type':'application/json'}});
+          const sample=target.searchParams.get('sample');
+          const runId=sample==='human-in-the-loop'?'run-hitl':sample==='generic-single'?'run-generic':sample==='ticket-routing'?'run-ticket':watchRunIds.shift();
+          const stale=runId==='run-continued';
+          const response=()=>new Response(JSON.stringify({state:stale?'stale run':'found',run_id:runId,detail:stale?'The previous Run ID is stale. The current Run ID changed, which can happen after Continue-As-New.':'resolved'}),{status:200,headers:{'Content-Type':'application/json'}});
           if(holdRun)return new Promise(resolve=>releaseRun=()=>resolve(response()));
           return response();
         }
@@ -67,7 +74,7 @@ async function main(){
   const input=(id,value)=>{$(id).value=value;$(id).dispatchEvent(new dom.window.Event('input',{bubbles:true}));};
   const ready=()=>waitFor(()=>!$('worker-block').hidden,'resolved commands');
   const failed=()=>waitFor(()=>$('selection-status').className.includes('error')&&$('worker-block').hidden,'selection rejection');
-  await waitFor(()=>$('sample').options.length===3,'sample discovery');
+  await waitFor(()=>$('sample').options.length===5,'sample discovery');
   assert.equal(dom.window.document.querySelectorAll('.step').length,6);
   assert.equal($('resolved-panel'),null);assert.equal($('evidence-panel'),null);
   assert.equal(dom.window.document.querySelector('.teaching'),null);
@@ -81,7 +88,7 @@ async function main(){
   change('mode','live');await ready();
   assert.ok($('worker-command').textContent.includes('--confirm-live'));assert.ok(!$('worker-command').textContent.includes('--agent-id'));
   assert.equal(runRequests.length,0);assert.equal($('workflow-run-panel').hidden,false);assert.equal($('resolve-run').hidden,false);
-  assert.equal($('web-cluster').textContent,'cluster0');assert.ok($('web-workflow-id').textContent.endsWith('-demo'));
+  assert.equal($('web-cluster').textContent,'cluster0');assert.ok($('web-workflow-id').value.endsWith('-demo'));assert.equal($('web-workflow-id').readOnly,true);
   $('resolve-run').click();await waitFor(()=>$('run-id').value==='run-current','latest run resolution');
   assert.ok($('workflow-history').href.endsWith('/run-current/history'));assert.ok($('workflow-queries').href.endsWith('/run-current/queries'));
   assert.equal($('watch-signals').hidden,false);holdSignal=true;$('signal-check-now').click();await waitFor(()=>typeof releaseSignal==='function','held check-now Signal');
@@ -92,7 +99,20 @@ async function main(){
   input('run-id','historical run/1');releaseSignal();await waitFor(()=>$('watch-signals').hidden&&$('signal-status').textContent==='','stale Signal response ignored');holdSignal=false;releaseSignal=undefined;
   assert.ok($('workflow-history').href.includes('/historical%20run%2F1/history'));assert.ok($('workflow-run-status').textContent.includes('entered'));
   $('resolve-run').click();await waitFor(()=>$('run-id').value==='run-continued','continued run resolution');
-  assert.ok($('workflow-history').href.endsWith('/run-continued/history'));assert.equal(runRequests.length,2);
+  assert.ok($('workflow-history').href.endsWith('/run-continued/history'));assert.equal(runRequests.length,2);assert.equal(runRequests[1].searchParams.get('run_id'),'historical run/1');assert.ok($('workflow-run-status').textContent.includes('Continue-As-New'));assert.ok($('workflow-run-status').className.includes('stale'));
+
+  change('sample','human-in-the-loop');change('framework','recipes/human-in-the-loop/python/openai-agents');change('mode','mock');await ready();
+  assert.equal($('workflow-run-panel').hidden,false);assert.equal($('web-workflow-id').readOnly,true);assert.ok($('web-workflow-id').value.startsWith('human-in-the-loop-'));
+  input('run-id','hitl historical/1');assert.ok($('workflow-history').href.includes('/hitl%20historical%2F1/history'));assert.equal($('watch-signals').hidden,true);
+  $('resolve-run').click();await waitFor(()=>$('run-id').value==='run-hitl','Human in the Loop run resolution');
+  assert.ok($('workflow-history').href.includes(`/${encodeURIComponent($('web-workflow-id').value)}/run-hitl/history`));assert.equal($('watch-signals').hidden,true);
+
+  change('sample','generic-single');change('framework','recipes/generic-single/python/google-adk');change('mode','mock');await ready();
+  assert.ok($('web-workflow-id').value.startsWith('generic-single-'));assert.equal($('web-workflow-id').readOnly,true);
+  $('resolve-run').click();await waitFor(()=>$('run-id').value==='run-generic','generic single-Workflow resolution');
+  assert.ok($('workflow-queries').href.endsWith('/run-generic/queries'));assert.equal($('watch-signals').hidden,true);
+
+  change('sample','recurring-ai-watch');change('framework','recipes/recurring-ai-watch/python/google-adk');change('mode','live');await ready();
   assert.equal($('open-worker').hidden,false);assert.equal($('open-start').hidden,false);assert.equal($('terminal-note').hidden,false);
   terminalEvents.length=0;$('open-worker').click();await waitFor(()=>$('worker-terminal-status').textContent.includes('Ready in Terminal'),'worker terminal handoff');
   assert.deepEqual(terminalEvents,['copy','terminal']);assert.equal(terminalRequests[0].action,'worker');assert.equal('command' in terminalRequests[0],false);
@@ -119,7 +139,12 @@ async function main(){
   holdRun=true;$('resolve-run').click();await waitFor(()=>typeof releaseRun==='function','held run lookup');
   change('sample','ticket-routing');releaseRun();await waitFor(()=>$('workflow-run-panel').hidden&&$('run-id').value==='','stale run response ignored');holdRun=false;releaseRun=undefined;
   assert.equal($('language').value,'go');assert.equal($('framework-field').hidden,true);assert.equal($('model-field').hidden,true);assert.equal($('mode').value,'');
-  change('mode','demo');await ready();assert.equal($('classifier').options.length,1);assert.equal($('classifier').value,'mock');assert.ok($('client-command').textContent.includes('-mode demo'));assert.ok($('workflow-run-scope').textContent.includes('multiple Workflows'));assert.ok(!$('cadence-web').hidden);
+  change('mode','demo');await ready();assert.equal($('classifier').options.length,1);assert.equal($('classifier').value,'mock');assert.ok($('client-command').textContent.includes('-mode demo'));assert.ok($('workflow-run-scope').textContent.includes('does not expose one safe Workflow ID'));assert.ok(!$('cadence-web').hidden);
+  assert.equal($('workflow-run-panel').hidden,false);assert.equal($('web-workflow-id').readOnly,false);assert.equal($('web-workflow-id').value,'');assert.equal($('resolve-run').disabled,true);
+  input('run-id','run-without-workflow');assert.equal($('resolve-run').disabled,true);assert.equal($('workflow-history').hidden,true);
+  const requestsBeforeTicket=runRequests.length;input('web-workflow-id','ticket-routing-demo-billing-001');assert.equal($('resolve-run').disabled,false);assert.equal(runRequests.length,requestsBeforeTicket);
+  input('run-id','ticket historical/1');assert.ok($('workflow-history').href.includes('/ticket-routing-demo-billing-001/ticket%20historical%2F1/history'));assert.equal($('watch-signals').hidden,true);
+  $('resolve-run').click();await waitFor(()=>$('run-id').value==='run-ticket','explicit Ticket Routing run resolution');assert.equal(runRequests.at(-1).searchParams.get('workflow_id'),'ticket-routing-demo-billing-001');assert.ok($('workflow-queries').href.endsWith('/run-ticket/queries'));assert.equal($('watch-signals').hidden,true);
   change('mode','live-demo');assert.equal($('worker-block').hidden,true);change('classifier','laya-local');await ready();assert.ok($('worker-command').textContent.includes('go run .'));assert.ok($('client-command').textContent.includes('-mode live-demo'));
   change('mode','acknowledge');await failed();assert.ok($('selection-status').textContent.includes('identifiers'));
   change('mode','live-batch');change('classifier','laya-local');await failed();assert.equal($('batch-fields').hidden,false);assert.equal($('count').max,'10');assert.equal($('concurrency').max,'5');
@@ -132,10 +157,10 @@ async function main(){
   change('mode','worker');await ready();assert.ok($('worker-command').textContent.includes('-classifier-id mock'));
   change('mode','live-demo');await failed();assert.ok($('selection-status').textContent.includes('classifiers.yaml'));
   const incomplete=path.join(fixture,'recipes/new-recipe/java');fs.mkdirSync(incomplete,{recursive:true});fs.writeFileSync(path.join(incomplete,'../README.md'),'# New incomplete recipe\n');
-  $('refresh').click();await waitFor(()=>$('sample').options.length===4,'new recipe discovery');change('sample','new-recipe');
+  $('refresh').click();await waitFor(()=>$('sample').options.length===6,'new recipe discovery');change('sample','new-recipe');
   assert.equal($('language').value,'java');assert.equal($('language-field').hidden,false);assert.equal($('readme').hidden,false);await failed();assert.ok($('selection-status').textContent.includes('adapter'));
   assert.deepEqual(errors,[]);
-  console.log('PASS: real HTTP + six-step DOM flow, visible single-choice selectors, explicit modes, manual checks, local warm-up availability, Mac terminal handoff/fallback/stale state, latest/manual Run ID deep links, allowlisted Signal feedback/stale state, individual controls, catalog refresh, Go live batches, clipboard fallback, and incomplete recipes.');
+  console.log('PASS: real HTTP + six-step DOM flow, generic/Human in the Loop latest-run links, explicit Ticket Routing Workflow selection, manual Run ID deep links, Watch-only Signals, stale/Continue-As-New feedback, visible single-choice selectors, explicit modes, manual checks, local warm-up availability, Mac terminal handoff/fallback, individual controls, catalog refresh, Go live batches, clipboard fallback, and incomplete recipes.');
 }
 main().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{
   if(dom)dom.window.close();

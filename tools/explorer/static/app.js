@@ -30,7 +30,8 @@
     runRequestVersion++;signalRequestVersion++;resolvedRunId="";
     $("resolve-run").hidden=true;$("resolve-run").disabled=true;
     $("workflow-run-panel").hidden=true;$("run-id").value="";
-    $("web-workflow-id").textContent="";$("web-cluster").textContent="";
+    $("web-workflow-id").value="";$("web-workflow-id").readOnly=true;
+    $("workflow-id-help").textContent="";$("web-cluster").textContent="";
     $("workflow-run-status").textContent="Run not resolved.";$("workflow-run-status").className="small";
     for(const id of ["workflow-history","workflow-queries"]){$(id).hidden=true;$(id).removeAttribute("href");}
     $("watch-signals").hidden=true;$("signal-status").textContent="";
@@ -52,6 +53,14 @@
     return new URLSearchParams({sample:recipe.id,implementation:variant.id,
       mode:variant.modes.length?$("mode").value:"",model:$("model").value,
       classifier:$("classifier").value,count:$("count").value,concurrency:$("concurrency").value});
+  }
+
+  function workflowRunQuery() {
+    const parameters=query();
+    if(!result?.workflow_id)parameters.set("workflow_id",$("web-workflow-id").value.trim());
+    const previousRunId=$("run-id").value.trim();
+    if(previousRunId)parameters.set("run_id",previousRunId);
+    return parameters;
   }
 
   async function flow() {
@@ -113,12 +122,18 @@
     $("warmup-status").textContent=result.local.length?"Warm-up is available for "+result.local.map(item=>item.service).join(" and ")+".":result.mock?"Mock mode does not need local warm-up.":"This selection has no local inference component to warm.";
     const web=result.cadence_web_url.replace(/\/$/,"");
     $("cadence-web").href=`${web}/redirects/domain/${encodeURIComponent(result.domain)}/workflows`;
-    if(recipe?.id==="recurring-ai-watch"&&result.workflow_id){
-      $("workflow-run-panel").hidden=false;$("resolve-run").hidden=false;$("resolve-run").disabled=false;
-      $("web-workflow-id").textContent=result.workflow_id;$("web-cluster").textContent=result.cadence_cluster;
+    const resolvedWorkflowId=typeof result.workflow_id==="string"&&result.workflow_id.trim();
+    $("workflow-run-panel").hidden=false;$("resolve-run").hidden=false;
+    $("web-workflow-id").value=resolvedWorkflowId||"";$("web-workflow-id").readOnly=Boolean(resolvedWorkflowId);
+    $("web-cluster").textContent=result.cadence_cluster;
+    if(resolvedWorkflowId){
+      $("resolve-run").disabled=false;
+      $("workflow-id-help").textContent="Resolved from the selected recipe command.";
       $("workflow-run-scope").textContent="Resolve the current run, or paste an exact Run ID.";
     }else{
-      $("workflow-run-scope").textContent=recipe?.id==="ticket-routing"?"Direct run links are deferred for Ticket Routing because its actions can create multiple Workflows.":"This selection does not expose one Workflow ID for direct links.";
+      $("resolve-run").disabled=true;
+      $("workflow-id-help").textContent=recipe?.id==="ticket-routing"?"Enter an exact parent, child, or batch Workflow ID. The Explorer will not choose one.":"Enter the exact Workflow ID produced by this recipe. The Explorer will not choose one.";
+      $("workflow-run-scope").textContent="This selection does not expose one safe Workflow ID. Enter the exact Workflow before resolving a run.";
     }
     $("read-at").textContent="Recipe files read at "+new Date(result.read_at).toLocaleTimeString()+".";
   }
@@ -179,33 +194,34 @@
     finally{if(version===requestVersion)button.disabled=false;}
   }
 
-  function updateRunLinks(source="entered"){
+  function updateRunLinks(source="entered",message=""){
     const runId=$("run-id").value.trim();
+    const workflowId=$("web-workflow-id").value.trim();
     signalRequestVersion++;resolvedRunId=source==="resolved"?runId:"";
-    $("watch-signals").hidden=source!=="resolved"||!runId;$("signal-status").textContent="";
+    $("watch-signals").hidden=source!=="resolved"||!runId||recipe?.id!=="recurring-ai-watch";$("signal-status").textContent="";
     if(source==="resolved"&&runId)for(const id of ["signal-check-now","signal-stop-watch"]){const button=$(id);button.disabled=false;button.textContent=button.dataset.signal==="check-now"?"Send check-now":"Send stop-watch";button.classList.remove("copied","failed");}
-    if(!result||!runId){
+    if(!result||!workflowId||!runId){
       for(const id of ["workflow-history","workflow-queries"]){$(id).hidden=true;$(id).removeAttribute("href");}
       $("workflow-run-status").textContent="Run not resolved.";$("workflow-run-status").className="small";
       return;
     }
     const web=result.cadence_web_url.replace(/\/$/,"");
-    const base=`${web}/domains/${encodeURIComponent(result.domain)}/${encodeURIComponent(result.cadence_cluster)}/workflows/${encodeURIComponent(result.workflow_id)}/${encodeURIComponent(runId)}`;
+    const base=`${web}/domains/${encodeURIComponent(result.domain)}/${encodeURIComponent(result.cadence_cluster)}/workflows/${encodeURIComponent(workflowId)}/${encodeURIComponent(runId)}`;
     $("workflow-history").href=base+"/history";$("workflow-queries").href=base+"/queries";
     $("workflow-history").hidden=false;$("workflow-queries").hidden=false;
     $("workflow-run-status").className="small ready";
-    $("workflow-run-status").textContent=source==="resolved"?"Current Run ID resolved through Cadence-Web.":"Using the entered Run ID.";
+    $("workflow-run-status").textContent=message||(source==="resolved"?"Current Run ID resolved through Cadence-Web.":"Using the entered Run ID.");
   }
 
   async function resolveWorkflowRun(){
-    if(!result||recipe?.id!=="recurring-ai-watch"||!result.workflow_id)return;
+    if(!result||!$("web-workflow-id").value.trim())return;
     const selectionVersion=requestVersion,version=++runRequestVersion;
     $("resolve-run").disabled=true;$("workflow-run-status").className="small";$("workflow-run-status").textContent="Resolving the current run through Cadence-Web…";
     try{
-      const response=await fetch("/api/workflow-run?"+query(),{cache:"no-store"});
+      const response=await fetch("/api/workflow-run?"+workflowRunQuery(),{cache:"no-store"});
       const body=await response.json();if(selectionVersion!==requestVersion||version!==runRequestVersion)return;
       if(!response.ok)throw Error(body.error||"Run lookup failed.");
-      if(body.state==="found"){$("run-id").value=body.run_id;updateRunLinks("resolved");}
+      if(body.state==="found"||body.state==="stale run"){$("run-id").value=body.run_id;updateRunLinks("resolved",body.detail);if(body.state==="stale run")$("workflow-run-status").className="small stale";}
       else{$("run-id").value="";updateRunLinks();$("workflow-run-status").className="small error";$("workflow-run-status").textContent=body.detail||"Run lookup failed.";}
     }catch(error){if(selectionVersion===requestVersion&&version===runRequestVersion){$("run-id").value="";updateRunLinks();$("workflow-run-status").className="small error";$("workflow-run-status").textContent=error.message;}}
     finally{if(selectionVersion===requestVersion&&version===runRequestVersion)$("resolve-run").disabled=false;}
@@ -245,7 +261,8 @@
   for(const id of ["mode","model","classifier"])$(id).addEventListener("change",flow);
   for(const id of ["count","concurrency"])$(id).addEventListener("input",flow);
   $("refresh").addEventListener("click",()=>refresh(true));$("warmup").addEventListener("click",warmup);
-  $("resolve-run").addEventListener("click",resolveWorkflowRun);$("run-id").addEventListener("input",()=>{runRequestVersion++;$("resolve-run").disabled=false;updateRunLinks("entered");});
+  $("resolve-run").addEventListener("click",resolveWorkflowRun);$("run-id").addEventListener("input",()=>{runRequestVersion++;$("resolve-run").disabled=!$("web-workflow-id").value.trim();updateRunLinks("entered");});
+  $("web-workflow-id").addEventListener("input",()=>{if($("web-workflow-id").readOnly)return;runRequestVersion++;$("run-id").value="";$("resolve-run").disabled=!$("web-workflow-id").value.trim();updateRunLinks("entered");});
   document.querySelectorAll("[data-signal]").forEach(button=>button.addEventListener("click",()=>sendWorkflowSignal(button.dataset.signal,button)));
   document.querySelectorAll("[data-copy]").forEach(button=>button.addEventListener("click",()=>{if(result)copyText(result[button.dataset.copy],button);}));
   document.querySelectorAll("[data-terminal]").forEach(button=>button.addEventListener("click",()=>openTerminal(button.dataset.terminal,button)));

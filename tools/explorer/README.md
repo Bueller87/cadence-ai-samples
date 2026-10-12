@@ -128,19 +128,25 @@ independent of the Bash launcher so another entry point can reuse it later.
 
 ## Cadence-Web run links
 
-For Recurring AI Watch, Step 6 shows the generated Workflow ID and can explicitly
-resolve its current Run ID through the local Cadence-Web read-only API. This needs
-neither the Cadence CLI nor a Cadence SDK dependency in the Explorer. Resolution
-never runs automatically and does not imply that a Workflow was started.
+When a selection resolves one safe Workflow ID, Step 6 shows it and can
+explicitly resolve its current Run ID through the local Cadence-Web read-only
+API. This includes Recurring AI Watch, Human in the Loop, and conforming
+generated recipes. Resolution needs neither the Cadence CLI nor a Cadence SDK
+dependency in the Explorer. It never runs automatically and does not imply that
+a Workflow was started.
 
 After resolution, **Open history** and **Open queries** target that exact run. The
 Run ID remains editable so an older exact run can be pasted. Resolve again after
-Continue-As-New to replace it with the current run. A missing execution or
+Continue-As-New to replace it with the current run; the Explorer identifies the
+previous Run ID as stale when the current Run changes. A missing execution or
 unavailable Cadence-Web instance leaves **Open domain** available.
 
-Ticket Routing direct-run links are deferred because its current actions can
-create several Workflow IDs. Supporting it requires an explicit Workflow
-selection rather than guessing.
+When a selection does not expose one safe Workflow ID, Step 6 requires an exact
+Workflow ID before it enables latest-run resolution. This is the path for Ticket
+Routing parent, child, and batch Workflows. Copy the exact ID from the recipe
+output; the Explorer does not choose an arbitrary Workflow. A manually entered
+Workflow ID and Run ID can open exact History and Queries links without first
+resolving the latest Run.
 
 After a successful latest-run resolution, Recurring AI Watch also shows
 payload-free **Send check-now** and **Send stop-watch** controls. The Explorer
