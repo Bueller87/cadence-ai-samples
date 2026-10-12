@@ -61,7 +61,7 @@
     <div class="step-heading"><span>6</span><div><h3 id="web-title">Open Cadence-Web</h3><p>Inspect the configured domain after you start a Workflow.</p></div></div>
     <div class="button-group web-actions"><a id="cadence-web" class="button-link" href="http://localhost:8088/redirects/domain/cadence-ai-samples/workflows" target="_blank" rel="noopener">Open domain</a><button type="button" id="resolve-run" hidden>Resolve latest run</button></div>
     <div id="workflow-run-panel" class="run-panel" hidden>
-      <div class="run-context"><div><span>Workflow ID</span><code id="web-workflow-id"></code></div><div><span>Cluster</span><code id="web-cluster"></code></div></div>
+      <div class="run-context"><div><label for="web-workflow-id">Workflow ID</label><input id="web-workflow-id" type="text" maxlength="255" autocomplete="off" spellcheck="false"><p id="workflow-id-help" class="small"></p></div><div><span>Cluster</span><code id="web-cluster"></code></div></div>
       <label for="run-id">Run ID <span class="small">Paste an exact historical Run ID to override the latest run.</span></label>
       <input id="run-id" type="text" maxlength="255" autocomplete="off" spellcheck="false">
       <p id="workflow-run-status" class="small" role="status" aria-live="polite">Run not resolved.</p>
