@@ -46,6 +46,7 @@ No chat transcript, agent memory, `STATUS.md`, or `TODO.md` is authoritative.
 ## Canonical specifications
 
 - [StreamWave ticket routing](../recipes/ticket-routing/SPEC.md)
+- [Human-in-the-loop ride booking](../recipes/human-in-the-loop/SPEC.md)
 - [Local Samples Explorer](../tools/explorer/SPEC-Explorer.md)
 - [Recipe template system](../templates/SPEC-Recipe-Templates.md)
 - [Generated `python/bare` recipe specification template](../templates/profiles/python/bare/recipe/SPEC.md)
@@ -58,6 +59,7 @@ centralize documentation.
 - [Project README](../README.md)
 - [Contributing](../CONTRIBUTING.md)
 - [Ticket routing README](../recipes/ticket-routing/README.md)
+- [Human-in-the-loop README](../recipes/human-in-the-loop/README.md)
 - [Recurring AI Watch README](../recipes/recurring-ai-watch/README.md)
 - [Explorer README](../tools/explorer/README.md)
 - [Template profiles README](../templates/profiles/README.md)
@@ -69,6 +71,7 @@ centralize documentation.
 ## Evidence, not requirements
 
 - [Recurring AI Watch matrix results](../recipes/recurring-ai-watch/MATRIX_RESULTS.md)
+- [Human-in-the-loop validation results](../recipes/human-in-the-loop/MATRIX_RESULTS.md)
 - [Ticket routing performance findings](../recipes/ticket-routing/perf/FINDINGS.md)
 
 These record what was tested at a point in time. They do not prove a changed
