@@ -18,10 +18,16 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlencode
 
+import yaml
+
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT/'tools/explorer'))
 from explorer import Explorer
 from server import Handler
+from signal_metadata import (MAX_METADATA_BYTES, MAX_SIGNALS,
+                             SignalMetadataError, metadata_revision,
+                             serialize_arguments, validate_arguments,
+                             validate_metadata)
 from source import InvalidSelection, Unsupported
 
 
@@ -100,7 +106,7 @@ class WorkflowStub(BaseHTTPRequestHandler):
             self.send_response(400);self.end_headers();return
         if WorkflowStub.signal_mode=='slow':
             time.sleep(.05)
-        payload=b'{}'
+        payload=b'not json' if WorkflowStub.signal_mode=='malformed' else b'{}'
         try:
             self.send_response(200);self.send_header('Content-Type','application/json')
             self.send_header('Content-Length',str(len(payload)));self.end_headers();self.wfile.write(payload)
@@ -703,7 +709,142 @@ class ExplorerTests(unittest.TestCase):
         finally:
             stub.shutdown();stub.server_close();thread.join()
 
-    def test_workflow_signal_allowlist_revalidation_and_http_route(self):
+    def test_signal_metadata_schema_and_fail_closed_loading(self):
+        valid=dict(version=1,signals=[dict(
+            id='typed-signal',name='typed_signal',label='Typed signal',
+            description='Exercise every supported scalar.',intent='confirm',
+            arguments=[
+                dict(name='text',label='Text',type='string',required=True,
+                     constraints=dict(min_length=1,max_length=12),
+                     help='Enter text.'),
+                dict(name='count',label='Count',type='integer',required=False,
+                     constraints=dict(minimum=1,maximum=5),
+                     help='Enter a count.'),
+                dict(name='ratio',label='Ratio',type='number',required=False,
+                     constraints=dict(minimum=0,maximum=1),
+                     help='Enter a ratio.'),
+                dict(name='enabled',label='Enabled',type='boolean',
+                     required=False,constraints={},help='Choose a state.'),
+            ])])
+        controls=validate_metadata(valid)
+        self.assertEqual([argument['type'] for argument in controls[0]['arguments']],
+                         ['string','integer','number','boolean'])
+        revision=metadata_revision(controls)
+        self.assertEqual(len(revision),64)
+        self.assertEqual(revision,metadata_revision(validate_metadata(
+            json.loads(json.dumps(valid)))))
+        changed_controls=json.loads(json.dumps(controls))
+        changed_controls[0]['intent']='destructive'
+        self.assertNotEqual(revision,metadata_revision(changed_controls))
+        values=validate_arguments(
+            controls[0],dict(text='safe',count=2,ratio=.5,enabled=True))
+        self.assertEqual(values,['safe',2,.5,True])
+        self.assertEqual(
+            serialize_arguments(values),'"safe" 2 0.5 true')
+        self.assertIsNone(serialize_arguments([]))
+        self.assertEqual(validate_metadata(dict(version=1)),[])
+
+        invalid=[]
+        invalid.append(('unknown field',{**valid,'command':'rm -rf /'}))
+        invalid.append(('unknown version',{**valid,'version':2}))
+        invalid.append(('too many signals',dict(
+            version=1,signals=valid['signals']*(MAX_SIGNALS+1))))
+        duplicate=json.loads(json.dumps(valid))
+        duplicate['signals'].append(json.loads(json.dumps(valid['signals'][0])))
+        invalid.append(('duplicate IDs',duplicate))
+        duplicate_name=json.loads(json.dumps(valid))
+        duplicate_name['signals'].append(
+            json.loads(json.dumps(valid['signals'][0])))
+        duplicate_name['signals'][1]['id']='other-signal'
+        invalid.append(('duplicate names',duplicate_name))
+        duplicate_argument=json.loads(json.dumps(valid))
+        duplicate_argument['signals'][0]['arguments'][1]['name']='text'
+        invalid.append(('duplicate arguments',duplicate_argument))
+        too_many_arguments=json.loads(json.dumps(valid))
+        too_many_arguments['signals'][0]['arguments']*=3
+        invalid.append(('too many arguments',too_many_arguments))
+        bad_type=json.loads(json.dumps(valid))
+        bad_type['signals'][0]['arguments'][0]['type']='object'
+        invalid.append(('unsupported type',bad_type))
+        unhashable_type=json.loads(json.dumps(valid))
+        unhashable_type['signals'][0]['arguments'][0]['type']=['string']
+        invalid.append(('non-string type',unhashable_type))
+        bad_order=json.loads(json.dumps(valid))
+        bad_order['signals'][0]['arguments'][1]['required']=False
+        bad_order['signals'][0]['arguments'][2]['required']=True
+        invalid.append(('required after optional',bad_order))
+        bad_constraint=json.loads(json.dumps(valid))
+        bad_constraint['signals'][0]['arguments'][0]['constraints']['minimum']=1
+        invalid.append(('type constraint',bad_constraint))
+        bad_limits=json.loads(json.dumps(valid))
+        bad_limits['signals'][0]['arguments'][0]['constraints']={
+            'min_length':10,'max_length':1}
+        invalid.append(('reversed limits',bad_limits))
+        unsafe=json.loads(json.dumps(valid))
+        unsafe['signals'][0]['description']='<script>unsafe</script>'
+        invalid.append(('HTML',unsafe))
+        too_long=json.loads(json.dumps(valid))
+        too_long['signals'][0]['label']='x'*81
+        invalid.append(('text limit',too_long))
+        padded=json.loads(json.dumps(valid))
+        padded['signals'][0]['label']=' padded'
+        invalid.append(('padded text',padded))
+        unknown_argument=json.loads(json.dumps(valid))
+        unknown_argument['signals'][0]['arguments'][0]['extra']=True
+        invalid.append(('unknown argument field',unknown_argument))
+        for label,document in invalid:
+            with self.subTest(label=label):
+                with self.assertRaises(SignalMetadataError):
+                    validate_metadata(document)
+
+        for supplied in (
+                {},dict(text=''),dict(text='too-long-for-limit'),
+                dict(text='safe',count=0),
+                dict(text='safe',count=10**1000),
+                dict(text='safe',ratio=.5),
+                dict(text='safe',unexpected='private-value')):
+            with self.subTest(supplied=list(supplied)):
+                with self.assertRaises(SignalMetadataError) as caught:
+                    validate_arguments(controls[0],supplied)
+                self.assertNotIn('private-value',str(caught.exception))
+
+        watch=self.watch(mode='mock')
+        self.assertEqual(
+            [signal['id'] for signal in watch['signals']],
+            ['check-now','stop-watch'])
+        self.assertIsNone(watch['signal_metadata_error'])
+        self.assertEqual(len(watch['signal_metadata_revision']),64)
+        hitl=self.explorer.resolve(dict(
+            sample='human-in-the-loop',
+            implementation='recipes/human-in-the-loop/python/openai-agents',
+            mode='mock',model='gemini-flash-lite'))
+        self.assertEqual(
+            [signal['id'] for signal in hitl['signals']],
+            ['approve-tool-call','reject-tool-call'])
+        self.assertEqual(
+            hitl['signals'][0]['arguments'][0]['name'],'call_id')
+        self.assertNotEqual(
+            watch['signal_metadata_revision'],
+            hitl['signal_metadata_revision'])
+        ticket=self.ticket()
+        self.assertEqual(ticket['signals'],[])
+        self.assertIsNone(ticket['signal_metadata_error'])
+
+        metadata=self.root/'recipes/recurring-ai-watch/explorer.yaml'
+        metadata.write_text('version: 1\nsignals: [broken')
+        broken=self.watch(mode='mock')
+        self.assertEqual(broken['signals'],[])
+        self.assertIsNone(broken['signal_metadata_revision'])
+        self.assertIn('valid safe YAML',broken['signal_metadata_error'])
+        metadata.write_bytes(b'x'*(MAX_METADATA_BYTES+1))
+        self.assertIn('must not exceed',self.watch(
+            mode='mock')['signal_metadata_error'])
+        metadata.unlink()
+        metadata.symlink_to(self.root/'models.yaml')
+        self.assertIn('must not be a symlink',self.watch(
+            mode='mock')['signal_metadata_error'])
+
+    def test_workflow_signal_metadata_revalidation_and_http_route(self):
         stub=ThreadingHTTPServer(('127.0.0.1',0),WorkflowStub)
         thread=threading.Thread(target=stub.serve_forever,daemon=True);thread.start()
         base=f'http://127.0.0.1:{stub.server_port}'
@@ -716,33 +857,124 @@ class ExplorerTests(unittest.TestCase):
             self.explorer=Explorer(self.root,cadence_web_url=base)
             WorkflowStub.mode='found';WorkflowStub.run_id='run-current'
             WorkflowStub.signal_mode='accepted';WorkflowStub.posts.clear()
-            for action,signal_name in [('check-now','check-now'),('stop-watch','stop-watch')]:
-                result=self.explorer.workflow_signal({**request,'action':action})
+            WorkflowStub.paths.clear()
+            request['signal_metadata_revision']=self.explorer.resolve(
+                request)['signal_metadata_revision']
+            missing_revision=dict(request)
+            missing_revision.pop('signal_metadata_revision')
+            with self.assertRaisesRegex(
+                    InvalidSelection,'Signal metadata changed; refresh'):
+                self.explorer.workflow_signal({
+                    **missing_revision,'signal_id':'check-now','arguments':{}})
+            self.assertEqual((WorkflowStub.paths,WorkflowStub.posts),([],[]))
+            for signal_id,signal_name in [('check-now','check-now'),('stop-watch','stop-watch')]:
+                result=self.explorer.workflow_signal({
+                    **request,'signal_id':signal_id,'arguments':{}})
                 self.assertEqual((result['state'],result['signal_name']),('accepted',signal_name))
                 path,body=WorkflowStub.posts[-1]
                 self.assertTrue(path.endswith(f'/run-current/signal'))
                 self.assertEqual(json.loads(body),dict(signalName=signal_name))
                 self.assertNotIn(b'secret',body)
             post_count=len(WorkflowStub.posts)
-            stale=self.explorer.workflow_signal({**request,'action':'check-now','run_id':'run-old'})
+            stale=self.explorer.workflow_signal({
+                **request,'signal_id':'check-now','arguments':{},
+                'run_id':'run-old'})
             self.assertEqual(stale['state'],'stale run')
             self.assertEqual(len(WorkflowStub.posts),post_count)
-            for action in ('status','arbitrary',''):
+            for signal_id in ('status','arbitrary',''):
                 with self.assertRaises(InvalidSelection):
-                    self.explorer.workflow_signal({**request,'action':action})
-            with self.assertRaises(Unsupported):
-                self.explorer.workflow_signal(dict(sample='ticket-routing',
-                    implementation='recipes/ticket-routing/go',mode='demo',
-                    classifier='mock',run_id='run-current',action='check-now'))
+                    self.explorer.workflow_signal({
+                        **request,'signal_id':signal_id,'arguments':{}})
+            ticket=dict(sample='ticket-routing',
+                implementation='recipes/ticket-routing/go',mode='demo',
+                classifier='mock')
+            ticket['signal_metadata_revision']=self.explorer.resolve(
+                ticket)['signal_metadata_revision']
+            path_count=len(WorkflowStub.paths)
+            with self.assertRaises(InvalidSelection):
+                self.explorer.workflow_signal({
+                    **ticket,
+                    'workflow_id':'ticket-routing-parent-001',
+                    'run_id':'run-current','signal_id':'check-now',
+                    'arguments':{}})
+            self.assertEqual(len(WorkflowStub.posts),post_count)
+            self.assertEqual(len(WorkflowStub.paths),path_count)
+
+            hitl={**request,'sample':'human-in-the-loop',
+                'implementation':'recipes/human-in-the-loop/python/openai-agents',
+                'model':'gemini-flash-lite'}
+            hitl['signal_metadata_revision']=self.explorer.resolve(
+                hitl)['signal_metadata_revision']
+            secret='call-id-private-value'
+            result=self.explorer.workflow_signal({
+                **hitl,'signal_id':'approve-tool-call',
+                'arguments':{'call_id':secret}})
+            self.assertEqual(result['state'],'accepted')
+            _,body=WorkflowStub.posts[-1]
+            self.assertEqual(json.loads(body),dict(
+                signalName='approve_tool_call',
+                signalInput=json.dumps(secret)))
+            with self.assertRaises(InvalidSelection) as caught:
+                self.explorer.workflow_signal({
+                    **hitl,'signal_id':'approve-tool-call',
+                    'arguments':{'call_id':'','schema':'private-value'}})
+            self.assertNotIn('private-value',str(caught.exception))
+
+            metadata=self.root/'recipes/human-in-the-loop/explorer.yaml'
+            original=metadata.read_text()
+            original_document=yaml.safe_load(original)
+            changes=[
+                ('Signal name',lambda document:
+                    document['signals'][0].__setitem__(
+                        'name','changed_signal')),
+                ('intent',lambda document:
+                    document['signals'][0].__setitem__('intent','normal')),
+                ('argument name',lambda document:
+                    document['signals'][0]['arguments'][0].__setitem__(
+                        'name','changed_call_id')),
+                ('argument type',lambda document:(
+                    document['signals'][0]['arguments'][0].__setitem__(
+                        'type','boolean'),
+                    document['signals'][0]['arguments'][0].__setitem__(
+                        'constraints',{}))),
+                ('argument constraints',lambda document:
+                    document['signals'][0]['arguments'][0][
+                        'constraints'].__setitem__('max_length',254)),
+                ('argument required status',lambda document:
+                    document['signals'][0]['arguments'][0].__setitem__(
+                        'required',False)),
+                ('control removal',lambda document:
+                    document['signals'].pop(0)),
+            ]
+            for label,change in changes:
+                document=json.loads(json.dumps(original_document))
+                change(document)
+                metadata.write_text(yaml.safe_dump(
+                    document,sort_keys=False))
+                path_count=len(WorkflowStub.paths)
+                post_count=len(WorkflowStub.posts)
+                with self.subTest(metadata_change=label):
+                    with self.assertRaisesRegex(
+                            InvalidSelection,
+                            'Signal metadata changed; refresh'):
+                        self.explorer.workflow_signal({
+                            **hitl,'signal_id':'approve-tool-call',
+                            'arguments':{'call_id':secret}})
+                    self.assertEqual(len(WorkflowStub.paths),path_count)
+                    self.assertEqual(len(WorkflowStub.posts),post_count)
+            metadata.write_text(original)
+
             for mode,state in [('not-found','no execution'),('auth','authentication required'),
-                    ('rejected','rejected')]:
+                    ('rejected','rejected'),('malformed','malformed response')]:
                 WorkflowStub.signal_mode=mode
                 self.assertEqual(self.explorer.workflow_signal(
-                    {**request,'action':'check-now'})['state'],state)
+                    {**request,'signal_id':'check-now',
+                     'arguments':{}})['state'],state)
             WorkflowStub.signal_mode='slow'
             timed=Explorer(self.root,cadence_web_url=base,workflow_timeout=.001)
             self.assertEqual(timed.workflow_signal(
-                {**request,'action':'check-now'})['state'],'unreachable')
+                {**request,'signal_id':'check-now',
+                 'arguments':{}})['state'],'unreachable')
 
             WorkflowStub.signal_mode='accepted'
             terminal=TerminalStub()
@@ -754,7 +986,8 @@ class ExplorerTests(unittest.TestCase):
             headers={'Content-Type':'application/json',
                 'Origin':f'http://127.0.0.1:{server.server_port}'}
             try:
-                body=json.dumps({**request,'action':'check-now'})
+                body=json.dumps({
+                    **request,'signal_id':'check-now','arguments':{}})
                 connection.request('POST','/api/workflow-signal',body=body,headers=headers)
                 response=connection.getresponse();self.assertEqual(response.status,200)
                 self.assertEqual(json.loads(response.read())['state'],'accepted')

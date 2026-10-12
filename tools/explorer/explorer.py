@@ -18,6 +18,9 @@ import yaml
 from source import (InvalidSelection, Unsupported, go_classifier, go_cli,
                     go_function, go_validate, java_classifier, java_cli,
                     python_cli, python_guard, value)
+from signal_metadata import (SignalMetadataError, load_metadata,
+                             metadata_revision, serialize_arguments,
+                             validate_arguments)
 
 
 SKIP = {'tests', 'testdata', 'perf', '.venv', 'venv', '__pycache__', 'node_modules'}
@@ -194,6 +197,44 @@ class Explorer:
         if entry is None:
             raise InvalidSelection(f'Unknown {kind} ID. Refresh the explorer to read the current catalog.')
         return entry
+
+    def signal_metadata(self, recipe_id):
+        recipe = self.root / 'recipes' / recipe_id
+        if not recipe.is_dir() or not self.inside(recipe):
+            raise SignalMetadataError(
+                'Signal metadata recipe must stay inside the checkout.')
+        return load_metadata(recipe, self.inside)
+
+    def signal_metadata_state(self, recipe_id):
+        try:
+            signals = self.signal_metadata(recipe_id)
+            return signals, metadata_revision(signals), None
+        except SignalMetadataError as error:
+            return [], None, str(error)
+
+    def validated_signal_request(self, request):
+        changed = 'Signal metadata changed; refresh the Explorer and retry.'
+        rendered_revision = request.get('signal_metadata_revision')
+        if not isinstance(rendered_revision, str):
+            raise InvalidSelection(changed)
+        try:
+            signals = self.signal_metadata(request.get('sample'))
+        except (SignalMetadataError, TypeError) as error:
+            raise InvalidSelection(changed) from error
+        if rendered_revision != metadata_revision(signals):
+            raise InvalidSelection(changed)
+        signal_id = request.get('signal_id')
+        signal = next(
+            (candidate for candidate in signals
+             if candidate['id'] == signal_id), None)
+        if signal is None:
+            raise InvalidSelection(
+                'Choose a currently declared Workflow Signal control.')
+        try:
+            values = validate_arguments(signal, request.get('arguments', {}))
+            return signal, serialize_arguments(values)
+        except SignalMetadataError as error:
+            raise InvalidSelection(str(error)) from error
 
     def resolve(self, request):
         state = self.snapshot()
@@ -372,6 +413,8 @@ class Explorer:
         if cli['generic'] or cli['kind'] != 'java':
             for command in [worker]+([starter] if starter else [])+controls:
                 self.validate_command(cli,command)
+        signals, signal_metadata_revision, signal_metadata_error = (
+            self.signal_metadata_state(recipe['id']))
         return dict(setup='\n'.join(setup),worker=prefix+shlex.join(worker),
             client='\n'.join(prefix+shlex.join(c) for c in ([starter] if starter else [])+controls),
             start=prefix+shlex.join(starter) if starter else '',
@@ -381,6 +424,8 @@ class Explorer:
             cadence_web_url=self.cadence_web_url, cadence_cluster=self.cadence_cluster,
             implementation=variant['id'],mode=mode,live=live,model=model,classifier=classifier,
             evidence=record,credentials=credentials,local=self.local_commands(model,classifier) if live else [],
+            signals=signals,signal_metadata_revision=signal_metadata_revision,
+            signal_metadata_error=signal_metadata_error,
             mock=(mode=='mock' if cli['generic'] or cli['kind']=='python'
                   else mode in cli['mock_modes'] or (mode=='worker' and not live)),
             read_at=state['read_at'],note='Recorded live evidence is historical, not a fresh run of this checkout. Read the evidence file for scope and limitations.' if record else
@@ -486,32 +531,35 @@ class Explorer:
         return result
 
     def workflow_signal(self, request):
-        signals = {'check-now':'check-now', 'stop-watch':'stop-watch'}
-        action = request.get('action')
-        if action not in signals:
-            raise InvalidSelection('Workflow Signal action must be check-now or stop-watch.')
-        if request.get('sample') != 'recurring-ai-watch':
-            raise Unsupported(
-                'Workflow Signal controls currently support Recurring AI Watch only.')
+        signal_id = request.get('signal_id')
+        if not isinstance(signal_id, str):
+            raise InvalidSelection('Choose a declared Workflow Signal control.')
         displayed_run = request.get('run_id')
         if (not isinstance(displayed_run, str) or not displayed_run.strip()
                 or len(displayed_run) > 255
                 or any(ord(character) < 32 for character in displayed_run)):
             raise InvalidSelection('Resolve the current Run ID before sending a Signal.')
+        signal, signal_input = self.validated_signal_request(request)
         current = self.workflow_run(request)
-        result = dict(state=current['state'], action=action,
-            signal_name=signals[action], run_id=displayed_run, detail=current['detail'])
+        result = dict(state=current['state'], signal_id=signal_id,
+            signal_name=signal['name'], run_id=displayed_run,
+            detail=current['detail'])
         if current['state'] != 'found':
             return result
         if current['run_id'] != displayed_run:
-            return dict(state='stale run', action=action,
-                signal_name=signals[action], run_id=displayed_run,
+            return dict(state='stale run', signal_id=signal_id,
+                signal_name=signal['name'], run_id=displayed_run,
                 detail='The current Run ID changed. Resolve the latest run and retry.')
+        signal, signal_input = self.validated_signal_request(request)
+        result['signal_name'] = signal['name']
         segments = [quote(value, safe='') for value in (
             current['domain'], current['cluster'], current['workflow_id'], displayed_run)]
         endpoint = (self.cadence_web_url + '/api/domains/' + segments[0] + '/'
             + segments[1] + '/workflows/' + segments[2] + '/' + segments[3] + '/signal')
-        body = json.dumps(dict(signalName=signals[action]), separators=(',',':')).encode()
+        payload = dict(signalName=signal['name'])
+        if signal_input is not None:
+            payload['signalInput'] = signal_input
+        body = json.dumps(payload, separators=(',',':')).encode()
         request_object = Request(endpoint, method='POST', data=body,
             headers={'Accept':'application/json', 'Content-Type':'application/json'})
         try:
@@ -519,6 +567,9 @@ class Explorer:
                 response_body = response.read(1024 * 1024 + 1)
             if len(response_body) > 1024 * 1024:
                 raise ValueError('response is too large')
+            response_payload = json.loads(response_body)
+            if not isinstance(response_payload, dict):
+                raise ValueError('response is not an object')
             result.update(state='accepted',
                 detail='Cadence-Web accepted the Signal; Workflow processing is not yet confirmed.')
         except HTTPError as error:

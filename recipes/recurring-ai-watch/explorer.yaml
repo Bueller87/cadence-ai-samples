@@ -1,0 +1,14 @@
+version: 1
+signals:
+  - id: check-now
+    name: check-now
+    label: Check now
+    description: Request an immediate release-note check.
+    intent: normal
+    arguments: []
+  - id: stop-watch
+    name: stop-watch
+    label: Stop watch
+    description: Stop the running watch after its current work finishes.
+    intent: destructive
+    arguments: []

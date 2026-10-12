@@ -67,6 +67,23 @@ closed Watch ID may be started again; Cadence creates a new Run and preserves th
 previous Run's history. Starting the same ID while it is still open remains an
 error.
 
+## Explorer Signal controls
+
+The optional recipe-root [`explorer.yaml`](explorer.yaml) declares the
+payload-free `check-now` and `stop-watch` controls for the Local Samples
+Explorer. After the Explorer resolves the exact current Run, **Check now** sends
+an immediate-check Signal and **Stop watch** uses a separate destructive
+confirmation step. Cadence-Web acceptance does not prove the Workflow processed
+the Signal; inspect status or history afterward.
+
+This declaration is shared by both framework folders because their Workflow
+Signal contracts are identical. A copied Watch may retain `explorer.yaml` only
+while it keeps those exact Signal names and no-argument handlers. Update and
+test the declaration if the handlers change, or remove it to keep the copied
+recipe runnable without showing Explorer Signal controls. Do not add commands,
+Workflow IDs, provider settings, endpoints, credentials, or raw payload
+templates to this file.
+
 ## Live run
 
 In Terminal 1, set `MODEL_AI_KEY` to the selected Google or OpenAI API key and

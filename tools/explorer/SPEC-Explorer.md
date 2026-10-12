@@ -144,9 +144,96 @@ omission, and keep the earlier working path reliable.
 - Report missing, unreachable, stale, and Continue-As-New-related run changes
   without guessing. Keep domain navigation available after lookup failures.
 - Do not claim a Workflow has started merely because its command was generated.
-- Keep recipe Signal discovery and typed payload controls deferred to
-  [Issue #6](https://github.com/cadence-workflow/cadence-ai-samples/issues/6).
-  Existing Recurring AI Watch Signal controls remain recipe-specific.
+- After resolving one exact current Run, show only the Signal controls declared
+  by the selected recipe's valid optional `explorer.yaml`.
+- A manually entered historical Run may open History and Queries, but it never
+  enables Signal sending.
+
+### Recipe-owned Signal metadata
+
+`explorer.yaml` is an optional Signal-only file at the recipe root. It is not a
+general recipe manifest or command catalog. Version 1 has this shape:
+
+```yaml
+version: 1
+signals:
+  - id: stable-control-id
+    name: exact_cadence_signal_name
+    label: Human-readable label
+    description: Short safe help text.
+    intent: normal
+    arguments:
+      - name: argument_name
+        label: Argument label
+        type: string
+        required: true
+        constraints:
+          min_length: 1
+          max_length: 255
+        help: Short safe field help.
+```
+
+`version` is required and must equal integer `1`; `signals` is optional. Unknown
+fields are errors. Every Signal requires `id`, `name`, `label`, `description`,
+`intent`, and `arguments`. Every argument requires `name`, `label`, `type`,
+`required`, `constraints`, and `help`.
+
+The v1 bounds are:
+
+- The UTF-8 file is at most 16 KiB, contains at most 16 Signals, and each Signal
+  contains at most 8 arguments.
+- Signal IDs are 1–64 lowercase letters, digits, or hyphens and start with a
+  letter. Argument names use the same bound with underscores instead of
+  hyphens. IDs, Signal names, and argument names are unique in their scope.
+- Signal names are at most 128 characters. Labels are at most 80 characters;
+  descriptions and argument help are at most 240 characters.
+- Text is nonempty, has no leading or trailing whitespace, control characters,
+  or angle brackets. Metadata cannot contain HTML.
+- Intent is `normal`, `confirm`, or `destructive`. Both `confirm` and
+  `destructive` require a separate inline confirmation action;
+  `destructive` also receives danger styling.
+- Argument type is `string`, `integer`, `number`, or `boolean`. String
+  constraints allow only `min_length` and `max_length` from 0 through 4096.
+  Integer and number constraints allow only `minimum` and `maximum` from
+  -1,000,000,000,000 through 1,000,000,000,000. Boolean constraints are empty.
+  A minimum cannot exceed its maximum.
+- Required arguments precede optional arguments. Optional arguments are omitted
+  only from the end of the positional value sequence.
+
+The Explorer uses safe YAML loading and rejects unknown versions and fields,
+duplicates, malformed YAML, unsupported types or constraints, excessive values,
+and metadata files or symlinks that escape the checkout. A missing file or
+missing `signals` section means no controls. Invalid metadata also means no
+controls, but the recipe remains usable and receives a specific sanitized
+metadata error.
+
+The backend returns only sanitized control definitions plus a deterministic
+SHA-256 revision of the complete validated metadata to the browser. A Signal
+request contains that rendered revision, the stable control ID, an
+argument-name/value object, and the resolved Run ID. It never contains a
+browser-selected Signal name, intent, schema, or serialized payload.
+
+Before contacting Cadence-Web, the backend reloads and validates the recipe
+metadata and rejects a missing or mismatched rendered revision with an
+instruction to refresh the Explorer. It validates the values and resolves the
+current Run again. Immediately before the Signal POST, it reloads the metadata
+and compares the revision again so a declaration change during Run resolution
+also fails closed. It refuses to POST if either the metadata or execution
+changed, disappeared, or cannot be resolved.
+
+Cadence-Web accepts `signalInput` as a JSON-bearing string and forwards its
+bytes to Cadence. The Cadence Python client's default converter represents
+positional handler arguments as whitespace-delimited JSON values. The Explorer
+therefore serializes each validated scalar independently in declaration order
+and joins the JSON values with one ASCII space. For example, string `call-1`,
+integer `2`, and boolean `true` become `"call-1" 2 true`. A payload-free Signal
+omits `signalInput`; the Explorer never wraps positional values in an object or
+array.
+
+Argument values exist only in the in-memory form and same-origin POST body. They
+are not placed in URLs, browser or server logs, persisted storage, durable
+evidence, or sanitized error text. Cadence-Web acceptance remains distinct from
+Workflow processing.
 
 ## Page simplification
 
@@ -204,10 +291,12 @@ and healthy/missing-service walkthrough were implemented and validated. Remainin
 limitations and post-demo expansion are tracked below. This baseline merged to
 `main` on October 7, 2026 in `8446cf3`.
 
-Post-demo Terminal handoff, current-run deep links, payload-free Watch Signal
-controls, and repeatable Watch IDs merged through
+Post-demo Terminal handoff, current-run deep links, the initial payload-free
+Watch Signal controls, and repeatable Watch IDs merged through
 [PR #2](https://github.com/cadence-workflow/cadence-ai-samples/pull/2) on
-October 8, 2026 in `2693a81`.
+October 8, 2026 in `2693a81`. The recipe-owned metadata contract above
+supersedes that Watch-specific Signal implementation while preserving its
+delivery history here.
 
 ---
 
@@ -250,18 +339,12 @@ ownership. This section preserves requirements and historical delivered scope.
    the user must enter one exact Workflow ID before resolution. Resolve again
    after Continue-As-New; never guess a Workflow or Run.
 4. **Signal control plane ([Issue #6](https://github.com/cadence-workflow/cadence-ai-samples/issues/6)):**
-   the delivered Recurring AI Watch slice exposes payload-free,
-   allowlisted `check-now` and `stop-watch` actions only after latest-run
-   resolution. It revalidates the exact current run, reports Cadence-Web
-   acceptance without claiming Workflow processing, and preserves copyable CLI
-   controls as the manual path. Queries remain in Cadence-Web through **Open
-   queries**. A disposable mock Watch verified that `check-now` advanced the check
-   count and `stop-watch` completed the Workflow. Both Watch implementations now
-   explicitly allow a closed demo Workflow ID to start a new Run while still
-   rejecting a duplicate start when a Run is open. Future work should evaluate a
-   separate control panel and recipe-owned, schema-driven typed fields only for
-   Signals that accept payloads; do not default to arbitrary Signal names or a
-   raw JSON textbox.
+   optional recipe-root metadata defines bounded controls and typed positional
+   fields for Recurring AI Watch and Human in the Loop. Controls appear only
+   after latest-run resolution, revalidate the exact current Run, and report
+   Cadence-Web acceptance without claiming Workflow processing. Queries remain
+   in Cadence-Web through **Open queries**; arbitrary Signal names and raw JSON
+   remain unsupported.
 5. **Windows experience ([Issue #4](https://github.com/cadence-workflow/cadence-ai-samples/issues/4)):**
    Linux/Mac and Windows command tabs in the same Explorer,
    plus a Windows launcher; preserve the same selection flow.

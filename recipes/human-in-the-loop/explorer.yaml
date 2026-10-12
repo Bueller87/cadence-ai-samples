@@ -1,0 +1,30 @@
+version: 1
+signals:
+  - id: approve-tool-call
+    name: approve_tool_call
+    label: Approve tool call
+    description: Approve the pending booking tool call with its exact call ID.
+    intent: confirm
+    arguments:
+      - name: call_id
+        label: Call ID
+        type: string
+        required: true
+        constraints:
+          min_length: 1
+          max_length: 255
+        help: Enter the pending call ID reported by the Workflow status Query.
+  - id: reject-tool-call
+    name: reject_tool_call
+    label: Reject tool call
+    description: Reject the pending booking tool call with its exact call ID.
+    intent: destructive
+    arguments:
+      - name: call_id
+        label: Call ID
+        type: string
+        required: true
+        constraints:
+          min_length: 1
+          max_length: 255
+        help: Enter the pending call ID reported by the Workflow status Query.

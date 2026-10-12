@@ -112,6 +112,15 @@ endpoint-mutation test proving that a changed safe catalog endpoint reaches the
 provider transport.
 
 The implemented profiles need no recipe metadata layer. Their validated layout
-and literal CLI contracts provide the facts the Explorer needs. If a future
-profile cannot express a required fact through those contracts, add metadata
-only after a failing contract test demonstrates the gap.
+and literal CLI contracts provide the facts the Explorer needs. A generated
+recipe may add optional recipe-root `explorer.yaml` only when it has explicit
+Cadence Signal handlers that need Explorer controls. The file is Signal-only;
+it must follow the strict schema in the
+[Explorer specification](../../tools/explorer/SPEC-Explorer.md#recipe-owned-signal-metadata)
+and must not duplicate commands, Workflow IDs, providers, endpoints, or
+credentials.
+
+When copying a recipe with `explorer.yaml`, retain it only if the copied
+Workflow keeps the exact declared Signal names, positional argument order, and
+safety behavior. Modify and test the declaration with any handler change, or
+remove the file to make the copied recipe show no Explorer Signal panel.
