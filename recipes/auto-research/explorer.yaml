@@ -1,0 +1,74 @@
+version: 1
+signals:
+  - id: revise-report
+    name: revise_report
+    label: Revise report
+    description: Apply bounded feedback to the exact current report revision.
+    intent: confirm
+    arguments:
+      - name: request
+        label: Revision request
+        type: object
+        required: true
+        constraints: {}
+        help: Enter the current revision and bounded edit.
+        fields:
+          - name: expected_revision
+            label: Expected revision
+            type: integer
+            required: true
+            constraints:
+              minimum: 0
+              maximum: 3
+            help: Enter the current revision reported by the Workflow status Query.
+          - name: feedback
+            label: Feedback
+            type: string
+            required: true
+            constraints:
+              min_length: 1
+              max_length: 1000
+            help: Describe the bounded edit to apply to the complete draft.
+  - id: expand-report
+    name: expand_report
+    label: Expand report
+    description: Research one bounded topic and add it to the exact current revision.
+    intent: confirm
+    arguments:
+      - name: request
+        label: Expansion request
+        type: object
+        required: true
+        constraints: {}
+        help: Enter the current revision and bounded expansion topic.
+        fields:
+          - name: expected_revision
+            label: Expected revision
+            type: integer
+            required: true
+            constraints:
+              minimum: 0
+              maximum: 3
+            help: Enter the current revision reported by the Workflow status Query.
+          - name: topic
+            label: Expansion topic
+            type: string
+            required: true
+            constraints:
+              min_length: 1
+              max_length: 300
+            help: Enter the additional synthetic research topic.
+  - id: approve-report
+    name: approve_report
+    label: Approve and publish
+    description: Approve the exact current revision for one idempotent local publication.
+    intent: confirm
+    arguments:
+      - name: expected_revision
+        label: Expected revision
+        type: integer
+        required: true
+        constraints:
+          minimum: 0
+          maximum: 3
+        help: Enter the current revision reported by the Workflow status Query.

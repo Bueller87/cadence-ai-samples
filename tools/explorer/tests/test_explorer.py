@@ -165,8 +165,9 @@ class ExplorerTests(unittest.TestCase):
     def test_current_discovery_and_modes(self):
         state=self.explorer.snapshot()
         self.assertEqual([r['id'] for r in state['recipes']],
-                         ['human-in-the-loop','recurring-ai-watch','ticket-routing'])
-        hitl,watch,ticket=state['recipes']
+                         ['auto-research','human-in-the-loop','recurring-ai-watch','ticket-routing'])
+        auto,hitl,watch,ticket=state['recipes']
+        self.assertEqual([v['framework'] for v in auto['variants']],['openai-agents'])
         self.assertEqual([v['framework'] for v in hitl['variants']],['openai-agents'])
         self.assertEqual([v['framework'] for v in watch['variants']],['google-adk','openai-agents'])
         self.assertTrue(all(v['supported'] for v in
@@ -176,6 +177,34 @@ class ExplorerTests(unittest.TestCase):
         self.assertEqual(ticket['variants'][0]['live_modes'],['live-demo','live-batch'])
         self.assertEqual(ticket['variants'][0]['mock_modes'],['demo','start-ticket','batch'])
         self.assertEqual([entry['id'] for entry in state['classifiers']],['jev-default','laya-local'])
+
+    def test_auto_research_resolves_commands_and_typed_signals(self):
+        implementation='recipes/auto-research/python/openai-agents'
+        variant=next(r for r in self.explorer.snapshot()['recipes']
+                     if r['id']=='auto-research')['variants'][0]
+        self.assertFalse(variant['generic'])
+        self.assertEqual(set(variant['actions']),
+                         {'worker','start','status','approve','revise','expand'})
+        result=self.explorer.resolve(dict(sample='auto-research',
+            implementation=implementation,mode='live',model='llama3.2-local'))
+        self.assertEqual([control['name'] for control in result['controls']],['status'])
+        self.assertEqual([signal['id'] for signal in result['signals']],
+                         ['revise-report','expand-report','approve-report'])
+        self.assertTrue(all(signal['intent']=='confirm'
+                            for signal in result['signals']))
+        self.assertEqual(
+            [argument['type'] for argument in
+             result['signals'][0]['arguments']],['object'])
+        self.assertEqual(
+            [argument['name'] for argument in
+             result['signals'][0]['arguments']],
+            ['request'])
+        self.assertEqual(
+            [field['name'] for field in
+             result['signals'][0]['arguments'][0]['fields']],
+            ['expected_revision','feedback'])
+        self.assertIn('--model-id llama3.2-local',result['worker'])
+        self.assertIn('start --mode live',result['start'])
 
     def test_human_in_the_loop_resolves_worker_and_start_without_imports(self):
         implementation='recipes/human-in-the-loop/python/openai-agents'
@@ -862,6 +891,23 @@ class ExplorerTests(unittest.TestCase):
         self.assertNotEqual(
             watch['signal_metadata_revision'],
             hitl['signal_metadata_revision'])
+        auto=self.explorer.resolve(dict(
+            sample='auto-research',
+            implementation='recipes/auto-research/python/openai-agents',
+            mode='mock',model='llama3.2-local'))
+        self.assertEqual(
+            [signal['id'] for signal in auto['signals']],
+            ['revise-report','expand-report','approve-report'])
+        self.assertEqual(
+            [argument['name'] for argument in
+             auto['signals'][0]['arguments']],
+            ['request'])
+        request={'expected_revision':2,'feedback':'Shorten it.'}
+        self.assertEqual(
+            serialize_arguments(validate_arguments(
+                auto['signals'][0],
+                {'request':request})),
+            json.dumps(request,separators=(',',':')))
         ticket=self.ticket()
         self.assertEqual(ticket['signals'],[])
         self.assertIsNone(ticket['signal_metadata_error'])
@@ -955,6 +1001,25 @@ class ExplorerTests(unittest.TestCase):
                     **hitl,'signal_id':'approve-tool-call',
                     'arguments':{'call_id':'','schema':'private-value'}})
             self.assertNotIn('private-value',str(caught.exception))
+
+            auto={**request,'sample':'auto-research',
+                'implementation':'recipes/auto-research/python/openai-agents',
+                'model':'llama3.2-local'}
+            auto['signal_metadata_revision']=self.explorer.resolve(
+                auto)['signal_metadata_revision']
+            result=self.explorer.workflow_signal({
+                **auto,'signal_id':'revise-report',
+                'arguments':{'request':{
+                    'expected_revision':2,
+                    'feedback':'Shorten it.'}}})
+            self.assertEqual(result['state'],'accepted')
+            path,body=WorkflowStub.posts[-1]
+            self.assertTrue(path.endswith('/run-current/signal'))
+            self.assertEqual(json.loads(body),dict(
+                signalName='revise_report',
+                signalInput=json.dumps(dict(
+                    expected_revision=2,feedback='Shorten it.'),
+                    separators=(',',':'))))
 
             metadata=self.root/'recipes/human-in-the-loop/explorer.yaml'
             original=metadata.read_text()
