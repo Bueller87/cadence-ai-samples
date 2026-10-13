@@ -22,6 +22,38 @@ async function main(){
   fs.mkdirSync(path.join(generic,'python'),{recursive:true});
   fs.cpSync(path.join(root,'recipes/recurring-ai-watch/python/google-adk'),path.join(generic,'python/google-adk'),{recursive:true});
   fs.writeFileSync(path.join(generic,'README.md'),'# Generic single Workflow\n');
+  fs.writeFileSync(path.join(generic,'explorer.yaml'),`version: 1
+signals:
+  - id: revise
+    name: revise
+    label: Revise
+    description: Revise one version.
+    intent: normal
+    arguments:
+      - name: request
+        label: Request
+        type: object
+        required: true
+        constraints: {}
+        help: Enter revision details.
+        fields:
+          - name: expected_revision
+            label: Expected revision
+            type: integer
+            required: true
+            constraints:
+              minimum: 0
+              maximum: 1000
+            help: Enter the current revision.
+          - name: detail
+            label: Detail
+            type: string
+            required: true
+            constraints:
+              min_length: 1
+              max_length: 255
+            help: Enter revision detail.
+`);
   for(const file of ['README.md','models.yaml','classifiers.yaml'])fs.copyFileSync(path.join(root,file),path.join(fixture,file));
   const tools=path.join(fixture,'tools/explorer');fs.mkdirSync(tools,{recursive:true});
   for(const file of ['source.py','signal_metadata.py','explorer.py','server.py','terminal.py'])fs.copyFileSync(path.join(root,'tools/explorer',file),path.join(tools,file));
@@ -129,7 +161,18 @@ async function main(){
   change('sample','generic-single');change('framework','recipes/generic-single/python/google-adk');change('mode','mock');await ready();
   assert.ok($('web-workflow-id').value.startsWith('generic-single-'));assert.equal($('web-workflow-id').readOnly,true);
   $('resolve-run').click();await waitFor(()=>$('run-id').value==='run-generic','generic single-Workflow resolution');
-  assert.ok($('workflow-queries').href.endsWith('/run-generic/queries'));assert.equal($('workflow-signals').hidden,true);
+  assert.ok($('workflow-queries').href.endsWith('/run-generic/queries'));assert.equal($('workflow-signals').hidden,false);
+  const reviseCard=dom.window.document.querySelector('[data-signal-id="revise"]');
+  const reviseCount=signalRequests.length;
+  input('signal-revise-request-expected_revision','1.5');
+  reviseCard.querySelector('.signal-send').click();assert.equal(signalRequests.length,reviseCount);assert.ok($('signal-status').textContent.includes('integer'));
+  const privateDetail='private structured detail';
+  input('signal-revise-request-expected_revision','2');input('signal-revise-request-detail',privateDetail);
+  reviseCard.querySelector('.signal-send').click();await waitFor(()=>signalRequests.length===reviseCount+1,'structured Signal request');
+  assert.deepEqual(signalRequests.at(-1).arguments,{request:{expected_revision:2,detail:privateDetail}});
+  assert.ok(signalRequestUrls.every(requestUrl=>!requestUrl.includes(privateDetail)));assert.ok(!$('signal-status').textContent.includes(privateDetail));
+  await waitFor(()=>!reviseCard.querySelector('.signal-send').disabled,'structured Signal completion');
+  assert.equal($('signal-revise-request-expected_revision').value,'');assert.equal($('signal-revise-request-detail').value,'');
 
   change('sample','recurring-ai-watch');change('framework','recipes/recurring-ai-watch/python/google-adk');change('mode','live');await ready();
   assert.equal($('open-worker').hidden,false);assert.equal($('open-start').hidden,false);assert.equal($('terminal-note').hidden,false);
@@ -183,7 +226,7 @@ async function main(){
   $('refresh').click();await waitFor(()=>$('sample').options.length===6,'new recipe discovery');change('sample','new-recipe');
   assert.equal($('language').value,'java');assert.equal($('language-field').hidden,false);assert.equal($('readme').hidden,false);await failed();assert.ok($('selection-status').textContent.includes('adapter'));
   assert.deepEqual(errors,[]);
-  console.log('PASS: real HTTP + six-step DOM flow, generic/Human in the Loop latest-run links, explicit Ticket Routing Workflow selection, manual Run ID deep links, metadata-driven Watch and typed Human in the Loop Signals, invalid metadata feedback, confirmations, stale/Continue-As-New feedback, visible single-choice selectors, explicit modes, manual checks, local warm-up availability, Mac terminal handoff/fallback, individual controls, catalog refresh, Go live batches, clipboard fallback, and incomplete recipes.');
+  console.log('PASS: real HTTP + six-step DOM flow, generic/Human in the Loop latest-run links, explicit Ticket Routing Workflow selection, manual Run ID deep links, metadata-driven Watch, scalar Human in the Loop Signals, structured object Signals, invalid metadata feedback, confirmations, stale/Continue-As-New feedback, visible single-choice selectors, explicit modes, manual checks, local warm-up availability, Mac terminal handoff/fallback, individual controls, catalog refresh, Go live batches, clipboard fallback, and incomplete recipes.');
 }
 main().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{
   if(dom)dom.window.close();

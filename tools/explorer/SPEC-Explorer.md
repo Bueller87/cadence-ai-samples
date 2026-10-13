@@ -163,25 +163,41 @@ signals:
     description: Short safe help text.
     intent: normal
     arguments:
-      - name: argument_name
-        label: Argument label
-        type: string
+      - name: request
+        label: Request
+        type: object
         required: true
-        constraints:
-          min_length: 1
-          max_length: 255
-        help: Short safe field help.
+        constraints: {}
+        help: Short safe argument help.
+        fields:
+          - name: expected_revision
+            label: Expected revision
+            type: integer
+            required: true
+            constraints:
+              minimum: 0
+              maximum: 1000000
+            help: Current revision number.
+          - name: detail
+            label: Detail
+            type: string
+            required: true
+            constraints:
+              min_length: 1
+              max_length: 255
+            help: Requested change.
 ```
 
 `version` is required and must equal integer `1`; `signals` is optional. Unknown
 fields are errors. Every Signal requires `id`, `name`, `label`, `description`,
 `intent`, and `arguments`. Every argument requires `name`, `label`, `type`,
-`required`, `constraints`, and `help`.
+`required`, `constraints`, and `help`. An object argument also requires `fields`;
+each field has the same required keys as a scalar argument.
 
 The v1 bounds are:
 
 - The UTF-8 file is at most 16 KiB, contains at most 16 Signals, and each Signal
-  contains at most 8 arguments.
+  contains at most one top-level argument. An object contains 1–8 fields.
 - Signal IDs are 1–64 lowercase letters, digits, or hyphens and start with a
   letter. Argument names use the same bound with underscores instead of
   hyphens. IDs, Signal names, and argument names are unique in their scope.
@@ -192,13 +208,15 @@ The v1 bounds are:
 - Intent is `normal`, `confirm`, or `destructive`. Both `confirm` and
   `destructive` require a separate inline confirmation action;
   `destructive` also receives danger styling.
-- Argument type is `string`, `integer`, `number`, or `boolean`. String
+- A top-level argument type is `string`, `integer`, `number`, `boolean`, or
+  `object`. Object fields use only the four scalar types. String
   constraints allow only `min_length` and `max_length` from 0 through 4096.
   Integer and number constraints allow only `minimum` and `maximum` from
   -1,000,000,000,000 through 1,000,000,000,000. Boolean constraints are empty.
-  A minimum cannot exceed its maximum.
-- Required arguments precede optional arguments. Optional arguments are omitted
-  only from the end of the positional value sequence.
+  Object constraints are empty. A minimum cannot exceed its maximum.
+- Object field names are unique and follow argument-name bounds. Fields may be
+  required or optional in any order. Arrays, arbitrary maps, nested objects,
+  unions, binary values, and recursive schemas are unsupported.
 
 The Explorer uses safe YAML loading and rejects unknown versions and fields,
 duplicates, malformed YAML, unsupported types or constraints, excessive values,
@@ -222,13 +240,15 @@ also fails closed. It refuses to POST if either the metadata or execution
 changed, disappeared, or cannot be resolved.
 
 Cadence-Web accepts `signalInput` as a JSON-bearing string and forwards its
-bytes to Cadence. The Cadence Python client's default converter represents
-positional handler arguments as whitespace-delimited JSON values. The Explorer
-therefore serializes each validated scalar independently in declaration order
-and joins the JSON values with one ASCII space. For example, string `call-1`,
-integer `2`, and boolean `true` become `"call-1" 2 true`. A payload-free Signal
-omits `signalInput`; the Explorer never wraps positional values in an object or
-array.
+bytes to Cadence, but validates the string as exactly one JSON document first.
+The Explorer therefore supports only no argument, one scalar argument, or one
+bounded object argument. A payload-free Signal omits `signalInput`; a scalar is
+encoded as its JSON value; and an object is encoded as one JSON object. For
+example, `{expected_revision: 2, detail: "feedback"}` becomes
+`{"expected_revision":2,"detail":"feedback"}`. Metadata with several top-level
+arguments fails before controls render or Cadence-Web is contacted. The Explorer
+does not join positional values, wrap arbitrary positional handlers in an array,
+or accept raw JSON from users.
 
 Argument values exist only in the in-memory form and same-origin POST body. They
 are not placed in URLs, browser or server logs, persisted storage, durable
@@ -339,8 +359,9 @@ ownership. This section preserves requirements and historical delivered scope.
    the user must enter one exact Workflow ID before resolution. Resolve again
    after Continue-As-New; never guess a Workflow or Run.
 4. **Signal control plane ([Issue #6](https://github.com/cadence-workflow/cadence-ai-samples/issues/6)):**
-   optional recipe-root metadata defines bounded controls and typed positional
-   fields for Recurring AI Watch and Human in the Loop. Controls appear only
+   optional recipe-root metadata defines bounded controls with zero arguments,
+   one scalar, or one object for Recurring AI Watch and Human in the Loop.
+   Controls appear only
    after latest-run resolution, revalidate the exact current Run, and report
    Cadence-Web acceptance without claiming Workflow processing. Queries remain
    in Cadence-Web through **Open queries**; arbitrary Signal names and raw JSON
