@@ -47,7 +47,7 @@ async function main(){
         if(target.pathname==='/api/workflow-run'){
           runRequests.push(target);
           const sample=target.searchParams.get('sample');
-          const runId=sample==='human-in-the-loop'?'run-hitl':sample==='generic-single'?'run-generic':sample==='ticket-routing'?'run-ticket':watchRunIds.shift();
+          const runId=sample==='auto-research'?'run-auto':sample==='human-in-the-loop'?'run-hitl':sample==='generic-single'?'run-generic':sample==='ticket-routing'?'run-ticket':watchRunIds.shift();
           const stale=runId==='run-continued';
           const response=()=>new Response(JSON.stringify({state:stale?'stale run':'found',run_id:runId,detail:stale?'The previous Run ID is stale. The current Run ID changed, which can happen after Continue-As-New.':'resolved'}),{status:200,headers:{'Content-Type':'application/json'}});
           if(holdRun)return new Promise(resolve=>releaseRun=()=>resolve(response()));
@@ -75,7 +75,7 @@ async function main(){
   const input=(id,value)=>{$(id).value=value;$(id).dispatchEvent(new dom.window.Event('input',{bubbles:true}));};
   const ready=()=>waitFor(()=>!$('worker-block').hidden,'resolved commands');
   const failed=()=>waitFor(()=>$('selection-status').className.includes('error')&&$('worker-block').hidden,'selection rejection');
-  await waitFor(()=>$('sample').options.length===5,'sample discovery');
+  await waitFor(()=>$('sample').options.length===6,'sample discovery');
   assert.equal(dom.window.document.querySelectorAll('.step').length,6);
   assert.equal($('resolved-panel'),null);assert.equal($('evidence-panel'),null);
   assert.equal(dom.window.document.querySelector('.teaching'),null);
@@ -125,6 +125,24 @@ async function main(){
   const rejectCount=signalRequests.length;rejectCard.querySelector('.signal-send').click();assert.equal(signalRequests.length,rejectCount);rejectCard.querySelector('.signal-confirmation .danger').click();await waitFor(()=>signalRequests.length===rejectCount+1,'reject Signal request');
   assert.equal(signalRequests.at(-1).signal_id,'reject-tool-call');assert.deepEqual(signalRequests.at(-1).arguments,{call_id:privateCallId});assert.ok(!$('signal-status').textContent.includes(privateCallId));
   await waitFor(()=>!rejectCard.querySelector('.signal-send').disabled,'reject Signal completion');assert.equal($('signal-reject-tool-call-call_id').value,'');
+
+  change('sample','auto-research');change('framework','recipes/auto-research/python/openai-agents');change('mode','mock');await ready();
+  $('resolve-run').click();await waitFor(()=>$('run-id').value==='run-auto','Auto Research run resolution');
+  assert.ok($('workflow-history').href.endsWith('/run-auto/history'));assert.equal($('workflow-signals').hidden,false);
+  const autoCases=[
+    ['revise-report',{expected_revision:'0',feedback:'Shorten the executive summary.'},{expected_revision:0,feedback:'Shorten the executive summary.'}],
+    ['expand-report',{expected_revision:'1',topic:'Operational recovery'},{expected_revision:1,topic:'Operational recovery'}],
+    ['approve-report',{expected_revision:'2'},{expected_revision:2}],
+  ];
+  for(const [signalId,fields,expected] of autoCases){
+    const card=dom.window.document.querySelector(`[data-signal-id="${signalId}"]`);
+    for(const [name,value] of Object.entries(fields))input(`signal-${signalId}-${name}`,value);
+    const count=signalRequests.length;card.querySelector('.signal-send').click();
+    assert.equal(signalRequests.length,count);assert.equal(card.querySelector('.signal-confirmation').hidden,false);
+    card.querySelector('.signal-confirmation button').click();await waitFor(()=>signalRequests.length===count+1,`${signalId} Signal request`);
+    assert.equal(signalRequests.at(-1).signal_id,signalId);assert.equal(signalRequests.at(-1).run_id,'run-auto');assert.deepEqual(signalRequests.at(-1).arguments,expected);assert.equal(signalRequests.at(-1).signal_metadata_revision.length,64);
+    await waitFor(()=>!card.querySelector('.signal-send').disabled,`${signalId} Signal completion`);
+  }
 
   change('sample','generic-single');change('framework','recipes/generic-single/python/google-adk');change('mode','mock');await ready();
   assert.ok($('web-workflow-id').value.startsWith('generic-single-'));assert.equal($('web-workflow-id').readOnly,true);
@@ -180,7 +198,7 @@ async function main(){
   change('mode','worker');await ready();assert.ok($('worker-command').textContent.includes('-classifier-id mock'));
   change('mode','live-demo');await failed();assert.ok($('selection-status').textContent.includes('classifiers.yaml'));
   const incomplete=path.join(fixture,'recipes/new-recipe/java');fs.mkdirSync(incomplete,{recursive:true});fs.writeFileSync(path.join(incomplete,'../README.md'),'# New incomplete recipe\n');
-  $('refresh').click();await waitFor(()=>$('sample').options.length===6,'new recipe discovery');change('sample','new-recipe');
+  $('refresh').click();await waitFor(()=>$('sample').options.length===7,'new recipe discovery');change('sample','new-recipe');
   assert.equal($('language').value,'java');assert.equal($('language-field').hidden,false);assert.equal($('readme').hidden,false);await failed();assert.ok($('selection-status').textContent.includes('adapter'));
   assert.deepEqual(errors,[]);
   console.log('PASS: real HTTP + six-step DOM flow, generic/Human in the Loop latest-run links, explicit Ticket Routing Workflow selection, manual Run ID deep links, metadata-driven Watch and typed Human in the Loop Signals, invalid metadata feedback, confirmations, stale/Continue-As-New feedback, visible single-choice selectors, explicit modes, manual checks, local warm-up availability, Mac terminal handoff/fallback, individual controls, catalog refresh, Go live batches, clipboard fallback, and incomplete recipes.');

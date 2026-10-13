@@ -27,6 +27,7 @@ SKIP = {'tests', 'testdata', 'perf', '.venv', 'venv', '__pycache__', 'node_modul
 CADENCE_WEB_URL = 'http://localhost:8088'
 CADENCE_CLUSTER = 'cluster0'
 SCENARIOS = {
+    'auto-research': 'Build, review, revise, and publish a durable briefing from simulated source material.',
     'ticket-routing': 'Classify StreamWave support tickets and route them through durable assignment Workflows.',
     'recurring-ai-watch': 'Classify release notes, then use an agent and LLM to produce a recurring impact report.',
 }

@@ -45,6 +45,7 @@ No chat transcript, agent memory, `STATUS.md`, or `TODO.md` is authoritative.
 
 ## Canonical specifications
 
+- [Auto Research briefing](../recipes/auto-research/SPEC.md)
 - [StreamWave ticket routing](../recipes/ticket-routing/SPEC.md)
 - [Human-in-the-loop ride booking](../recipes/human-in-the-loop/SPEC.md)
 - [Local Samples Explorer](../tools/explorer/SPEC-Explorer.md)
@@ -59,6 +60,7 @@ centralize documentation.
 - [Project README](../README.md)
 - [Contributing](../CONTRIBUTING.md)
 - [Contribution workflow cheat sheet](../WORKFLOW.md)
+- [Auto Research README](../recipes/auto-research/README.md)
 - [Ticket routing README](../recipes/ticket-routing/README.md)
 - [Human-in-the-loop README](../recipes/human-in-the-loop/README.md)
 - [Recurring AI Watch README](../recipes/recurring-ai-watch/README.md)
