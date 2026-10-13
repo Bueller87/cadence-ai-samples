@@ -12,7 +12,8 @@ import yaml
 
 MAX_METADATA_BYTES = 16 * 1024
 MAX_SIGNALS = 16
-MAX_ARGUMENTS = 8
+MAX_ARGUMENTS = 1
+MAX_OBJECT_FIELDS = 8
 MAX_ID_LENGTH = 64
 MAX_NAME_LENGTH = 128
 MAX_LABEL_LENGTH = 80
@@ -24,7 +25,8 @@ MAX_ABS_NUMBER = 1_000_000_000_000
 ID_PATTERN = re.compile(r'^[a-z][a-z0-9-]*$')
 ARGUMENT_PATTERN = re.compile(r'^[a-z][a-z0-9_]*$')
 INTENTS = {'normal', 'confirm', 'destructive'}
-TYPES = {'string', 'integer', 'number', 'boolean'}
+SCALAR_TYPES = {'string', 'integer', 'number', 'boolean'}
+TYPES = SCALAR_TYPES | {'object'}
 
 
 class SignalMetadataError(ValueError):
@@ -106,6 +108,62 @@ def _constraints(value, argument_type, location):
     return result
 
 
+def _argument(raw_argument, location, allow_object):
+    argument = _object(raw_argument, location)
+    argument_type = argument.get('type')
+    is_object = argument_type == 'object'
+    fields = {
+        'name', 'label', 'type', 'required', 'constraints', 'help'}
+    if is_object:
+        fields.add('fields')
+    _fields(argument, fields, fields, location)
+    argument_name = _text(
+        argument['name'], f'{location}.name', MAX_ID_LENGTH, ARGUMENT_PATTERN)
+    if (not isinstance(argument_type, str)
+            or argument_type not in TYPES
+            or (is_object and not allow_object)):
+        raise SignalMetadataError(f'{location}.type is unsupported.')
+    required = argument['required']
+    if not isinstance(required, bool):
+        raise SignalMetadataError(f'{location}.required must be true or false.')
+    constraints = argument['constraints']
+    if is_object:
+        constraints = _object(constraints, f'{location}.constraints')
+        _fields(constraints, set(), set(), f'{location}.constraints')
+        raw_fields = argument['fields']
+        if (not isinstance(raw_fields, list) or not raw_fields
+                or len(raw_fields) > MAX_OBJECT_FIELDS):
+            raise SignalMetadataError(
+                f'{location}.fields must contain 1 to '
+                f'{MAX_OBJECT_FIELDS} scalar fields.')
+        seen, validated_fields = set(), []
+        for field_index, raw_field in enumerate(raw_fields):
+            field_location = f'{location}.fields[{field_index}]'
+            field = _argument(raw_field, field_location, allow_object=False)
+            if field['name'] in seen:
+                raise SignalMetadataError(
+                    f'{location} has duplicate field name {field["name"]}.')
+            seen.add(field['name'])
+            validated_fields.append(field)
+    else:
+        constraints = _constraints(
+            constraints, argument_type, f'{location}.constraints')
+        validated_fields = None
+    result = {
+        'name': argument_name,
+        'label': _text(
+            argument['label'], f'{location}.label', MAX_LABEL_LENGTH),
+        'type': argument_type,
+        'required': required,
+        'constraints': constraints,
+        'help': _text(
+            argument['help'], f'{location}.help', MAX_HELP_LENGTH),
+    }
+    if validated_fields is not None:
+        result['fields'] = validated_fields
+    return result
+
+
 def validate_metadata(document):
     document = _object(document, 'explorer.yaml')
     _fields(document, {'version', 'signals'}, {'version'}, 'explorer.yaml')
@@ -141,51 +199,14 @@ def validate_metadata(document):
         arguments = signal['arguments']
         if not isinstance(arguments, list) or len(arguments) > MAX_ARGUMENTS:
             raise SignalMetadataError(
-                f'{location}.arguments must be a list of at most '
-                f'{MAX_ARGUMENTS}.')
-        argument_names, validated_arguments = set(), []
-        optional_seen = False
+                f'{location}.arguments must contain at most one top-level '
+                'argument because Cadence Web accepts one JSON document.')
+        validated_arguments = []
         for argument_index, raw_argument in enumerate(arguments):
             argument_location = (
                 f'{location}.arguments[{argument_index}]')
-            argument = _object(raw_argument, argument_location)
-            argument_fields = {
-                'name', 'label', 'type', 'required', 'constraints', 'help'}
-            _fields(
-                argument, argument_fields, argument_fields, argument_location)
-            argument_name = _text(
-                argument['name'], f'{argument_location}.name',
-                MAX_ID_LENGTH, ARGUMENT_PATTERN)
-            if argument_name in argument_names:
-                raise SignalMetadataError(
-                    f'{location} has duplicate argument name {argument_name}.')
-            argument_names.add(argument_name)
-            argument_type = argument['type']
-            if not isinstance(argument_type, str) or argument_type not in TYPES:
-                raise SignalMetadataError(
-                    f'{argument_location}.type is unsupported.')
-            required = argument['required']
-            if not isinstance(required, bool):
-                raise SignalMetadataError(
-                    f'{argument_location}.required must be true or false.')
-            if optional_seen and required:
-                raise SignalMetadataError(
-                    f'{location} required arguments cannot follow optional ones.')
-            optional_seen = optional_seen or not required
-            validated_arguments.append({
-                'name': argument_name,
-                'label': _text(
-                    argument['label'], f'{argument_location}.label',
-                    MAX_LABEL_LENGTH),
-                'type': argument_type,
-                'required': required,
-                'constraints': _constraints(
-                    argument['constraints'], argument_type,
-                    f'{argument_location}.constraints'),
-                'help': _text(
-                    argument['help'], f'{argument_location}.help',
-                    MAX_HELP_LENGTH),
-            })
+            validated_arguments.append(
+                _argument(raw_argument, argument_location, allow_object=True))
         result.append({
             'id': signal_id,
             'name': name,
@@ -230,6 +251,58 @@ def metadata_revision(signals):
     return hashlib.sha256(canonical).hexdigest()
 
 
+def _validate_value(definition, value, kind='argument'):
+    name = definition['name']
+    value_type = definition['type']
+    finite_number = not isinstance(value, float) or math.isfinite(value)
+    valid = {
+        'string': isinstance(value, str),
+        'integer': isinstance(value, int) and not isinstance(value, bool),
+        'number': (isinstance(value, (int, float))
+                   and not isinstance(value, bool)
+                   and finite_number),
+        'boolean': isinstance(value, bool),
+    }[value_type]
+    if not valid:
+        raise SignalMetadataError(
+            f'Signal {kind} {name} must match its declared type.')
+    constraints = definition['constraints']
+    if value_type == 'string':
+        minimum = constraints.get('min_length', 0)
+        maximum = constraints.get('max_length', MAX_STRING_LENGTH)
+        valid = minimum <= len(value) <= maximum
+    elif value_type in {'integer', 'number'}:
+        minimum = constraints.get('minimum', -MAX_ABS_NUMBER)
+        maximum = constraints.get('maximum', MAX_ABS_NUMBER)
+        valid = minimum <= value <= maximum
+    if not valid:
+        raise SignalMetadataError(
+            f'Signal {kind} {name} does not satisfy its declared constraints.')
+    return value
+
+
+def _validate_object(argument, supplied):
+    if not isinstance(supplied, dict):
+        raise SignalMetadataError(
+            f'Signal argument {argument["name"]} must match its declared type.')
+    definitions = argument['fields']
+    names = {field['name'] for field in definitions}
+    if set(supplied) - names:
+        raise SignalMetadataError(
+            f'Signal object {argument["name"]} received an unknown field.')
+    result = {}
+    for field in definitions:
+        name = field['name']
+        if name not in supplied:
+            if field['required']:
+                raise SignalMetadataError(
+                    f'Signal object {argument["name"]} requires field {name}.')
+            continue
+        result[name] = _validate_value(
+            field, supplied[name], kind='object field')
+    return result
+
+
 def validate_arguments(signal, supplied):
     if not isinstance(supplied, dict):
         raise SignalMetadataError('Signal arguments must be an object.')
@@ -239,52 +312,27 @@ def validate_arguments(signal, supplied):
     if unknown:
         raise SignalMetadataError(
             f'Signal {signal["id"]} received an unknown argument.')
-    values, gap = [], False
+    values = []
     for argument in definitions:
         name = argument['name']
         if name not in supplied:
             if argument['required']:
                 raise SignalMetadataError(
                     f'Signal {signal["id"]} requires argument {name}.')
-            gap = True
             continue
-        if gap:
-            raise SignalMetadataError(
-                f'Signal {signal["id"]} optional arguments must be supplied in order.')
         value = supplied[name]
-        argument_type = argument['type']
-        finite_number = (not isinstance(value, float)
-                         or math.isfinite(value))
-        valid = {
-            'string': isinstance(value, str),
-            'integer': isinstance(value, int) and not isinstance(value, bool),
-            'number': (isinstance(value, (int, float))
-                       and not isinstance(value, bool)
-                       and finite_number),
-            'boolean': isinstance(value, bool),
-        }[argument_type]
-        if not valid:
-            raise SignalMetadataError(
-                f'Signal argument {name} must match its declared type.')
-        constraints = argument['constraints']
-        if argument_type == 'string':
-            minimum = constraints.get('min_length', 0)
-            maximum = constraints.get('max_length', MAX_STRING_LENGTH)
-            valid = minimum <= len(value) <= maximum
-        elif argument_type in {'integer', 'number'}:
-            minimum = constraints.get('minimum', -MAX_ABS_NUMBER)
-            maximum = constraints.get('maximum', MAX_ABS_NUMBER)
-            valid = minimum <= value <= maximum
-        if not valid:
-            raise SignalMetadataError(
-                f'Signal argument {name} does not satisfy its declared constraints.')
-        values.append(value)
+        values.append(
+            _validate_object(argument, value)
+            if argument['type'] == 'object' else
+            _validate_value(argument, value))
     return values
 
 
 def serialize_arguments(values):
     if not values:
         return None
-    return ' '.join(json.dumps(
-        value, ensure_ascii=False, allow_nan=False, separators=(',', ':'))
-        for value in values)
+    if len(values) != 1:
+        raise SignalMetadataError(
+            'A Signal may contain at most one top-level JSON value.')
+    return json.dumps(
+        values[0], ensure_ascii=False, allow_nan=False, separators=(',', ':'))

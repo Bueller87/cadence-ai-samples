@@ -155,6 +155,12 @@ in the Loop provides confirmed approve and reject controls with one required
 call-ID field. Editing the Workflow or Run ID hides the controls until the
 latest run is resolved again.
 
+Each Signal may declare no argument, one bounded scalar argument, or one
+bounded object argument whose named fields are scalar controls. Cadence-Web
+requires `signalInput` to contain exactly one JSON document, so metadata with
+several top-level arguments is rejected before controls render. Object fields
+are rendered as typed inputs; the Explorer does not expose a raw JSON editor.
+
 The browser sends the rendered metadata revision, a stable control ID, and field
 values. Before contacting Cadence-Web, the backend reloads the selected recipe's
 declaration and rejects missing or changed revisions with an instruction to
@@ -198,4 +204,13 @@ temporary location and set `NODE_PATH` to its `node_modules` directory:
 
 ```bash
 node tools/explorer/tests/ui.cjs
+```
+
+With local Cadence and Cadence-Web running and the Human in the Loop Python
+environment prepared, verify that Cadence-Web forwards one structured document
+to a typed Python Signal handler and that a query observes both fields:
+
+```bash
+recipes/human-in-the-loop/python/openai-agents/.venv/bin/python \
+  tools/explorer/tests/local_structured_signal_check.py
 ```

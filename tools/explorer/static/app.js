@@ -220,11 +220,41 @@
   function signalArguments(control,card){
     const values={};
     for(const argument of control.arguments){
-      const field=card.querySelector(`[data-signal-argument="${argument.name}"]`);
-      const [present,value]=signalFieldValue(control,argument,field);
-      if(present)values[argument.name]=value;
+      if(argument.type==="object"){
+        const objectValue={};let present=false;
+        const fields=argument.fields.map(member=>[
+          member,card.querySelector(`[data-signal-argument="${argument.name}"][data-signal-field="${member.name}"]`)]);
+        if(!argument.required&&fields.every(([,field])=>field.value===""))continue;
+        for(const [member,field] of fields){
+          const [memberPresent,value]=signalFieldValue(control,member,field);
+          if(memberPresent){objectValue[member.name]=value;present=true;}
+        }
+        if(present||argument.required)values[argument.name]=objectValue;
+      }else{
+        const field=card.querySelector(`[data-signal-argument="${argument.name}"]`);
+        const [present,value]=signalFieldValue(control,argument,field);
+        if(present)values[argument.name]=value;
+      }
     }
     return values;
+  }
+
+  function appendSignalField(control,card,argument,fieldId,argumentName,fieldName){
+    const label=node("label",argument.label+(argument.required?"":" (optional)"));label.htmlFor=fieldId;
+    let field;
+    if(argument.type==="boolean"){
+      field=node("select");const empty=node("option","Choose…");empty.value="";field.append(empty);
+      for(const value of ["true","false"]){const option=node("option",value);option.value=value;field.append(option);}
+    }else{
+      field=node("input");field.type=argument.type==="string"?"text":"number";
+      if(argument.type==="integer")field.step="1";else if(argument.type==="number")field.step="any";
+      if(argument.constraints?.max_length!==undefined)field.maxLength=argument.constraints.max_length;
+      if(argument.constraints?.minimum!==undefined)field.min=argument.constraints.minimum;
+      if(argument.constraints?.maximum!==undefined)field.max=argument.constraints.maximum;
+    }
+    field.id=fieldId;field.dataset.signalArgument=argumentName;if(fieldName)field.dataset.signalField=fieldName;field.autocomplete="off";field.spellcheck=false;
+    field.addEventListener("input",()=>{const confirmation=card.querySelector(".signal-confirmation");if(confirmation)confirmation.hidden=true;$("signal-status").textContent="";});
+    card.append(label,field,node("p",argument.help));
   }
 
   function resetSignalForms(clearValues=true){
@@ -248,22 +278,14 @@
       if(control.intent!=="normal"){const intent=node("span",control.intent);intent.className="signal-intent "+control.intent;heading.append(intent);}
       card.append(heading,node("p",control.description));
       for(const argument of control.arguments){
-        const fieldId=`signal-${control.id}-${argument.name}`;
-        const label=node("label",argument.label+(argument.required?"":" (optional)"));label.htmlFor=fieldId;
-        let field;
-        if(argument.type==="boolean"){
-          field=node("select");const empty=node("option","Choose…");empty.value="";field.append(empty);
-          for(const value of ["true","false"]){const option=node("option",value);option.value=value;field.append(option);}
+        if(argument.type==="object"){
+          card.append(node("p",argument.label+(argument.required?"":" (optional)")),node("p",argument.help));
+          for(const member of argument.fields){
+            appendSignalField(control,card,member,`signal-${control.id}-${argument.name}-${member.name}`,argument.name,member.name);
+          }
         }else{
-          field=node("input");field.type=argument.type==="string"?"text":"number";
-          if(argument.type==="integer")field.step="1";else if(argument.type==="number")field.step="any";
-          if(argument.constraints?.max_length!==undefined)field.maxLength=argument.constraints.max_length;
-          if(argument.constraints?.minimum!==undefined)field.min=argument.constraints.minimum;
-          if(argument.constraints?.maximum!==undefined)field.max=argument.constraints.maximum;
+          appendSignalField(control,card,argument,`signal-${control.id}-${argument.name}`,argument.name);
         }
-        field.id=fieldId;field.dataset.signalArgument=argument.name;field.autocomplete="off";field.spellcheck=false;
-        field.addEventListener("input",()=>{const confirmation=card.querySelector(".signal-confirmation");if(confirmation)confirmation.hidden=true;$("signal-status").textContent="";});
-        card.append(label,field,node("p",argument.help));
       }
       const actions=node("div");actions.className="button-group signal-actions";
       const send=node("button",`Send ${control.label}`);send.type="button";send.className="signal-send"+(control.intent==="destructive"?" danger":"");send.dataset.defaultLabel=send.textContent;
