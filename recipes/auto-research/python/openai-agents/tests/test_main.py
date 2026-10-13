@@ -171,7 +171,7 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         )
         cadence_client.close.assert_awaited_once()
 
-    async def test_review_commands_send_typed_positional_arguments(self) -> None:
+    async def test_review_commands_send_typed_signal_arguments(self) -> None:
         cases = (
             (
                 ["approve", "--expected-revision", "2"],
@@ -185,7 +185,10 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
                     "--feedback",
                     "shorten",
                 ],
-                ("revise_report", 2, "shorten"),
+                (
+                    "revise_report",
+                    main.ReviseReportRequest(2, "shorten"),
+                ),
             ),
             (
                 [
@@ -195,7 +198,10 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
                     "--topic",
                     "operations",
                 ],
-                ("expand_report", 3, "operations"),
+                (
+                    "expand_report",
+                    main.ExpandReportRequest(3, "operations"),
+                ),
             ),
         )
         for argv, expected in cases:

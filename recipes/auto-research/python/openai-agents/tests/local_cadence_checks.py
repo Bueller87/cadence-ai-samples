@@ -37,8 +37,10 @@ from workflow import (
     REVISE_SIGNAL,
     STATUS_QUERY,
     WORKFLOW,
+    ExpandReportRequest,
     RecipeInput,
     RecipeResult,
+    ReviseReportRequest,
     WorkflowStatus,
     build_registry,
 )
@@ -162,8 +164,9 @@ async def main() -> None:
                     execution.workflow_id,
                     execution.run_id,
                     REVISE_SIGNAL,
-                    0,
-                    "Make the conclusion more direct.",
+                    ReviseReportRequest(
+                        0, "Make the conclusion more direct."
+                    ),
                 )
                 await client.signal_workflow(
                     execution.workflow_id,
@@ -183,8 +186,7 @@ async def main() -> None:
                     execution.workflow_id,
                     execution.run_id,
                     EXPAND_SIGNAL,
-                    1,
-                    "Operational recovery",
+                    ExpandReportRequest(1, "Operational recovery"),
                 )
                 expanded = await wait_for_status(
                     client,

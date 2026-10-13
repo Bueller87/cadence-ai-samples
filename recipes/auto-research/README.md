@@ -97,16 +97,10 @@ tools/explorer/.venv/bin/python tools/explorer/server.py
 
 Select Auto Research, Python, OpenAI Agents, and mock mode. Start the Worker and
 Workflow, resolve the current Run, then open Queries to read the draft and
-revision. The rendered controls send typed `expected_revision`, `feedback`, and
-`topic` fields. Revise, expand, and approve each require confirmation and are
-enabled only for the exact current resolved Run.
-
-Known limitation: the currently installed Cadence Web rejects Explorer's
-specified whitespace-delimited multi-argument payload as invalid JSON. The
-single-argument approve control works, while rendered revise and expand are
-blocked by [Issue #43](https://github.com/cadence-workflow/cadence-ai-samples/issues/43).
-Use the recipe CLI for revise and expand until that separately scoped Explorer
-defect is approved and fixed.
+revision. The rendered revise and expand controls each send one typed object
+containing `expected_revision` and the bounded `feedback` or `topic` field.
+Approve sends its typed integer revision. All three controls require
+confirmation and are enabled only for the exact current resolved Run.
 
 ## Local Ollama walkthrough
 

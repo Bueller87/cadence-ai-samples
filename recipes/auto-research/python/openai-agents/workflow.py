@@ -83,6 +83,18 @@ class RecipeInput:
 
 
 @dataclass(frozen=True)
+class ReviseReportRequest:
+    expected_revision: int
+    feedback: str
+
+
+@dataclass(frozen=True)
+class ExpandReportRequest:
+    expected_revision: int
+    topic: str
+
+
+@dataclass(frozen=True)
 class ReviewAction:
     kind: str
     detail: str = ""
@@ -188,25 +200,31 @@ class AutoResearchWorkflow:
         self._record_action(expected_revision, ReviewAction("approve"))
 
     @workflow.signal(name=REVISE_SIGNAL)
-    def revise(self, expected_revision: int, feedback: str) -> None:
-        if not isinstance(feedback, str):
+    def revise(self, request: ReviseReportRequest) -> None:
+        if (
+            not isinstance(request, ReviseReportRequest)
+            or not isinstance(request.feedback, str)
+        ):
             return
-        detail = feedback.strip()
+        detail = request.feedback.strip()
         if not detail or len(detail) > MAX_FEEDBACK_LENGTH:
             return
         self._record_action(
-            expected_revision, ReviewAction("revise", detail)
+            request.expected_revision, ReviewAction("revise", detail)
         )
 
     @workflow.signal(name=EXPAND_SIGNAL)
-    def expand(self, expected_revision: int, topic: str) -> None:
-        if not isinstance(topic, str):
+    def expand(self, request: ExpandReportRequest) -> None:
+        if (
+            not isinstance(request, ExpandReportRequest)
+            or not isinstance(request.topic, str)
+        ):
             return
-        detail = topic.strip()
+        detail = request.topic.strip()
         if not detail or len(detail) > MAX_EXPANSION_TOPIC_LENGTH:
             return
         self._record_action(
-            expected_revision, ReviewAction("expand", detail)
+            request.expected_revision, ReviewAction("expand", detail)
         )
 
     def _record_action(

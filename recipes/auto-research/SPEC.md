@@ -64,8 +64,10 @@ Run is subject to its configured 24-hour execution timeout.
 Signals are:
 
 - `approve_report(expected_revision: int)`
-- `revise_report(expected_revision: int, feedback: str)`
-- `expand_report(expected_revision: int, topic: str)`
+- `revise_report(request: ReviseReportRequest)`, where the request contains
+  `expected_revision: int` and `feedback: str`
+- `expand_report(request: ExpandReportRequest)`, where the request contains
+  `expected_revision: int` and `topic: str`
 
 A Signal is eligible only while state is `WAITING_FOR_REVIEW`, its expected
 revision equals the current revision, and no action has won that revision. The

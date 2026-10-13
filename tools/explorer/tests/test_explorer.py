@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT/'tools/explorer'))
 from explorer import Explorer
 from server import Handler
-from signal_metadata import (MAX_METADATA_BYTES, MAX_SIGNALS,
+from signal_metadata import (MAX_METADATA_BYTES, MAX_OBJECT_FIELDS, MAX_SIGNALS,
                              SignalMetadataError, metadata_revision,
                              serialize_arguments, validate_arguments,
                              validate_metadata)
@@ -194,10 +194,14 @@ class ExplorerTests(unittest.TestCase):
                             for signal in result['signals']))
         self.assertEqual(
             [argument['type'] for argument in
-             result['signals'][0]['arguments']],['integer','string'])
+             result['signals'][0]['arguments']],['object'])
         self.assertEqual(
             [argument['name'] for argument in
              result['signals'][0]['arguments']],
+            ['request'])
+        self.assertEqual(
+            [field['name'] for field in
+             result['signals'][0]['arguments'][0]['fields']],
             ['expected_revision','feedback'])
         self.assertIn('--model-id llama3.2-local',result['worker'])
         self.assertIn('start --mode live',result['start'])
@@ -737,22 +741,27 @@ class ExplorerTests(unittest.TestCase):
     def test_signal_metadata_schema_and_fail_closed_loading(self):
         valid=dict(version=1,signals=[dict(
             id='typed-signal',name='typed_signal',label='Typed signal',
-            description='Exercise every supported scalar.',intent='confirm',
-            arguments=[
-                dict(name='text',label='Text',type='string',required=True,
-                     constraints=dict(min_length=1,max_length=12),
-                     help='Enter text.'),
-                dict(name='count',label='Count',type='integer',required=False,
-                     constraints=dict(minimum=1,maximum=5),
-                     help='Enter a count.'),
-                dict(name='ratio',label='Ratio',type='number',required=False,
-                     constraints=dict(minimum=0,maximum=1),
-                     help='Enter a ratio.'),
-                dict(name='enabled',label='Enabled',type='boolean',
-                     required=False,constraints={},help='Choose a state.'),
-            ])])
+            description='Exercise one bounded object.',intent='confirm',
+            arguments=[dict(
+                name='request',label='Request',type='object',required=True,
+                constraints={},help='Enter the request.',
+                fields=[
+                    dict(name='text',label='Text',type='string',required=True,
+                         constraints=dict(min_length=1,max_length=12),
+                         help='Enter text.'),
+                    dict(name='count',label='Count',type='integer',
+                         required=False,constraints=dict(minimum=1,maximum=5),
+                         help='Enter a count.'),
+                    dict(name='ratio',label='Ratio',type='number',
+                         required=False,constraints=dict(minimum=0,maximum=1),
+                         help='Enter a ratio.'),
+                    dict(name='enabled',label='Enabled',type='boolean',
+                         required=False,constraints={},help='Choose a state.'),
+                ])])])
         controls=validate_metadata(valid)
-        self.assertEqual([argument['type'] for argument in controls[0]['arguments']],
+        self.assertEqual(controls[0]['arguments'][0]['type'],'object')
+        self.assertEqual(
+            [field['type'] for field in controls[0]['arguments'][0]['fields']],
                          ['string','integer','number','boolean'])
         revision=metadata_revision(controls)
         self.assertEqual(len(revision),64)
@@ -762,12 +771,27 @@ class ExplorerTests(unittest.TestCase):
         changed_controls[0]['intent']='destructive'
         self.assertNotEqual(revision,metadata_revision(changed_controls))
         values=validate_arguments(
-            controls[0],dict(text='safe',count=2,ratio=.5,enabled=True))
-        self.assertEqual(values,['safe',2,.5,True])
+            controls[0],dict(request=dict(
+                text='safe',count=2,ratio=.5,enabled=True)))
+        self.assertEqual(values,[dict(
+            text='safe',count=2,ratio=.5,enabled=True)])
         self.assertEqual(
-            serialize_arguments(values),'"safe" 2 0.5 true')
+            serialize_arguments(values),
+            '{"text":"safe","count":2,"ratio":0.5,"enabled":true}')
         self.assertIsNone(serialize_arguments([]))
+        with self.assertRaisesRegex(
+                SignalMetadataError,'at most one top-level JSON value'):
+            serialize_arguments([1,2])
         self.assertEqual(validate_metadata(dict(version=1)),[])
+        scalar=json.loads(json.dumps(valid))
+        scalar_argument=dict(
+            name='revision',label='Revision',type='integer',required=True,
+            constraints=dict(minimum=0,maximum=100),help='Enter revision.')
+        scalar['signals'][0]['arguments']=[scalar_argument]
+        scalar_control=validate_metadata(scalar)[0]
+        self.assertEqual(validate_arguments(
+            scalar_control,dict(revision=3)),[3])
+        self.assertEqual(serialize_arguments([3]),'3')
 
         invalid=[]
         invalid.append(('unknown field',{**valid,'command':'rm -rf /'}))
@@ -782,29 +806,38 @@ class ExplorerTests(unittest.TestCase):
             json.loads(json.dumps(valid['signals'][0])))
         duplicate_name['signals'][1]['id']='other-signal'
         invalid.append(('duplicate names',duplicate_name))
-        duplicate_argument=json.loads(json.dumps(valid))
-        duplicate_argument['signals'][0]['arguments'][1]['name']='text'
-        invalid.append(('duplicate arguments',duplicate_argument))
         too_many_arguments=json.loads(json.dumps(valid))
-        too_many_arguments['signals'][0]['arguments']*=3
-        invalid.append(('too many arguments',too_many_arguments))
+        too_many_arguments['signals'][0]['arguments'].append(scalar_argument)
+        invalid.append(('multiple top-level arguments',too_many_arguments))
         bad_type=json.loads(json.dumps(valid))
-        bad_type['signals'][0]['arguments'][0]['type']='object'
+        bad_type['signals'][0]['arguments'][0]['fields'][0]['type']='array'
         invalid.append(('unsupported type',bad_type))
         unhashable_type=json.loads(json.dumps(valid))
-        unhashable_type['signals'][0]['arguments'][0]['type']=['string']
+        unhashable_type['signals'][0]['arguments'][0]['type']=['object']
         invalid.append(('non-string type',unhashable_type))
-        bad_order=json.loads(json.dumps(valid))
-        bad_order['signals'][0]['arguments'][1]['required']=False
-        bad_order['signals'][0]['arguments'][2]['required']=True
-        invalid.append(('required after optional',bad_order))
         bad_constraint=json.loads(json.dumps(valid))
         bad_constraint['signals'][0]['arguments'][0]['constraints']['minimum']=1
         invalid.append(('type constraint',bad_constraint))
         bad_limits=json.loads(json.dumps(valid))
-        bad_limits['signals'][0]['arguments'][0]['constraints']={
+        bad_limits['signals'][0]['arguments'][0]['fields'][0]['constraints']={
             'min_length':10,'max_length':1}
         invalid.append(('reversed limits',bad_limits))
+        no_fields=json.loads(json.dumps(valid))
+        no_fields['signals'][0]['arguments'][0]['fields']=[]
+        invalid.append(('empty object',no_fields))
+        too_many_fields=json.loads(json.dumps(valid))
+        too_many_fields['signals'][0]['arguments'][0]['fields']=[
+            {**scalar_argument,'name':f'field_{index}'}
+            for index in range(MAX_OBJECT_FIELDS+1)]
+        invalid.append(('too many object fields',too_many_fields))
+        duplicate_field=json.loads(json.dumps(valid))
+        duplicate_field['signals'][0]['arguments'][0]['fields'][1]['name']='text'
+        invalid.append(('duplicate object fields',duplicate_field))
+        nested=json.loads(json.dumps(valid))
+        nested_field=nested['signals'][0]['arguments'][0]['fields'][0]
+        nested_field.update(type='object',constraints={},fields=[
+            scalar_argument])
+        invalid.append(('nested object',nested))
         unsafe=json.loads(json.dumps(valid))
         unsafe['signals'][0]['description']='<script>unsafe</script>'
         invalid.append(('HTML',unsafe))
@@ -815,7 +848,7 @@ class ExplorerTests(unittest.TestCase):
         padded['signals'][0]['label']=' padded'
         invalid.append(('padded text',padded))
         unknown_argument=json.loads(json.dumps(valid))
-        unknown_argument['signals'][0]['arguments'][0]['extra']=True
+        unknown_argument['signals'][0]['arguments'][0]['fields'][0]['extra']=True
         invalid.append(('unknown argument field',unknown_argument))
         for label,document in invalid:
             with self.subTest(label=label):
@@ -823,15 +856,22 @@ class ExplorerTests(unittest.TestCase):
                     validate_metadata(document)
 
         for supplied in (
-                {},dict(text=''),dict(text='too-long-for-limit'),
-                dict(text='safe',count=0),
-                dict(text='safe',count=10**1000),
-                dict(text='safe',ratio=.5),
-                dict(text='safe',unexpected='private-value')):
+                {},dict(request='not-an-object'),
+                dict(request={}),dict(request=dict(text='')),
+                dict(request=dict(text='too-long-for-limit')),
+                dict(request=dict(text='safe',count=0)),
+                dict(request=dict(text='safe',count=10**1000)),
+                dict(request=dict(text='safe',ratio=2)),
+                dict(request=dict(text='safe',enabled='true')),
+                dict(request=dict(text='safe',unexpected='private-value')),
+                dict(request=dict(text='safe'),unexpected='private-value')):
             with self.subTest(supplied=list(supplied)):
                 with self.assertRaises(SignalMetadataError) as caught:
                     validate_arguments(controls[0],supplied)
                 self.assertNotIn('private-value',str(caught.exception))
+        self.assertEqual(validate_arguments(
+            controls[0],dict(request=dict(text='safe',enabled=True))),
+            [dict(text='safe',enabled=True)])
 
         watch=self.watch(mode='mock')
         self.assertEqual(
@@ -861,12 +901,13 @@ class ExplorerTests(unittest.TestCase):
         self.assertEqual(
             [argument['name'] for argument in
              auto['signals'][0]['arguments']],
-            ['expected_revision','feedback'])
+            ['request'])
+        request={'expected_revision':2,'feedback':'Shorten it.'}
         self.assertEqual(
             serialize_arguments(validate_arguments(
                 auto['signals'][0],
-                {'expected_revision':2,'feedback':'Shorten it.'})),
-            '2 "Shorten it."')
+                {'request':request})),
+            json.dumps(request,separators=(',',':')))
         ticket=self.ticket()
         self.assertEqual(ticket['signals'],[])
         self.assertIsNone(ticket['signal_metadata_error'])
@@ -968,18 +1009,60 @@ class ExplorerTests(unittest.TestCase):
                 auto)['signal_metadata_revision']
             result=self.explorer.workflow_signal({
                 **auto,'signal_id':'revise-report',
-                'arguments':{
+                'arguments':{'request':{
                     'expected_revision':2,
-                    'feedback':'Shorten it.'}})
+                    'feedback':'Shorten it.'}}})
             self.assertEqual(result['state'],'accepted')
             path,body=WorkflowStub.posts[-1]
             self.assertTrue(path.endswith('/run-current/signal'))
             self.assertEqual(json.loads(body),dict(
                 signalName='revise_report',
-                signalInput='2 "Shorten it."'))
+                signalInput=json.dumps(dict(
+                    expected_revision=2,feedback='Shorten it.'),
+                    separators=(',',':'))))
 
             metadata=self.root/'recipes/human-in-the-loop/explorer.yaml'
             original=metadata.read_text()
+            structured=dict(version=1,signals=[dict(
+                id='revise',name='revise',label='Revise',
+                description='Revise one version.',intent='confirm',
+                arguments=[dict(
+                    name='request',label='Request',type='object',
+                    required=True,constraints={},help='Enter revision details.',
+                    fields=[
+                        dict(name='expected_revision',label='Expected revision',
+                             type='integer',required=True,
+                             constraints=dict(minimum=0,maximum=1000),
+                             help='Enter the current revision.'),
+                        dict(name='detail',label='Detail',type='string',
+                             required=True,
+                             constraints=dict(min_length=1,max_length=255),
+                             help='Enter revision detail.'),
+                    ])])])
+            metadata.write_text(yaml.safe_dump(structured,sort_keys=False))
+            structured_hitl={**hitl,
+                'signal_metadata_revision':self.explorer.resolve(
+                    hitl)['signal_metadata_revision']}
+            structured_value=dict(
+                expected_revision=2,detail='Keep this value private.')
+            result=self.explorer.workflow_signal({
+                **structured_hitl,'signal_id':'revise',
+                'arguments':{'request':structured_value}})
+            self.assertEqual(result['state'],'accepted')
+            _,body=WorkflowStub.posts[-1]
+            structured_body=json.loads(body)
+            self.assertEqual(structured_body['signalName'],'revise')
+            self.assertEqual(
+                json.loads(structured_body['signalInput']),structured_value)
+            self.assertNotIn('} {',structured_body['signalInput'])
+            with self.assertRaises(InvalidSelection) as caught:
+                self.explorer.workflow_signal({
+                    **structured_hitl,'signal_id':'revise',
+                    'arguments':{'request':{
+                        **structured_value,'unknown':'private-value'}}})
+            self.assertNotIn('private-value',str(caught.exception))
+            metadata.write_text(original)
+
             original_document=yaml.safe_load(original)
             changes=[
                 ('Signal name',lambda document:

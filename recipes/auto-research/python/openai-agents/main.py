@@ -23,7 +23,9 @@ from workflow import (
     REVISE_SIGNAL,
     STATUS_QUERY,
     WORKFLOW,
+    ExpandReportRequest,
     RecipeInput,
+    ReviseReportRequest,
     WorkflowStatus,
     build_registry,
 )
@@ -146,9 +148,13 @@ async def review(args: argparse.Namespace) -> None:
     if args.command == "approve":
         values = (args.expected_revision,)
     elif args.command == "revise":
-        values = (args.expected_revision, args.feedback)
+        values = (
+            ReviseReportRequest(args.expected_revision, args.feedback),
+        )
     else:
-        values = (args.expected_revision, args.topic)
+        values = (
+            ExpandReportRequest(args.expected_revision, args.topic),
+        )
     try:
         await cadence_client.signal_workflow(
             args.workflow_id,

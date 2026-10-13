@@ -25,9 +25,11 @@ from workflow import (
     STATUS_QUERY,
     WORKFLOW,
     AutoResearchWorkflow,
+    ExpandReportRequest,
     RecipeInput,
     RecipeResult,
     ReviewAction,
+    ReviseReportRequest,
     WorkflowStatus,
     build_registry,
 )
@@ -114,15 +116,13 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
                 execution.workflow_id,
                 execution.run_id,
                 REVISE_SIGNAL,
-                -1,
-                "stale feedback",
+                ReviseReportRequest(-1, "stale feedback"),
             )
             await environment.client.signal_workflow(
                 execution.workflow_id,
                 execution.run_id,
                 REVISE_SIGNAL,
-                0,
-                "Shorten the conclusion.",
+                ReviseReportRequest(0, "Shorten the conclusion."),
             )
             await environment.client.signal_workflow(
                 execution.workflow_id,
@@ -143,8 +143,7 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
                 execution.workflow_id,
                 execution.run_id,
                 EXPAND_SIGNAL,
-                1,
-                "Operational recovery",
+                ExpandReportRequest(1, "Operational recovery"),
             )
             status = await environment.client.query_workflow(
                 execution.workflow_id,
@@ -242,11 +241,11 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         instance._state = "WAITING_FOR_REVIEW"
         instance._revision = 2
         instance.approve(True)
-        instance.revise(1, "stale")
-        instance.revise(2, " ")
+        instance.revise(ReviseReportRequest(1, "stale"))
+        instance.revise(ReviseReportRequest(2, " "))
         self.assertIsNone(instance._review_action)
 
-        instance.expand(2, "Additional evidence")
+        instance.expand(ExpandReportRequest(2, "Additional evidence"))
         instance.approve(2)
         self.assertEqual(
             instance._review_action,
@@ -255,8 +254,8 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
 
         instance._review_action = None
         instance._edit_rounds = MAX_EDIT_ROUNDS
-        instance.revise(2, "one more")
-        instance.expand(2, "one more")
+        instance.revise(ReviseReportRequest(2, "one more"))
+        instance.expand(ExpandReportRequest(2, "one more"))
         self.assertIsNone(instance._review_action)
         instance.approve(2)
         self.assertEqual(instance._review_action, ReviewAction("approve"))
