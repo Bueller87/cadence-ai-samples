@@ -107,7 +107,7 @@ signals:
   const input=(id,value)=>{$(id).value=value;$(id).dispatchEvent(new dom.window.Event('input',{bubbles:true}));};
   const ready=()=>waitFor(()=>!$('worker-block').hidden,'resolved commands');
   const failed=()=>waitFor(()=>$('selection-status').className.includes('error')&&$('worker-block').hidden,'selection rejection');
-  await waitFor(()=>$('sample').options.length===6,'sample discovery');
+  await waitFor(()=>$('sample').options.length===7,'sample discovery');
   assert.equal(dom.window.document.querySelectorAll('.step').length,6);
   assert.equal($('resolved-panel'),null);assert.equal($('evidence-panel'),null);
   assert.equal(dom.window.document.querySelector('.teaching'),null);
@@ -175,6 +175,12 @@ signals:
     assert.equal(signalRequests.at(-1).signal_id,signalId);assert.equal(signalRequests.at(-1).run_id,'run-auto');assert.deepEqual(signalRequests.at(-1).arguments,expected);assert.equal(signalRequests.at(-1).signal_metadata_revision.length,64);
     await waitFor(()=>!card.querySelector('.signal-send').disabled,`${signalId} Signal completion`);
   }
+  change('framework','recipes/auto-research/python/google-adk');change('mode','mock');await ready();
+  assert.ok($('worker-command').textContent.includes('python/google-adk'));
+  assert.ok($('client-command').textContent.includes('start --mode mock'));
+  $('resolve-run').click();await waitFor(()=>$('run-id').value==='run-auto','Google ADK Auto Research run resolution');
+  assert.equal($('workflow-signals').hidden,false);
+  assert.equal(dom.window.document.querySelectorAll('#signal-controls [data-signal-id]').length,3);
 
   change('sample','generic-single');change('framework','recipes/generic-single/python/google-adk');change('mode','mock');await ready();
   assert.ok($('web-workflow-id').value.startsWith('generic-single-'));assert.equal($('web-workflow-id').readOnly,true);
@@ -241,7 +247,7 @@ signals:
   change('mode','worker');await ready();assert.ok($('worker-command').textContent.includes('-classifier-id mock'));
   change('mode','live-demo');await failed();assert.ok($('selection-status').textContent.includes('classifiers.yaml'));
   const incomplete=path.join(fixture,'recipes/new-recipe/java');fs.mkdirSync(incomplete,{recursive:true});fs.writeFileSync(path.join(incomplete,'../README.md'),'# New incomplete recipe\n');
-  $('refresh').click();await waitFor(()=>$('sample').options.length===7,'new recipe discovery');change('sample','new-recipe');
+  $('refresh').click();await waitFor(()=>$('sample').options.length===8,'new recipe discovery');change('sample','new-recipe');
   assert.equal($('language').value,'java');assert.equal($('language-field').hidden,false);assert.equal($('readme').hidden,false);await failed();assert.ok($('selection-status').textContent.includes('adapter'));
   assert.deepEqual(errors,[]);
   console.log('PASS: real HTTP + six-step DOM flow, generic/Human in the Loop latest-run links, explicit Ticket Routing Workflow selection, manual Run ID deep links, metadata-driven Watch, scalar Human in the Loop Signals, structured object Signals, invalid metadata feedback, confirmations, stale/Continue-As-New feedback, visible single-choice selectors, explicit modes, manual checks, local warm-up availability, Mac terminal handoff/fallback, individual controls, catalog refresh, Go live batches, clipboard fallback, and incomplete recipes.');

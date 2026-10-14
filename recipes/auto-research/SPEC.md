@@ -25,14 +25,13 @@ without claiming that synthetic source briefs are factual web research.
 - Classifier integration or a shared runtime with another recipe.
 - Remote provider validation on the work Mac.
 
-## Implementation profile
+## Implementation profiles
 
-The recipe is generated from `python/openai-agents`:
+The recipe has two independent Python implementations generated with no
+classifier:
 
-- Cadence language: Python.
-- Classifier: none.
-- Agent integration: OpenAI Agents.
-- Implementation: `python/openai-agents`.
+- `python/openai-agents` uses OpenAI Agents.
+- `python/google-adk` uses Google ADK.
 - Runtime catalog: only a live Worker reads repository-root `models.yaml`.
 - Live confirmation: `worker --mode live` requires `--confirm-live`.
 - Workflow ID reuse: `ALLOW_DUPLICATE`; a closed ID is reusable, while an open
@@ -82,8 +81,11 @@ The Workflow contains deterministic orchestration only.
 
 - `auto-research.mock-plan`, `mock-specialist`, `mock-synthesis`, and
   `mock-edit` provide deterministic offline role output.
-- `auto-research.openai-agents-agent` executes live planner, specialist,
-  synthesizer, and editor roles with the Worker-selected model.
+- The OpenAI Agents implementation schedules
+  `auto-research.openai-agents-agent` for each live role.
+- The Google ADK implementation runs the real `CadenceAgentRunner` in Workflow
+  code and schedules each provider request as
+  `GoogleADKActivities.generate_content_async`. It does not use agent handoffs.
 - `auto-research.search-sources` and `read-source` return synthetic fixtures and
   perform no network requests.
 - `auto-research.log-progress` emits replay-safe operator progress.
@@ -129,10 +131,11 @@ excluded from Workflow input, queries, and result.
 
 ## Configuration and live inference
 
-The Worker defaults to task list `auto-research-openai-agents` and local model
-selection `llama3.2-local`. `models.yaml` is the only source of model, provider,
-and provider-native endpoint. The adapter supports compatible Google, Ollama,
-and OpenAI catalog entries without a recipe-owned model ID allowlist. Remote
+The Workers default to task lists `auto-research-openai-agents` and
+`auto-research-google-adk`; both default to local model selection
+`llama3.2-local`. `models.yaml` is the only source of model, provider, and
+provider-native endpoint. Both adapters support compatible Google, Ollama, and
+OpenAI catalog entries without a recipe-owned model ID allowlist. Remote
 credential-bearing endpoints require HTTPS; Ollama requires loopback.
 
 Google and OpenAI use Worker-local `MODEL_AI_KEY`. Ollama requires no key. Local
@@ -157,8 +160,9 @@ Workflow for operator inspection rather than inventing fallback evidence.
   stale/duplicate rejection, approval, one publication, and Worker restart.
 - History proves completed role, simulated tool, and publication Activities are
   not intentionally repeated.
-- Explorer discovers the recipe, resolves the exact current Run, renders the
-  report query, and sends all three typed controls through confirmation UI.
+- Explorer discovers both implementations, resolves the exact current Run,
+  renders the report query, and sends all three typed controls through
+  confirmation UI.
 - The local Ollama check uses the complete production state machine and Activity
   registrations. A model capability failure is recorded, not bypassed.
 - Generator and Explorer drift suites pass.

@@ -172,7 +172,8 @@ class ExplorerTests(unittest.TestCase):
                          ['google-adk','openai-agents'])
         self.assertTrue(all(v['modes']==['mock','live']
                             for v in handoffs['variants']))
-        self.assertEqual([v['framework'] for v in auto['variants']],['openai-agents'])
+        self.assertEqual([v['framework'] for v in auto['variants']],
+                         ['google-adk','openai-agents'])
         self.assertEqual([v['framework'] for v in hitl['variants']],['openai-agents'])
         self.assertEqual([v['framework'] for v in watch['variants']],['google-adk','openai-agents'])
         self.assertTrue(all(v['supported'] for v in
@@ -214,32 +215,48 @@ class ExplorerTests(unittest.TestCase):
                         tokens[tokens.index('main.py')+1:])
 
     def test_auto_research_resolves_commands_and_typed_signals(self):
-        implementation='recipes/auto-research/python/openai-agents'
-        variant=next(r for r in self.explorer.snapshot()['recipes']
-                     if r['id']=='auto-research')['variants'][0]
-        self.assertFalse(variant['generic'])
-        self.assertEqual(set(variant['actions']),
-                         {'worker','start','status','approve','revise','expand'})
-        result=self.explorer.resolve(dict(sample='auto-research',
-            implementation=implementation,mode='live',model='llama3.2-local'))
-        self.assertEqual([control['name'] for control in result['controls']],['status'])
-        self.assertEqual([signal['id'] for signal in result['signals']],
-                         ['revise-report','expand-report','approve-report'])
-        self.assertTrue(all(signal['intent']=='confirm'
-                            for signal in result['signals']))
-        self.assertEqual(
-            [argument['type'] for argument in
-             result['signals'][0]['arguments']],['object'])
-        self.assertEqual(
-            [argument['name'] for argument in
-             result['signals'][0]['arguments']],
-            ['request'])
-        self.assertEqual(
-            [field['name'] for field in
-             result['signals'][0]['arguments'][0]['fields']],
-            ['expected_revision','feedback'])
-        self.assertIn('--model-id llama3.2-local',result['worker'])
-        self.assertIn('start --mode live',result['start'])
+        recipe=next(r for r in self.explorer.snapshot()['recipes']
+                    if r['id']=='auto-research')
+        for framework in ('google-adk','openai-agents'):
+            implementation=f'recipes/auto-research/python/{framework}'
+            variant=next(v for v in recipe['variants']
+                         if v['framework']==framework)
+            with self.subTest(framework=framework):
+                self.assertFalse(variant['generic'])
+                self.assertEqual(set(variant['actions']),
+                                 {'worker','start','status','approve','revise','expand'})
+                result=self.explorer.resolve(dict(sample='auto-research',
+                    implementation=implementation,mode='live',
+                    model='llama3.2-local'))
+                self.assertEqual([control['name'] for control in result['controls']],
+                                 ['status'])
+                self.assertEqual([signal['id'] for signal in result['signals']],
+                                 ['revise-report','expand-report','approve-report'])
+                self.assertTrue(all(signal['intent']=='confirm'
+                                    for signal in result['signals']))
+                self.assertEqual(
+                    [argument['type'] for argument in
+                     result['signals'][0]['arguments']],['object'])
+                self.assertEqual(
+                    [field['name'] for field in
+                     result['signals'][0]['arguments'][0]['fields']],
+                    ['expected_revision','feedback'])
+                self.assertIn('--model-id llama3.2-local',result['worker'])
+                self.assertIn('start --mode live',result['start'])
+                path=self.root/implementation/'main.py'
+                tree=ast.parse(path.read_text())
+                body=[n for n in tree.body if
+                      isinstance(n,ast.FunctionDef) and n.name=='parser' or
+                      isinstance(n,ast.Assign) and isinstance(n.targets[0],ast.Name)
+                      and n.targets[0].id.startswith('DEFAULT_')]
+                scope=dict(argparse=argparse,Path=Path,__file__=str(path),
+                           __doc__='CLI validation')
+                exec(compile(ast.Module(body=body,type_ignores=[]),
+                             str(path),'exec'),scope)
+                for command in (result['worker'],result['start']):
+                    tokens=shlex.split(command)
+                    scope['parser']().parse_args(
+                        tokens[tokens.index('main.py')+1:])
 
     def test_human_in_the_loop_resolves_worker_and_start_without_imports(self):
         implementation='recipes/human-in-the-loop/python/openai-agents'
