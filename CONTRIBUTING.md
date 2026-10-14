@@ -49,7 +49,9 @@ Before implementation:
 1. Describe the proposed use case and why durable workflow orchestration helps.
 2. Run `./scripts/new-recipe.sh your-recipe-name --language python --classifier none --agent none`
    (or another implemented profile from `./scripts/new-recipe.sh --help`), then
-   tailor its `SPEC.md`.
+   tailor its `SPEC.md`. To add another implementation profile to an existing
+   recipe without changing recipe-owned root files, use
+   `./scripts/add-recipe-implementation.sh --help`.
 3. Define how the recipe can be exercised with mock or synthetic data without paid AI API access.
 
 When implementing a recipe:

@@ -107,7 +107,8 @@ Create a recipe from an implementation profile. All three choices are required:
 ```
 
 Run `./scripts/new-recipe.sh --help` to list valid combinations and the profiles
-implemented in this checkout.
+implemented in this checkout. To add another profile directory to an existing
+recipe, run `./scripts/add-recipe-implementation.sh --help`.
 
 Coding agents start with [AGENTS.md](AGENTS.md) and the
 [repository context map](agent-context/README.md). These files describe how work

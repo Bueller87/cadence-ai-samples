@@ -33,10 +33,11 @@ No chat transcript, agent memory, `STATUS.md`, or `TODO.md` is authoritative.
 - [models.yaml](../models.yaml) and [classifiers.yaml](../classifiers.yaml) are
   repository-wide runtime catalogs; an entry is not proof that every recipe
   implements it.
-- [templates/profiles/](../templates/profiles/) and
-  [scripts/new-recipe.sh](../scripts/new-recipe.sh) generate recipes from
-  explicit language, classifier, and agent choices. Each profile is a complete,
-  independent template tree.
+- [templates/profiles/](../templates/profiles/),
+  [scripts/new-recipe.sh](../scripts/new-recipe.sh), and
+  [scripts/add-recipe-implementation.sh](../scripts/add-recipe-implementation.sh)
+  generate recipes from explicit language, classifier, and agent choices. Each
+  profile is a complete, independent template tree.
 - [tools/explorer/](../tools/explorer/) is a loopback-only companion that reads
   this checkout, checks local dependencies, previews commands, and exposes only
   bounded explicit actions.
