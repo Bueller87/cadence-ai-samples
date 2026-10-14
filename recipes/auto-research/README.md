@@ -20,10 +20,12 @@ topic
 ```
 
 Mock and live modes use the same Workflow state machine. Mock role Activities
-return deterministic fixtures. Live role Activities run OpenAI Agents with the
-model selected by the Worker from repository-root `models.yaml`. Provider,
-model, endpoint, credentials, and `AUTO_RESEARCH_OUTPUT_DIR` never enter
-Workflow input or history.
+return deterministic fixtures. The OpenAI Agents implementation runs each live
+role in a model Activity. The Google ADK implementation runs
+`CadenceAgentRunner` in Workflow code and schedules provider calls as
+`GoogleADKActivities.generate_content_async`. Provider, model, endpoint,
+credentials, and `AUTO_RESEARCH_OUTPUT_DIR` never enter Workflow input or
+history.
 
 ## Requirements
 
@@ -34,10 +36,11 @@ Workflow input or history.
 
 ## Setup
 
-From the repository root:
+Choose either independent implementation:
 
 ```bash
 cd recipes/auto-research/python/openai-agents
+# or: cd recipes/auto-research/python/google-adk
 python3.13 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e .
@@ -95,12 +98,12 @@ Start the Explorer from the repository root:
 tools/explorer/.venv/bin/python tools/explorer/server.py
 ```
 
-Select Auto Research, Python, OpenAI Agents, and mock mode. Start the Worker and
-Workflow, resolve the current Run, then open Queries to read the draft and
-revision. The rendered revise and expand controls each send one typed object
-containing `expected_revision` and the bounded `feedback` or `topic` field.
-Approve sends its typed integer revision. All three controls require
-confirmation and are enabled only for the exact current resolved Run.
+Select Auto Research, Python, either OpenAI Agents or Google ADK, and mock mode.
+Start the Worker and Workflow, resolve the current Run, then open Queries to
+read the draft and revision. The rendered revise and expand controls each send
+one typed object containing `expected_revision` and the bounded `feedback` or
+`topic` field. Approve sends its typed integer revision. All three controls
+require confirmation and are enabled only for the exact current resolved Run.
 
 ## Local Ollama walkthrough
 
@@ -146,9 +149,10 @@ revision. Retries atomically replace the same stable filename and return a
 portable receipt containing only publication ID, filename, revision, and
 content hash. The absolute output path remains Worker-local.
 
-The default Workflow ID is `auto-research-openai-agents-demo` with
-`ALLOW_DUPLICATE`. A closed ID can be reused; an open duplicate is rejected.
-Override `--workflow-id` when running multiple walkthroughs.
+The default Workflow IDs are `auto-research-openai-agents-demo` and
+`auto-research-google-adk-demo`, each with `ALLOW_DUPLICATE`. A closed ID can be
+reused; an open duplicate is rejected. Override `--workflow-id` when running
+multiple walkthroughs.
 
 ## Limits and failures
 
@@ -167,12 +171,24 @@ search/read Activities make no network requests.
 
 ## Tests
 
-From `recipes/auto-research/python/openai-agents`:
+From each implementation directory:
 
 ```bash
 python -m unittest discover -s tests -v
 python tests/local_cadence_checks.py
 ```
+
+The Google ADK suite drives planner, specialist, synthesis, revise, and expand
+through the real `CadenceAgentRunner` with controlled model Activity responses.
+Its strict local live check is:
+
+```bash
+python tests/live_ollama_validation.py
+```
+
+This command requires local Cadence, Ollama, and `llama3.2:latest`. It records
+Workflow and Run IDs plus Activity history. A missing prerequisite or model
+capability failure exits nonzero; it never falls back to remote inference.
 
 Repository suites:
 
