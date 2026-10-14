@@ -45,6 +45,7 @@ No chat transcript, agent memory, `STATUS.md`, or `TODO.md` is authoritative.
 
 ## Canonical specifications
 
+- [Agent Handoffs trip planning](../recipes/agent-handoffs/SPEC.md)
 - [Auto Research briefing](../recipes/auto-research/SPEC.md)
 - [StreamWave ticket routing](../recipes/ticket-routing/SPEC.md)
 - [Human-in-the-loop ride booking](../recipes/human-in-the-loop/SPEC.md)
@@ -60,6 +61,7 @@ centralize documentation.
 - [Project README](../README.md)
 - [Contributing](../CONTRIBUTING.md)
 - [Contribution workflow cheat sheet](../WORKFLOW.md)
+- [Agent Handoffs README](../recipes/agent-handoffs/README.md)
 - [Auto Research README](../recipes/auto-research/README.md)
 - [Ticket routing README](../recipes/ticket-routing/README.md)
 - [Human-in-the-loop README](../recipes/human-in-the-loop/README.md)
