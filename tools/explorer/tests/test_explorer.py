@@ -165,8 +165,11 @@ class ExplorerTests(unittest.TestCase):
     def test_current_discovery_and_modes(self):
         state=self.explorer.snapshot()
         self.assertEqual([r['id'] for r in state['recipes']],
-                         ['auto-research','human-in-the-loop','recurring-ai-watch','ticket-routing'])
-        auto,hitl,watch,ticket=state['recipes']
+                         ['agent-handoffs','auto-research','human-in-the-loop',
+                          'recurring-ai-watch','ticket-routing'])
+        handoffs,auto,hitl,watch,ticket=state['recipes']
+        self.assertEqual([v['framework'] for v in handoffs['variants']],['openai-agents'])
+        self.assertEqual(handoffs['variants'][0]['modes'],['mock','live'])
         self.assertEqual([v['framework'] for v in auto['variants']],['openai-agents'])
         self.assertEqual([v['framework'] for v in hitl['variants']],['openai-agents'])
         self.assertEqual([v['framework'] for v in watch['variants']],['google-adk','openai-agents'])
@@ -176,7 +179,10 @@ class ExplorerTests(unittest.TestCase):
         self.assertEqual(watch['variants'][0]['modes'],['mock','live'])
         self.assertEqual(ticket['variants'][0]['live_modes'],['live-demo','live-batch'])
         self.assertEqual(ticket['variants'][0]['mock_modes'],['demo','start-ticket','batch'])
-        self.assertEqual([entry['id'] for entry in state['classifiers']],['jev-default','laya-local'])
+        self.assertEqual(
+            sorted(entry['id'] for entry in state['classifiers']),
+            ['jev-default', 'laya-local'],
+        )
 
     def test_auto_research_resolves_commands_and_typed_signals(self):
         implementation='recipes/auto-research/python/openai-agents'
