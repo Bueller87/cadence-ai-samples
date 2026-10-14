@@ -116,6 +116,45 @@ combined template names:
 Profile templates live under `templates/profiles/`; see its
 [README](profiles/README.md) for the source layout and how to add a profile.
 
+### Add one implementation to an existing recipe
+
+When a recipe already exists, add another independently runnable profile
+directory without changing recipe-owned root documents or sibling
+implementations:
+
+```text
+./scripts/add-recipe-implementation.sh <existing-recipe-slug> \
+  --language go|java|python \
+  --classifier none|systemone \
+  --agent none|google-adk|openai-agents
+```
+
+- The recipe root must already exist as a normal directory under `recipes/` with
+  required root files `README.md`, `SPEC.md`, and `PROMPT.md`. Symlink recipe
+  roots, paths outside `recipes/`, and missing or non-directory roots fail
+  before writing.
+- The command reuses the same profile matrix and placeholder rendering as
+  `new-recipe.sh`, but copies only `templates/profiles/<profile>/recipe/<profile>/`
+  into `recipes/<slug>/<profile>/`.
+- The profile template path, its `recipe/` directory, the implementation source
+  directory, and relevant ancestors must not be symlinks. The resolved
+  implementation source must stay inside the selected profile template.
+- `scripts/recipe_implementation_validate.py` rejects generated artifacts in
+  profile source and staged output, including empty `.venv`, `venv`, `build`,
+  `.gradle`, `__pycache__`, `.pytest_cache`, and `*.egg-info` directories.
+  Add-implementation fails closed and does not strip artifacts.
+- The validator also rejects symlinks and cross-recipe imports in Python, Go,
+  and Java source before anything is moved into the recipe.
+- Recipe-owned root files, metadata, and every existing implementation must
+  remain byte-for-byte unchanged.
+- The destination `recipes/<slug>/<profile>/` must not exist. Symlinks, files,
+  or other collisions on the destination path fail before writing.
+- Output is staged under a hidden directory inside the recipe root, validated,
+  then moved atomically. Failures remove staging output, remove any newly created
+  empty parent directories, and leave no partial destination.
+- On success the command prints `added recipes/<slug>/<profile> from profile
+  <profile>` followed by the profile's next steps.
+
 ## Generated recipe contract
 
 Every implemented profile must generate a recipe that:
@@ -260,8 +299,9 @@ decision; it is not added merely to exercise a permutation.
 ## Validation expectations
 
 Generator behavior is tested in
-[scripts/tests/test_new_recipe.py](../scripts/tests/test_new_recipe.py). Each
-delivered profile must also pass its generated offline suite and the Explorer
+[scripts/tests/test_new_recipe.py](../scripts/tests/test_new_recipe.py) and
+[scripts/tests/test_add_recipe_implementation.py](../scripts/tests/test_add_recipe_implementation.py).
+Each delivered profile must also pass its generated offline suite and the Explorer
 discovery test. Implementation must test:
 
 - Every advertised combination and every rejected combination.
