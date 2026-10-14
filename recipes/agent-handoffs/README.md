@@ -22,7 +22,9 @@ provider request into `OpenAIActivities.invoke_model` or
 `GoogleADKActivities.generate_content_async`; booking tools are separate
 Activities. Google ADK uses a coordinator `LlmAgent`, specialist `sub_agents`,
 and the built-in `transfer_to_agent` tool. The Worker resolves the Workflow's
-logical model name to its selected `models.yaml` entry.
+logical model name to its selected `models.yaml` entry and rewrites a copy of
+the request with the provider-specific runtime model immediately before
+transport. The logical request in Workflow history remains unchanged.
 
 ## Requirements
 
@@ -162,11 +164,12 @@ script **must exit non-zero** when the model omits required specialist handoffs
 or booking tool Activities. Google ADK also requires the actual
 `transfer_to_agent` event and exact typed receipts.
 
-The current Google ADK check reaches
-`GoogleADKActivities.generate_content_async`, but `llama3.2:latest` rejects the
-tool-bearing request with HTTP 400 before either route transfers or books. The
-script reports both Workflow and Run IDs and leaves their histories available
-for inspection.
+The current Google ADK check reaches Ollama after the Worker rewrites the copied
+request's runtime model. In the latest acceptance run, the short route scheduled
+two model Activities and one ride before failing without a final valid result.
+The long route scheduled three model Activities and one ride, but no flight,
+before strict schema validation failed. The script remained nonzero, reported
+both Workflow and Run IDs, and left their histories available for inspection.
 
 Issue #16 closure accepts offline tests and local Cadence mock durability as
 validated; real-model handoffs remain unproven pending Issue #47.

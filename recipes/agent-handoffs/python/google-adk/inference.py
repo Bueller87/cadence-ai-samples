@@ -99,6 +99,9 @@ class ADKActivities(GoogleADKActivities):
         actual_model = runtime_model(
             self._selection.provider, self._selection.model
         )
+        runtime_request = llm_request.model_copy(
+            update={"model": actual_model}
+        )
         try:
             if self._selection.provider == "google":
                 model = Gemini(
@@ -107,11 +110,13 @@ class ADKActivities(GoogleADKActivities):
                 )
                 responses = []
                 async for response in model.generate_content_async(
-                    llm_request=llm_request, stream=False
+                    llm_request=runtime_request, stream=False
                 ):
                     responses.append(response)
                 return responses
-            return await super().generate_content_async(actual_model, llm_request)
+            return await super().generate_content_async(
+                actual_model, runtime_request
+            )
         except genai_errors.APIError as error:
             if error.code in {401, 403} or _contains_invalid_key(error.details):
                 raise LiveAuthenticationError(

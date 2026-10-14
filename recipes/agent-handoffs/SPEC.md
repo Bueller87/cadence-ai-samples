@@ -58,7 +58,9 @@ defined by the
   rejected.
 - **Recipe deviation:** both agent control loops and handoffs run in Workflow
   code. The Cadence adapters schedule model requests as Activities, and booking
-  tools are separate Activities.
+  tools are separate Activities. The Google ADK Worker rewrites a copy of each
+  logical request with the selected provider-specific runtime model immediately
+  before transport.
 
 ## Workflow architecture
 
@@ -188,10 +190,14 @@ three attempts with exponential backoff starting at one second.
 - Real-model Google ADK success is recorded separately from OpenAI Agents
   evidence. An unavailable or incapable local model is not replaced with remote
   inference.
-- **Google ADK capability gap:** the Issue #26 local `llama3.2-local` acceptance
-  run reached `GoogleADKActivities.generate_content_async` for both routes, but
-  Ollama rejected each tool-bearing request with HTTP 400 before a transfer or
-  booking Activity. The strict script exited nonzero and retained both histories.
+- **Google ADK capability gap:** after the Worker-side runtime-model correction,
+  the Issue #54 local `llama3.2-local` acceptance run reached Ollama and booking
+  Activities for both routes. The short route scheduled two model Activities
+  and one ride before failing without a final valid result. The long route
+  scheduled three model Activities and one ride, but no flight, before strict
+  schema validation failed. The strict script exited nonzero and retained both
+  histories; this is model-capability evidence, not a provider-resolution
+  failure.
 
 ### Non-goals for this closure
 
