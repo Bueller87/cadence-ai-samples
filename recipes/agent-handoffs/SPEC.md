@@ -12,8 +12,8 @@ Worker restarts without repeating completed model or booking work.
 
 - Route short local trips to one ride specialist and long inter-city trips to a
   flight plus airport-ride specialist.
-- Preserve OpenAI Agents handoffs in live mode with Activity-backed model calls
-  and synthetic booking tools.
+- Preserve framework-native OpenAI Agents and Google ADK handoffs in live mode
+  with Activity-backed model calls and synthetic booking tools.
 - Provide deterministic mock runs for both routes without catalogs, credentials,
   or provider access.
 - Keep model selection, endpoints, credentials, and raw provider failures
@@ -36,33 +36,37 @@ agent delegates to:
   connecting local addresses to airports.
 
 Mock mode uses deterministic parsing and routing. Live mode uses the same trip
-intent with OpenAI Agents handoffs. All receipts are labeled synthetic.
+intent with the selected framework's native handoff primitive. All receipts are
+labeled synthetic.
 
 ## Repository implementation profile
 
-Generated from the `python/openai-agents` profile defined by the
+Generated from the `python/openai-agents` and `python/google-adk` profiles
+defined by the
 [recipe template system specification](https://github.com/cadence-workflow/cadence-ai-samples/blob/main/templates/SPEC-Recipe-Templates.md).
 
 - **Cadence language:** Python
 - **Classifier integration:** none
-- **Agent integration:** OpenAI Agents
-- **Implementation directory:** `python/openai-agents`
+- **Agent integrations:** OpenAI Agents and Google ADK
+- **Implementation directories:** `python/openai-agents` and `python/google-adk`
 - **Runtime catalog use:** only a live Worker reads repository-root
   `models.yaml`; start remains configuration-free.
 - **Live confirmation:** a live Worker requires `--confirm-live` before catalog,
   credential, or provider-client access.
-- **Workflow ID reuse:** start uses `agent-handoffs-openai-agents-demo` with
-  `ALLOW_DUPLICATE`; a closed ID is reusable, while an open duplicate is rejected.
-- **Recipe deviation:** the OpenAI Agents control loop and handoffs run in
-  Workflow code. The Cadence adapter schedules model requests as Activities, and
-  booking tools are separate Activities.
+- **Workflow ID reuse:** each implementation uses its framework-specific demo ID
+  with `ALLOW_DUPLICATE`; a closed ID is reusable, while an open duplicate is
+  rejected.
+- **Recipe deviation:** both agent control loops and handoffs run in Workflow
+  code. The Cadence adapters schedule model requests as Activities, and booking
+  tools are separate Activities.
 
 ## Workflow architecture
 
 Mock mode schedules `agent-handoffs.mock-route`, then books through typed
-Activities based on the returned route. Live mode runs the coordinator agent
-with handoffs to short- and long-trip specialists; tools map to the same booking
-Activities.
+Activities based on the returned route. Live mode runs a coordinator with
+handoffs to short- and long-trip specialists. OpenAI Agents uses `handoffs`;
+Google ADK uses `sub_agents` and its injected `transfer_to_agent` tool. Both map
+specialist tools to the same booking Activity names on separate task lists.
 
 The Workflow records mode, route, and completion state. Replay reads completed
 Activity results from history, so finished route, model, and booking Activities
@@ -75,6 +79,8 @@ are not intentionally rescheduled.
 - `agent-handoffs.book-ride`: synthetic ride receipt, no dispatch contact.
 - `OpenAIActivities.invoke_model`: live model requests with Worker-local
   configuration.
+- `GoogleADKActivities.generate_content_async`: Google ADK model requests with
+  Worker-local configuration.
 
 Cadence Activities are at least once. Synthetic bookings use fixed fixtures and
 document that external integrations would need business idempotency keys.
@@ -102,8 +108,10 @@ Invalid or unparseable requests fail before booking Activities run.
 ## Configuration
 
 - `--domain`: defaults to `cadence-ai-samples`.
-- `--task-list`: defaults to `agent-handoffs-openai-agents`.
-- `--workflow-id`: defaults to `agent-handoffs-openai-agents-demo`.
+- `--task-list`: defaults to `agent-handoffs-openai-agents` or
+  `agent-handoffs-google-adk`.
+- `--workflow-id`: defaults to the corresponding
+  `agent-handoffs-<framework>-demo`.
 - Worker `--catalog-dir`: defaults to the checkout root.
 - Worker `--model-id`: selects a supported repository `models.yaml` entry.
 - `MODEL_AI_KEY`: required by Google and OpenAI Workers, unused by mock and local
@@ -129,7 +137,7 @@ three attempts with exponential backoff starting at one second.
 
 ## Acceptance and validation
 
-### Validated for Issue #16 closure
+### Validated OpenAI Agents implementation
 
 - Offline unit tests and mock Workflow behavior, including both routing outcomes,
   live orchestration with mocked agent runs, model Activity registration, booking
@@ -139,7 +147,21 @@ three attempts with exponential backoff starting at one second.
   history).
 - Generator drift and Explorer discovery for this recipe.
 
-### Live behavior and known limitation
+### Google ADK implementation validation
+
+- Offline tests exercise the real ADK runner and built-in transfer machinery
+  with controlled model Activity responses. They cover successful short and
+  long transfers, missing and incorrect transfers, missing and duplicate tool
+  calls, invalid arguments, typed receipts, Worker-local configuration, and
+  exact booking Activity counts.
+- `python/google-adk/tests/local_cadence_checks.py` demonstrates mock short and
+  long runs and Worker restart/replay when local Cadence is available.
+- `python/google-adk/tests/live_ollama_validation.py` is strict: it succeeds only
+  when the actual ADK transfer event names the expected specialist and history
+  contains the exact model and booking Activities. It exits nonzero and prints
+  retained Workflow and Run IDs on a capability failure.
+
+### Live behavior and known limitations
 
 - Live mode is implemented with OpenAI Agents handoffs and Activity-backed
   model and booking tools. Live `RecipeResult` values include the specialist
@@ -158,6 +180,18 @@ three attempts with exponential backoff starting at one second.
   [Issue #47](https://github.com/cadence-workflow/cadence-ai-samples/issues/47).
   Alternate local Ollama model evaluation is tracked in
   [Issue #48](https://github.com/cadence-workflow/cadence-ai-samples/issues/48).
+- Google ADK live mode derives route and specialist from
+  `event.actions.transfer_to_agent`, then validates the tool receipts returned by
+  the selected specialist. Deterministic parsing checks that the model selected
+  the correct specialist, but never substitutes a transfer or schedules fallback
+  bookings.
+- Real-model Google ADK success is recorded separately from OpenAI Agents
+  evidence. An unavailable or incapable local model is not replaced with remote
+  inference.
+- **Google ADK capability gap:** the Issue #26 local `llama3.2-local` acceptance
+  run reached `GoogleADKActivities.generate_content_async` for both routes, but
+  Ollama rejected each tool-bearing request with HTTP 400 before a transfer or
+  booking Activity. The strict script exited nonzero and retained both histories.
 
 ### Non-goals for this closure
 
