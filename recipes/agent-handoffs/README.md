@@ -8,20 +8,21 @@ must survive Worker restarts without repeating model or tool Activities.
 
 ## Solution
 
-A coordinating OpenAI Agents trip planner hands off to short- or long-trip
-specialists. Synthetic `book-flight` and `book-ride` tools are Cadence
-Activities. Mock mode routes deterministically and never reads catalogs or
-contacts a provider.
+A coordinating trip planner hands off to short- or long-trip specialists using
+either OpenAI Agents or Google ADK. Synthetic `book-flight` and `book-ride`
+tools are Cadence Activities. Mock mode routes deterministically and never reads
+catalogs or contacts a provider.
 
 ## Architecture
 
 `request → mock route or live handoffs → synthetic booking Activities → result`
 
-In live mode, OpenAI Agents runs in Workflow code with framework handoffs.
-Cadence's OpenAI adapter turns each provider request into
-`OpenAIActivities.invoke_model`; booking tools are separate Activities. The
-Worker resolves the Workflow's logical model name to its selected `models.yaml`
-entry.
+In live mode, the selected framework runs in Workflow code. Cadence turns each
+provider request into `OpenAIActivities.invoke_model` or
+`GoogleADKActivities.generate_content_async`; booking tools are separate
+Activities. Google ADK uses a coordinator `LlmAgent`, specialist `sub_agents`,
+and the built-in `transfer_to_agent` tool. The Worker resolves the Workflow's
+logical model name to its selected `models.yaml` entry.
 
 ## Requirements
 
@@ -29,16 +30,26 @@ entry.
 - A Cadence server at `localhost:7833` with domain `cadence-ai-samples`.
 - Live mode only: a compatible entry in repository-root `models.yaml`.
 
-The dependency pins use Cadence Python client commit
-`2bc1af4207d20cd99ae64fa1ef82d803905af947`, OpenAI Agents `0.12.5`, OpenAI
-`2.30.0`, Pydantic `2.12.5`, and PyYAML `6.0.2`.
+Both implementations pin Cadence Python client commit
+`2bc1af4207d20cd99ae64fa1ef82d803905af947` and Pydantic `2.12.5`. The OpenAI
+implementation pins OpenAI Agents `0.12.5`; the Google ADK implementation pins
+Google ADK `2.1.0` and LiteLLM `1.83.7`.
 
 ## Fresh-checkout setup
 
-From the repository root:
+Choose one implementation from the repository root:
 
 ```bash
+# OpenAI Agents
 cd recipes/agent-handoffs/python/openai-agents
+python3.13 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e .
+```
+
+```bash
+# Google ADK
+cd recipes/agent-handoffs/python/google-adk
 python3.13 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e .
@@ -53,7 +64,7 @@ PIP_INDEX_URL=https://pypi.org/simple python -m pip install -e .
 
 ## Offline mock walkthrough
 
-Start one mock Worker and keep it running:
+From either implementation directory, start one mock Worker and keep it running:
 
 ```bash
 python main.py worker --mode mock
@@ -78,17 +89,18 @@ booking provider.
 
 ## Live mode
 
-Live mode runs OpenAI Agents handoffs in Workflow code with Activity-backed model
-and booking tools. Google and OpenAI catalog entries require `MODEL_AI_KEY` and
-an HTTPS endpoint. The live Worker accepts compatible catalog entries but
-**successful specialist handoffs with a real model are not proven for this
-recipe** until
+Live mode runs the selected framework's native handoffs in Workflow code with
+Activity-backed model and booking tools. Google and OpenAI catalog entries
+require `MODEL_AI_KEY` and an HTTPS endpoint. Evidence is tracked separately for
+each implementation; **successful specialist handoffs with a real model are not
+proven for this recipe** until
 [Issue #47](https://github.com/cadence-workflow/cadence-ai-samples/issues/47).
 
-**Do not use `llama3.2-local` expecting working live handoffs here.** Acceptance
-runs reached Ollama and invoked the model, but `llama3.2:latest` did not hand off
-to specialists or call booking tools. There is no deterministic fallback that
-masks that gap. Alternate local Ollama models are tracked in
+**Do not use `llama3.2-local` expecting working live handoffs without running the
+strict check for the chosen implementation.** OpenAI Agents acceptance runs
+reached Ollama, but `llama3.2:latest` did not hand off to specialists or call
+booking tools. Google ADK validation is held to the same no-fallback rule.
+Alternate local Ollama models are tracked in
 [Issue #48](https://github.com/cadence-workflow/cadence-ai-samples/issues/48).
 
 Example live Worker with a remote catalog entry (requires authorization and a
@@ -107,16 +119,17 @@ python main.py start --mode live \
 ```
 
 Worker and start commands must use the same `--domain` and `--task-list`. The
-start command has no catalog, model, endpoint, or credential options. For local
-Ollama, the Worker sets an internal `OPENAI_API_KEY` compatibility shim for the
-OpenAI Agents SDK (same pattern as Human-in-the-Loop); operators do not export a
-key for loopback Ollama.
+start command has no catalog, model, endpoint, or credential options. The OpenAI
+implementation sets an internal API-key compatibility shim for local Ollama.
+The Google ADK implementation uses LiteLLM's loopback Ollama transport;
+operators do not export a key for either local path.
 
 ## Workflow ID reuse
 
-The default Workflow ID is `agent-handoffs-openai-agents-demo` with
-`ALLOW_DUPLICATE`. After a Run closes, the same ID can start again. An open
-duplicate is rejected with a clear error.
+The default Workflow IDs are `agent-handoffs-openai-agents-demo` and
+`agent-handoffs-google-adk-demo`, each with `ALLOW_DUPLICATE`. After a Run
+closes, the same ID can start again. An open duplicate is rejected with a clear
+error.
 
 ## Reliability and failures
 
@@ -128,7 +141,7 @@ Activity failures.
 
 ## Tests
 
-From `recipes/agent-handoffs/python/openai-agents`:
+From either implementation directory:
 
 ```bash
 python -m unittest discover -s tests -v
@@ -142,18 +155,26 @@ python tests/local_cadence_checks.py
 
 ## Strict live capability check (optional)
 
-`python tests/live_ollama_validation.py` runs live short and long requests against
-`llama3.2-local` when Ollama serves `llama3.2:latest` at `localhost:11434` and
-Cadence is at `localhost:7833`. The script **must exit non-zero** when the model
-omits required specialist handoffs or booking tool Activities. That is the
-expected result today for `llama3.2-local` on this recipe.
+`python tests/live_ollama_validation.py` runs live short and long requests for
+the current implementation against `llama3.2-local` when Ollama serves
+`llama3.2:latest` at `localhost:11434` and Cadence is at `localhost:7833`. The
+script **must exit non-zero** when the model omits required specialist handoffs
+or booking tool Activities. Google ADK also requires the actual
+`transfer_to_agent` event and exact typed receipts.
+
+The current Google ADK check reaches
+`GoogleADKActivities.generate_content_async`, but `llama3.2:latest` rejects the
+tool-bearing request with HTTP 400 before either route transfers or books. The
+script reports both Workflow and Run IDs and leaves their histories available
+for inspection.
 
 Issue #16 closure accepts offline tests and local Cadence mock durability as
 validated; real-model handoffs remain unproven pending Issue #47.
 
-The unit suite is fully offline except for the optional local scripts above. It
-covers both handoff routes, live orchestration with mocked agent runs, invalid
-input, Activity failures, configuration isolation, and scheduling counts.
+The unit suites are fully offline except for the optional local scripts above.
+The Google ADK suite drives the real `CadenceAgentRunner` and
+`transfer_to_agent` machinery with controlled model Activity responses; it does
+not replace the runner with a mock.
 
 ## Copying this recipe
 

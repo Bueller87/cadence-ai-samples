@@ -168,8 +168,10 @@ class ExplorerTests(unittest.TestCase):
                          ['agent-handoffs','auto-research','human-in-the-loop',
                           'recurring-ai-watch','ticket-routing'])
         handoffs,auto,hitl,watch,ticket=state['recipes']
-        self.assertEqual([v['framework'] for v in handoffs['variants']],['openai-agents'])
-        self.assertEqual(handoffs['variants'][0]['modes'],['mock','live'])
+        self.assertEqual([v['framework'] for v in handoffs['variants']],
+                         ['google-adk','openai-agents'])
+        self.assertTrue(all(v['modes']==['mock','live']
+                            for v in handoffs['variants']))
         self.assertEqual([v['framework'] for v in auto['variants']],['openai-agents'])
         self.assertEqual([v['framework'] for v in hitl['variants']],['openai-agents'])
         self.assertEqual([v['framework'] for v in watch['variants']],['google-adk','openai-agents'])
@@ -183,6 +185,33 @@ class ExplorerTests(unittest.TestCase):
             sorted(entry['id'] for entry in state['classifiers']),
             ['jev-default', 'laya-local'],
         )
+
+    def test_agent_handoffs_resolves_both_framework_commands_without_imports(self):
+        for framework in ('google-adk','openai-agents'):
+            implementation=f'recipes/agent-handoffs/python/{framework}'
+            with self.subTest(framework=framework):
+                result=self.explorer.resolve(dict(sample='agent-handoffs',
+                    implementation=implementation,mode='live',
+                    model='llama3.2-local'))
+                self.assertIn('--model-id llama3.2-local',result['worker'])
+                self.assertIn('worker --mode live',result['worker'])
+                self.assertIn('--confirm-live',result['worker'])
+                self.assertIn('start --mode live',result['start'])
+                self.assertNotIn('--model-id',result['start'])
+                path=self.root/implementation/'main.py'
+                tree=ast.parse(path.read_text())
+                body=[n for n in tree.body if
+                      isinstance(n,ast.FunctionDef) and n.name=='parser' or
+                      isinstance(n,ast.Assign) and isinstance(n.targets[0],ast.Name)
+                      and n.targets[0].id.startswith('DEFAULT_')]
+                scope=dict(argparse=argparse,Path=Path,__file__=str(path),
+                           __doc__='CLI validation')
+                exec(compile(ast.Module(body=body,type_ignores=[]),
+                             str(path),'exec'),scope)
+                for command in (result['worker'],result['start']):
+                    tokens=shlex.split(command)
+                    scope['parser']().parse_args(
+                        tokens[tokens.index('main.py')+1:])
 
     def test_auto_research_resolves_commands_and_typed_signals(self):
         implementation='recipes/auto-research/python/openai-agents'
