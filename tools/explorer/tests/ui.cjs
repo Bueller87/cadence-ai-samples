@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const {spawn} = require('node:child_process');
+const {spawn, execSync} = require('node:child_process');
 const {JSDOM, VirtualConsole} = require('jsdom');
 const root=path.resolve(__dirname,'../../..');
 const fixture=fs.mkdtempSync(path.join(os.tmpdir(),'cadence-explorer-ui-'));
@@ -18,6 +18,10 @@ async function waitFor(predicate,message){
 async function main(){
   fs.cpSync(path.join(root,'recipes'),path.join(fixture,'recipes'),{recursive:true,
     filter:source=>!['.venv','venv','__pycache__'].includes(path.basename(source))});
+  fs.cpSync(path.join(root,'scripts'),path.join(fixture,'scripts'),{recursive:true});
+  fs.cpSync(path.join(root,'templates'),path.join(fixture,'templates'),{recursive:true});
+  execSync('bash scripts/new-recipe.sh generated-go-systemone --language go --classifier systemone --agent none',
+    {cwd:fixture,stdio:'pipe',timeout:60000});
   const generic=path.join(fixture,'recipes/generic-single');
   fs.mkdirSync(path.join(generic,'python'),{recursive:true});
   fs.cpSync(path.join(root,'recipes/recurring-ai-watch/python/google-adk'),path.join(generic,'python/google-adk'),{recursive:true});
@@ -107,7 +111,7 @@ signals:
   const input=(id,value)=>{$(id).value=value;$(id).dispatchEvent(new dom.window.Event('input',{bubbles:true}));};
   const ready=()=>waitFor(()=>!$('worker-block').hidden,'resolved commands');
   const failed=()=>waitFor(()=>$('selection-status').className.includes('error')&&$('worker-block').hidden,'selection rejection');
-  await waitFor(()=>$('sample').options.length===7,'sample discovery');
+  await waitFor(()=>$('sample').options.length===8,'sample discovery');
   assert.equal(dom.window.document.querySelectorAll('.step').length,6);
   assert.equal($('resolved-panel'),null);assert.equal($('evidence-panel'),null);
   assert.equal(dom.window.document.querySelector('.teaching'),null);
@@ -198,6 +202,16 @@ signals:
   await waitFor(()=>!reviseCard.querySelector('.signal-send').disabled,'structured Signal completion');
   assert.equal($('signal-revise-request-expected_revision').value,'');assert.equal($('signal-revise-request-detail').value,'');
 
+  change('sample','generated-go-systemone');change('framework','recipes/generated-go-systemone/go/systemone');change('mode','mock');
+  assert.equal($('classifier-field').hidden,true);await ready();
+  assert.ok($('worker-command').textContent.includes('go run .'));assert.ok($('worker-command').textContent.includes('-mode mock'));
+  assert.ok($('client-command').textContent.includes('start'));assert.ok($('client-command').textContent.includes('-mode mock'));
+  assert.ok(!$('client-command').textContent.includes('-classifier-id'));assert.ok(!$('client-command').textContent.includes('-catalog-dir'));
+  change('mode','live');assert.equal($('classifier-field').hidden,false);assert.equal($('worker-block').hidden,true);
+  change('classifier','laya-local');await ready();
+  assert.ok($('worker-command').textContent.includes('-confirm-live'));assert.ok($('worker-command').textContent.includes('-classifier-id laya-local'));
+  assert.ok(!$('client-command').textContent.includes('-classifier-id'));
+
   change('sample','recurring-ai-watch');change('framework','recipes/recurring-ai-watch/python/google-adk');change('mode','live');await ready();
   assert.equal($('open-worker').hidden,false);assert.equal($('open-start').hidden,false);assert.equal($('terminal-note').hidden,false);
   terminalEvents.length=0;$('open-worker').click();await waitFor(()=>$('worker-terminal-status').textContent.includes('Ready in Terminal'),'worker terminal handoff');
@@ -247,10 +261,10 @@ signals:
   change('mode','worker');await ready();assert.ok($('worker-command').textContent.includes('-classifier-id mock'));
   change('mode','live-demo');await failed();assert.ok($('selection-status').textContent.includes('classifiers.yaml'));
   const incomplete=path.join(fixture,'recipes/new-recipe/java');fs.mkdirSync(incomplete,{recursive:true});fs.writeFileSync(path.join(incomplete,'../README.md'),'# New incomplete recipe\n');
-  $('refresh').click();await waitFor(()=>$('sample').options.length===8,'new recipe discovery');change('sample','new-recipe');
+  $('refresh').click();await waitFor(()=>$('sample').options.length===9,'new recipe discovery');change('sample','new-recipe');
   assert.equal($('language').value,'java');assert.equal($('language-field').hidden,false);assert.equal($('readme').hidden,false);await failed();assert.ok($('selection-status').textContent.includes('adapter'));
   assert.deepEqual(errors,[]);
-  console.log('PASS: real HTTP + six-step DOM flow, generic/Human in the Loop latest-run links, explicit Ticket Routing Workflow selection, manual Run ID deep links, metadata-driven Watch, scalar Human in the Loop Signals, structured object Signals, invalid metadata feedback, confirmations, stale/Continue-As-New feedback, visible single-choice selectors, explicit modes, manual checks, local warm-up availability, Mac terminal handoff/fallback, individual controls, catalog refresh, Go live batches, clipboard fallback, and incomplete recipes.');
+  console.log('PASS: real HTTP + six-step DOM flow, generic/Human in the Loop latest-run links, generated Go SystemOne mock/live classifier visibility, explicit Ticket Routing Workflow selection, manual Run ID deep links, metadata-driven Watch, scalar Human in the Loop Signals, structured object Signals, invalid metadata feedback, confirmations, stale/Continue-As-New feedback, visible single-choice selectors, explicit modes, manual checks, local warm-up availability, Mac terminal handoff/fallback, individual controls, catalog refresh, Go live batches, clipboard fallback, and incomplete recipes.');
 }
 main().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{
   if(dom)dom.window.close();
