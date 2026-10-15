@@ -86,16 +86,18 @@
     if(variant.modes.length){field("mode",true);$("mode-label").textContent=variant.kind==="go"?"Run action":"Execution mode";options("mode",variant.modes.map(id=>({id})),{placeholder:"Choose a mode explicitly"});}
     const mode=$("mode").value;
     if(variant.model){field("model",true);options("model",state.models.map(e=>({id:e.id})),{defaultValue:variant.defaults["--model-id"]||variant.defaults["-model-id"]});}
-    if(variant.classifier){
+    const legacyGoMockMode=variant.kind==="go"&&!variant.generic&&Array.isArray(variant.live_modes)&&!variant.live_modes.includes(mode);
+    const showClassifier=variant.classifier&&!(variant.generic&&variant.kind==="go"&&mode==="mock");
+    if(showClassifier){
       field("classifier",true);
       let entries=state.classifiers.map(e=>({id:e.id}));
-      if(variant.kind==="go"&&!variant.live_modes.includes(mode))entries=mode==="worker"?[{id:variant.defaults["-classifier-id"],label:variant.defaults["-classifier-id"]+" (built-in)"},...entries]:[{id:variant.defaults["-classifier-id"],label:variant.defaults["-classifier-id"]+" (built-in)"}];
+      if(legacyGoMockMode)entries=mode==="worker"?[{id:variant.defaults["-classifier-id"],label:variant.defaults["-classifier-id"]+" (built-in)"},...entries]:[{id:variant.defaults["-classifier-id"],label:variant.defaults["-classifier-id"]+" (built-in)"}];
       options("classifier",entries,{defaultValue:variant.defaults["--classifier-id"]||variant.defaults["-classifier-id"]});
     }
     if(mode==="live-batch"&&variant.kind==="go"){$("batch-fields").hidden=false;const limits=variant.batch_limits;$("count").max=limits.maximumLiveBatchCount||"";$("concurrency").max=limits.maximumLiveConcurrency||"";$("batch-limits").textContent=`Recipe limits: count ≤ ${limits.maximumLiveBatchCount}, concurrency ≤ ${limits.maximumLiveConcurrency}.`;}
-    const usesClassifierCatalog=variant.classifier&&!(variant.kind==="go"&&!variant.live_modes.includes(mode)&&(mode!=="worker"||$("classifier").value===variant.defaults["-classifier-id"]));
+    const usesClassifierCatalog=variant.classifier&&(variant.generic&&variant.kind==="go"?mode==="live":!(legacyGoMockMode&&(mode!=="worker"||$("classifier").value===variant.defaults["-classifier-id"])));
     for(const [kind,needed] of [["models",variant.model],["classifiers",usesClassifierCatalog]])if(state.catalog_errors[kind]&&needed){clear(state.catalog_errors[kind],true);return;}
-    if((variant.modes.length&&!mode)||(variant.model&&!$("model").value)||(variant.classifier&&!$("classifier").value))return;
+    if((variant.modes.length&&!mode)||(variant.model&&!$("model").value)||(usesClassifierCatalog&&!$("classifier").value))return;
     await resolve();
   }
 
