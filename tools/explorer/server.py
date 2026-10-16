@@ -56,9 +56,11 @@ class Handler(BaseHTTPRequestHandler):
                 path = self.explorer.source_path(query.get('path',''))
                 self.send(200, path.read_bytes(), 'text/plain; charset=utf-8')
                 return
-            elif url.path in {'/', '/app.js', '/style.css', '/favicon.svg'}:
+            elif url.path in {'/', '/theme.js', '/app.js', '/style.css', '/favicon.svg'}:
                 name = 'index.html' if url.path == '/' else url.path[1:]
-                content_type = {'index.html':'text/html', 'app.js':'text/javascript', 'style.css':'text/css', 'favicon.svg':'image/svg+xml'}[name]
+                content_type = {'index.html':'text/html', 'theme.js':'text/javascript',
+                    'app.js':'text/javascript', 'style.css':'text/css',
+                    'favicon.svg':'image/svg+xml'}[name]
                 self.send(200, (STATIC/name).read_bytes(), content_type+'; charset=utf-8')
                 return
             else:

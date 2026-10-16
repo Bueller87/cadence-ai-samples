@@ -10,14 +10,36 @@ const root=path.resolve(__dirname,'../../..');
 const fixture=fs.mkdtempSync(path.join(os.tmpdir(),'cadence-explorer-ui-'));
 let server,dom;
 const errors=[];
+const themeKey='cadence-explorer-theme';
 async function waitFor(predicate,message){
   const until=Date.now()+5000;
   while(Date.now()<until){if(predicate())return;await new Promise(r=>setTimeout(r,20));}
   throw Error('Timed out: '+message);
 }
+function themeDocument(saved,{inaccessible=false}={}){
+  const themed=new JSDOM('<!doctype html><html><head></head><body></body></html>',
+    {runScripts:'dangerously',url:'http://127.0.0.1:8765/'});
+  if(inaccessible)Object.defineProperty(themed.window,'localStorage',{get(){throw Error('Storage denied');}});
+  else if(saved!==undefined)themed.window.localStorage.setItem(themeKey,saved);
+  themed.window.eval(fs.readFileSync(path.join(root,'tools/explorer/static/theme.js'),'utf8'));
+  return themed;
+}
 async function main(){
+  const indexSource=fs.readFileSync(path.join(root,'tools/explorer/static/index.html'),'utf8');
+  assert.ok(indexSource.indexOf('src="theme.js"')<indexSource.indexOf('rel="stylesheet"'),
+    'theme bootstrap must run before the stylesheet');
+  for(const [saved,expected] of [[undefined,'dark'],['dark','dark'],['light','light'],['sepia','dark']]){
+    const themed=themeDocument(saved);
+    assert.equal(themed.window.document.documentElement.dataset.theme,expected);
+    assert.equal(themed.window.ExplorerTheme.current(),expected);
+    themed.window.close();
+  }
+  const inaccessibleTheme=themeDocument(undefined,{inaccessible:true});
+  assert.equal(inaccessibleTheme.window.document.documentElement.dataset.theme,'dark');
+  inaccessibleTheme.window.close();
+
   fs.cpSync(path.join(root,'recipes'),path.join(fixture,'recipes'),{recursive:true,
-    filter:source=>!['.venv','venv','__pycache__'].includes(path.basename(source))});
+    filter:source=>!['.venv','venv','__pycache__','.run-state'].includes(path.basename(source))});
   fs.cpSync(path.join(root,'scripts'),path.join(fixture,'scripts'),{recursive:true});
   fs.cpSync(path.join(root,'templates'),path.join(fixture,'templates'),{recursive:true});
   execSync('bash scripts/new-recipe.sh generated-go-systemone --language go --classifier systemone --agent none',
@@ -120,6 +142,24 @@ signals:
   const ready=()=>waitFor(()=>!$('worker-block').hidden,'resolved commands');
   const failed=()=>waitFor(()=>$('selection-status').className.includes('error')&&$('worker-block').hidden,'selection rejection');
   await waitFor(()=>$('sample').options.length===8,'sample discovery');
+  const themeToggle=$('theme-toggle');
+  assert.equal(dom.window.document.documentElement.dataset.theme,'dark');
+  assert.equal(themeToggle.tagName,'BUTTON');assert.equal(themeToggle.type,'button');
+  assert.equal(themeToggle.getAttribute('aria-pressed'),'true');
+  assert.equal(themeToggle.getAttribute('aria-label'),'Dark theme active. Switch to light theme.');
+  themeToggle.focus();assert.equal(dom.window.document.activeElement,themeToggle);
+  themeToggle.click();assert.equal(dom.window.document.documentElement.dataset.theme,'light');
+  assert.equal(dom.window.localStorage.getItem(themeKey),'light');
+  assert.equal(themeToggle.getAttribute('aria-pressed'),'false');
+  assert.equal(themeToggle.getAttribute('aria-label'),'Light theme active. Switch to dark theme.');
+  themeToggle.click();assert.equal(dom.window.document.documentElement.dataset.theme,'dark');
+  assert.equal(dom.window.localStorage.getItem(themeKey),'dark');
+  const storagePrototype=Object.getPrototypeOf(dom.window.localStorage);
+  const originalSetItem=storagePrototype.setItem;
+  storagePrototype.setItem=()=>{throw Error('Storage denied');};
+  themeToggle.click();assert.equal(dom.window.document.documentElement.dataset.theme,'light');
+  storagePrototype.setItem=originalSetItem;
+  themeToggle.click();assert.equal(dom.window.document.documentElement.dataset.theme,'dark');
   assert.equal(dom.window.document.querySelectorAll('.step').length,6);
   assert.equal($('resolved-panel'),null);assert.equal($('evidence-panel'),null);
   assert.equal(dom.window.document.querySelector('.teaching'),null);
@@ -146,6 +186,18 @@ signals:
   $('resolve-run').click();await waitFor(()=>$('run-id').value==='run-current','latest run resolution');
   assert.ok($('workflow-history').href.endsWith('/run-current/history'));assert.ok($('workflow-queries').href.endsWith('/run-current/queries'));
   assert.equal($('workflow-signals').hidden,false);
+  const preservedThemeState={
+    sample:$('sample').value,framework:$('framework').value,mode:$('mode').value,
+    worker:$('worker-command').textContent,preparation:$('prepare-status').textContent,
+    run:$('run-id').value,signals:$('signal-controls').children.length,
+  };
+  themeToggle.click();
+  assert.deepEqual({
+    sample:$('sample').value,framework:$('framework').value,mode:$('mode').value,
+    worker:$('worker-command').textContent,preparation:$('prepare-status').textContent,
+    run:$('run-id').value,signals:$('signal-controls').children.length,
+  },preservedThemeState);
+  themeToggle.click();
   const checkCard=dom.window.document.querySelector('[data-signal-id="check-now"]');
   const stopCard=dom.window.document.querySelector('[data-signal-id="stop-watch"]');
   const checkButton=checkCard.querySelector('.signal-send'),stopButton=stopCard.querySelector('.signal-send');
@@ -281,7 +333,7 @@ signals:
   $('refresh').click();await waitFor(()=>$('sample').options.length===9,'new recipe discovery');change('sample','new-recipe');
   assert.equal($('language').value,'java');assert.equal($('language-field').hidden,false);assert.equal($('readme').hidden,false);await failed();assert.ok($('selection-status').textContent.includes('adapter'));
   assert.deepEqual(errors,[]);
-  console.log('PASS: real HTTP + six-step DOM flow, generic/Human in the Loop latest-run links, generated Go SystemOne mock/live classifier visibility, Ticket Routing generic commands and Cadence Web Queries link, manual Run ID deep links, metadata-driven Watch, scalar Human in the Loop Signals, structured object Signals, invalid metadata feedback, confirmations, stale/Continue-As-New feedback, visible single-choice selectors, explicit modes, manual checks, local warm-up availability, Mac terminal handoff/fallback, individual controls, catalog refresh, clipboard fallback, and incomplete recipes.');
+  console.log('PASS: pre-paint dark/light theme persistence and failure handling, state-preserving accessible toggle, real HTTP + six-step DOM flow, generic/Human in the Loop latest-run links, generated Go SystemOne mock/live classifier visibility, Ticket Routing generic commands and Cadence Web Queries link, manual Run ID deep links, metadata-driven Watch, scalar Human in the Loop Signals, structured object Signals, invalid metadata feedback, confirmations, stale/Continue-As-New feedback, visible single-choice selectors, explicit modes, manual checks, local warm-up availability, Mac terminal handoff/fallback, individual controls, catalog refresh, clipboard fallback, and incomplete recipes.');
 }
 main().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{
   if(dom)dom.window.close();

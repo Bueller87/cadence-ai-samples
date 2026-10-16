@@ -1,8 +1,21 @@
 "use strict";
 (() => {
   const $ = id => document.getElementById(id);
+  const theme=window.ExplorerTheme;
   let state, result, recipe, variant, requestVersion = 0, runRequestVersion = 0, signalRequestVersion = 0, resolvedRunId = "", checkedSelection = "";
   const node = (tag,text) => {const e=document.createElement(tag);if(text!==undefined)e.textContent=text;return e;};
+
+  function renderThemeToggle(){
+    const current=theme.current(),next=current==="dark"?"light":"dark",button=$("theme-toggle");
+    button.textContent=`${current[0].toUpperCase()+current.slice(1)} · switch to ${next}`;
+    button.setAttribute("aria-label",`${current[0].toUpperCase()+current.slice(1)} theme active. Switch to ${next} theme.`);
+    button.setAttribute("aria-pressed",String(current==="dark"));
+  }
+
+  function toggleTheme(){
+    theme.apply(theme.current()==="dark"?"light":"dark",true);
+    renderThemeToggle();
+  }
 
   function options(id, entries, {placeholder, defaultValue}={}) {
     const control=$(id), previous=control.value;
@@ -421,5 +434,7 @@
   $("web-workflow-id").addEventListener("input",()=>{if($("web-workflow-id").readOnly)return;runRequestVersion++;$("run-id").value="";$("resolve-run").disabled=!$("web-workflow-id").value.trim();updateRunLinks("entered");});
   document.querySelectorAll("[data-copy]").forEach(button=>button.addEventListener("click",()=>{if(result)copyText(result[button.dataset.copy],button);}));
   document.querySelectorAll("[data-terminal]").forEach(button=>button.addEventListener("click",()=>openTerminal(button.dataset.terminal,button)));
+  $("theme-toggle").addEventListener("click",toggleTheme);
+  renderThemeToggle();
   refresh(false);
 })();

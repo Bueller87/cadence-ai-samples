@@ -282,6 +282,23 @@ are not placed in URLs, browser or server logs, persisted storage, durable
 evidence, or sanitized error text. Cadence-Web acceptance remains distinct from
 Workflow processing.
 
+## Presentation themes
+
+- Dark is the default presentation when no valid saved preference exists. The
+  Explorer does not follow the operating-system theme.
+- One header control shows the active theme and the available action. It is a
+  native button with an accurate accessible name and pressed state.
+- Explicit `dark` and `light` choices persist in browser `localStorage` under
+  `cadence-explorer-theme`. Missing, inaccessible, malformed, and unsupported
+  values fail safely to dark. A failed write does not prevent the current page
+  from changing theme.
+- The saved or default theme is applied before the stylesheet loads. Theme
+  changes update presentation only and preserve selections, commands, service
+  and preparation results, Workflow/run links, and Signal state.
+- Both themes use semantic colors across the complete Explorer surface. Text,
+  controls, links, focus indicators, and statuses meet WCAG AA contrast; state
+  meaning also remains available through text, labels, borders, or shapes.
+
 ## Page simplification
 
 Remove these three standalone cards:
