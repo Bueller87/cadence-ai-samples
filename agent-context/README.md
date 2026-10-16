@@ -78,7 +78,6 @@ centralize documentation.
 
 - [Recurring AI Watch matrix results](../recipes/recurring-ai-watch/MATRIX_RESULTS.md)
 - [Human-in-the-loop validation results](../recipes/human-in-the-loop/MATRIX_RESULTS.md)
-- [Ticket routing performance findings](../recipes/ticket-routing/perf/FINDINGS.md)
 
 These record what was tested at a point in time. They do not prove a changed
 checkout is currently valid and do not define future work.

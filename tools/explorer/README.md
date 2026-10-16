@@ -50,9 +50,10 @@ The Watch's Workflow ID is shared by start/status/check-now/stop. Copy its run
 command and controls separately so pasting a command does not immediately start
 and stop the Watch.
 
-Go live batches require an explicit count and concurrency. Their bounds are read
-from the recipe's validation code. The acknowledgment action requires IDs from
-an existing ticket, so it directs you to the README instead of inventing them.
+Ticket Routing uses the same generic Go command contract. Its start command
+selects a synthetic ticket inside the external starter. After resolving the
+parent Run, use the **Queries** link to open its `ticket-assignment` Custom
+Workflow Control in Cadence Web and acknowledge the assignment.
 
 ## Keeping the checkout as the source of truth
 
@@ -63,10 +64,9 @@ an existing ticket, so it directs you to the README instead of inventing them.
 - **Python CLI:** a restricted AST reader examines literal `parser()` definitions
   and reads the recipe's selection guards. It never imports recipe modules or
   executes their code, and needs none of their agent/SDK dependencies.
-- **Go CLI:** a restricted source reader distinguishes the generated positional
-  `worker|start -mode mock|live` contract from Ticket Routing's specialized
-  global-flag mode switch. Its scenario modes and batch guards remain local to
-  that recipe and cannot weaken the generic contract.
+- **Go CLI:** a restricted source reader recognizes the generated positional
+  `worker|start -mode mock|live` contract. Ticket Routing and generated Go
+  profiles use this same contract.
 - **Java CLI:** a bounded source reader recognizes only the generated
   positional `RecipeApplication.Command` contract and fixed Gradle invocation.
   It rejects symlinked/out-of-checkout source paths before reading and does not
@@ -142,11 +142,10 @@ previous Run ID as stale when the current Run changes. A missing execution or
 unavailable Cadence-Web instance leaves **Open domain** available.
 
 When a selection does not expose one safe Workflow ID, Step 6 requires an exact
-Workflow ID before it enables latest-run resolution. This is the path for Ticket
-Routing parent, child, and batch Workflows. Copy the exact ID from the recipe
-output; the Explorer does not choose an arbitrary Workflow. A manually entered
-Workflow ID and Run ID can open exact History and Queries links without first
-resolving the latest Run.
+Workflow ID before it enables latest-run resolution. Copy the exact ID from the
+recipe output; the Explorer does not choose an arbitrary Workflow. A manually
+entered Workflow ID and Run ID can open exact History and Queries links without
+first resolving the latest Run.
 
 After a successful latest-run resolution, a recipe with valid optional
 `explorer.yaml` Signal metadata shows its declared controls. Recurring AI Watch
@@ -189,10 +188,10 @@ tools/explorer/.venv/bin/python -m unittest discover -s tools/explorer/tests -v
 ```
 
 Tests use a temporary checkout and local stub services, without cloud AI,
-Cadence, Gradle, or Terminal.app calls. They cover all 24 supported Watch
-selections, 120 generated commands against both actual argparse parsers, Go
-actions and live-batch bounds, changed catalogs/CLI guards, new/incomplete
-recipes, both modes and actions for every generated profile,
+Cadence, Gradle, or Terminal.app calls. They cover supported Watch selections,
+generated commands against actual parsers, generic Go actions, changed
+catalogs/CLI guards, new/incomplete recipes, both modes and actions for every
+generated profile,
 non-execution of recipe modules, quoting of paths with spaces, probe/warm-up
 failures, Terminal handoff and fallback, action protection, HTTP refresh
 behavior, source-file boundaries, strict Signal metadata, backend Signal
@@ -203,7 +202,11 @@ development; these are not explorer runtime dependencies. Install jsdom into a
 temporary location and set `NODE_PATH` to its `node_modules` directory:
 
 ```bash
-node tools/explorer/tests/ui.cjs
+JSDOM_DIR="$(mktemp -d)"
+npm_config_registry=https://registry.npmjs.org \
+  npm install --prefix "$JSDOM_DIR" jsdom@26.1.0
+NODE_PATH="$JSDOM_DIR/node_modules" node tools/explorer/tests/ui.cjs
+rm -rf "$JSDOM_DIR"
 ```
 
 With local Cadence and Cadence-Web running and the Human in the Loop Python

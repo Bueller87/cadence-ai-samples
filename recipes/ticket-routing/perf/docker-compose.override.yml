@@ -1,4 +1,0 @@
-services:
-  cadence:
-    environment:
-      LOG_LEVEL: info

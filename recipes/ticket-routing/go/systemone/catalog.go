@@ -12,7 +12,7 @@ import (
 
 const (
 	mockClassifierID           = "mock"
-	defaultCatalogDir          = "../../.."
+	defaultCatalogDir          = "../../../.."
 	classifierProviderTypeSafe = "typesafe"
 	classifierProviderLaya     = "laya"
 )

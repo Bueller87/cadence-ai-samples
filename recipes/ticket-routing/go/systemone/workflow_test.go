@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -21,16 +20,15 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/cadence"
 	"go.uber.org/cadence/.gen/go/shared"
-	"go.uber.org/cadence/client"
+	"go.uber.org/cadence/activity"
 	"go.uber.org/cadence/encoded"
-	cadencemocks "go.uber.org/cadence/mocks"
 	"go.uber.org/cadence/testsuite"
 	"go.uber.org/cadence/worker"
 	"go.uber.org/cadence/workflow"
 )
 
 func TestSyntheticTicketDataset(t *testing.T) {
-	file, err := os.Open(filepath.Join("..", "testdata", "tickets.jsonl"))
+	file, err := os.Open(filepath.Join("..", "..", "testdata", "tickets.jsonl"))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, file.Close()) })
 
@@ -59,6 +57,15 @@ func TestSyntheticTicketDataset(t *testing.T) {
 		require.Truef(t, validPriorities[record.ExpectedPriority], "invalid priority %q on line %d", record.ExpectedPriority, recordCount)
 		require.Truef(t, validComplexities[record.ExpectedComplexity], "invalid complexity %q on line %d", record.ExpectedComplexity, recordCount)
 
+		decision, err := ClassifyTicket(t.Context(), Ticket{
+			TicketID: record.TicketID,
+			Message:  record.Message,
+		})
+		require.NoErrorf(t, err, "mock classification failed on line %d", recordCount)
+		require.Truef(t, validDepartments[string(decision.Department)], "mock returned invalid department on line %d", recordCount)
+		require.Truef(t, validPriorities[string(decision.Priority)], "mock returned invalid priority on line %d", recordCount)
+		require.Truef(t, validComplexities[string(decision.Complexity)], "mock returned invalid complexity on line %d", recordCount)
+
 		seenIDs[record.TicketID] = true
 		departmentCounts[record.ExpectedDepartment]++
 	}
@@ -68,79 +75,6 @@ func TestSyntheticTicketDataset(t *testing.T) {
 	for department := range validDepartments {
 		require.Equalf(t, 10, departmentCounts[department], "unexpected %s record count", department)
 	}
-}
-
-func TestStartManualTicketDisplaysAcknowledgmentDetails(t *testing.T) {
-	cadenceClient := cadencemocks.NewClient(t)
-	run := cadencemocks.NewWorkflowRun(t)
-	run.On("GetRunID").Return("run-manual-001").Once()
-	run.On("Get", mock.Anything, mock.Anything).Run(func(arguments mock.Arguments) {
-		result := arguments.Get(1).(*TicketResult)
-		*result = TicketResult{
-			TicketID:   "manual-test-001",
-			Department: DepartmentBilling,
-			EmployeeID: BillingEmployeeID,
-			Status:     StatusAcknowledged,
-			SLAMet:     true,
-		}
-	}).Return(nil).Once()
-	cadenceClient.On(
-		"ExecuteWorkflow",
-		mock.Anything,
-		mock.MatchedBy(func(options client.StartWorkflowOptions) bool {
-			return options.ID == "ticket-routing-manual-test-001" &&
-				options.TaskList == TaskList &&
-				options.ExecutionStartToCloseTimeout == 7*time.Minute
-		}),
-		mock.Anything,
-		mock.MatchedBy(func(ticket Ticket) bool {
-			return ticket.TicketID == "manual-test-001" &&
-				ticket.Message == manualDemoTicketMessage &&
-				ticket.SLA.High == 2*time.Minute
-		}),
-	).Return(run, nil).Once()
-
-	var output bytes.Buffer
-	err := startManualTicket(context.Background(), cadenceClient, TaskList, "manual-test-001", 2*time.Minute, &output)
-
-	require.NoError(t, err)
-	require.Contains(t, output.String(), "parent workflow ID: ticket-routing-manual-test-001")
-	require.Contains(t, output.String(), "parent run ID: run-manual-001")
-	require.Contains(t, output.String(), "child workflow ID: ticket-routing-manual-test-001-child-billing")
-	require.Contains(t, output.String(), "employee ID: "+BillingEmployeeID)
-	require.Contains(t, output.String(), "assignment ID: manual-test-001:billing:"+BillingEmployeeID)
-	require.Contains(t, output.String(), "signal name: "+AcknowledgmentSignalName)
-	require.Contains(t, output.String(), "go run . -mode acknowledge")
-	require.Contains(t, output.String(), "Workflow status: Completed")
-	require.Contains(t, output.String(), "Ticket ID: manual-test-001")
-	require.Contains(t, output.String(), "Department: billing")
-	require.Contains(t, output.String(), "Assigned employee: "+BillingEmployeeID)
-	require.Contains(t, output.String(), "Business status: ACKNOWLEDGED")
-	require.Contains(t, output.String(), "SLA met: YES")
-}
-
-func TestAcknowledgeManualTicketSendsTypedSignal(t *testing.T) {
-	cadenceClient := cadencemocks.NewClient(t)
-	expected := AcknowledgmentSignal{
-		TicketID:     "manual-test-002",
-		EmployeeID:   BillingEmployeeID,
-		AssignmentID: "manual-test-002:billing:" + BillingEmployeeID,
-	}
-	cadenceClient.On(
-		"SignalWorkflow",
-		mock.Anything,
-		"ticket-routing-manual-test-002-child-billing",
-		"",
-		AcknowledgmentSignalName,
-		expected,
-	).Return(nil).Once()
-
-	var output bytes.Buffer
-	err := acknowledgeManualTicket(context.Background(), cadenceClient, expected.TicketID, DepartmentBilling, expected.EmployeeID, "", &output)
-
-	require.NoError(t, err)
-	require.Contains(t, output.String(), "acknowledgment sent")
-	require.Contains(t, output.String(), expected.AssignmentID)
 }
 
 func TestTicketIntakeWorkflowRoutesEveryDepartment(t *testing.T) {
@@ -191,6 +125,136 @@ func TestTicketIntakeWorkflowRoutesEveryDepartment(t *testing.T) {
 			env.AssertExpectations(t)
 		})
 	}
+}
+
+func TestParentAssignmentStatusQueryTransitions(t *testing.T) {
+	env := newWorkflowEnvironment(t)
+	ticket := Ticket{
+		TicketID: "query-001",
+		Message:  "synthetic test ticket",
+		SLA:      testSLAConfig(10 * time.Second),
+	}
+	decision := validDecision(DepartmentBilling)
+	var pending ParentAssignmentStatus
+	env.SetOnActivityStartedListener(func(_ *activity.Info, _ context.Context, _ encoded.Values) {
+		pending = queryParentAssignmentStatus(t, env)
+		control := queryAssignmentControl(t, env)
+		require.Contains(t, control.Data, "CLASSIFICATION_PENDING")
+		require.NotContains(t, control.Data, "{% signal")
+	})
+	env.OnActivity(ClassifyTicket, mock.Anything, ticket).Return(decision, nil).Once()
+	env.RegisterDelayedCallback(func() {
+		assigned := queryParentAssignmentStatus(t, env)
+		require.Equal(t, StatusAwaitingAcknowledgment, assigned.Status)
+		require.Equal(t, DepartmentBilling, assigned.Department)
+		require.Equal(t, BillingEmployeeID, assigned.EmployeeID)
+		require.Equal(t, "query-001:billing:"+BillingEmployeeID, assigned.AssignmentID)
+		require.Contains(t, assigned.ChildWorkflowID, "-child-billing")
+		require.Equal(t, AcknowledgmentSignalName, assigned.SignalName)
+		require.Equal(t, 10*time.Second, assigned.SLADuration)
+		require.NoError(t, env.SignalWorkflowByID(
+			assigned.ChildWorkflowID,
+			AcknowledgmentSignalName,
+			AcknowledgmentSignal{
+				TicketID:     ticket.TicketID,
+				EmployeeID:   assigned.EmployeeID,
+				AssignmentID: assigned.AssignmentID,
+			},
+		))
+	}, time.Second)
+
+	env.ExecuteWorkflow(TicketIntakeWorkflow, ticket)
+
+	require.NoError(t, env.GetWorkflowError())
+	require.Equal(t, "CLASSIFICATION_PENDING", pending.Status)
+	require.Equal(t, ticket.TicketID, pending.TicketID)
+}
+
+func TestParentAssignmentStatusQueryReportsUnroutable(t *testing.T) {
+	env := newWorkflowEnvironment(t)
+	ticket := Ticket{TicketID: "query-unroutable-001", Message: "synthetic test ticket"}
+	decision := validDecision(DepartmentBilling)
+	decision.DepartmentConfidence = 0.1
+	env.OnActivity(ClassifyTicket, mock.Anything, ticket).Return(decision, nil).Once()
+
+	env.ExecuteWorkflow(TicketIntakeWorkflow, ticket)
+
+	require.NoError(t, env.GetWorkflowError())
+	status := queryParentAssignmentStatus(t, env)
+	require.Equal(t, StatusUnroutable, status.Status)
+	require.Contains(t, status.Reason, "below 0.65")
+	require.Empty(t, status.ChildWorkflowID)
+	control := queryAssignmentControl(t, env)
+	require.Contains(t, control.Data, "UNROUTABLE")
+	require.NotContains(t, control.Data, "{% signal")
+}
+
+func TestParentCustomWorkflowControlAcknowledgesChild(t *testing.T) {
+	env := newWorkflowEnvironment(t)
+	ticket := Ticket{
+		TicketID: "explorer-ack-001",
+		Message:  "synthetic billing ticket",
+		SLA:      testSLAConfig(10 * time.Second),
+	}
+	env.OnActivity(ClassifyTicket, mock.Anything, ticket).
+		Return(validDecision(DepartmentBilling), nil).Once()
+	env.RegisterDelayedCallback(func() {
+		control := queryAssignmentControl(t, env)
+		require.Equal(t, "formattedData", control.CadenceResponseType)
+		require.Equal(t, "text/markdown", control.Format)
+		require.Contains(t, control.Data, "Ticket ID:** `explorer-ack-001`")
+		require.Contains(t, control.Data, "Department:** `billing`")
+		require.Contains(t, control.Data, "Assigned employee:** `"+BillingEmployeeID+"`")
+		require.Contains(t, control.Data, "Child Workflow ID:** `")
+		require.Contains(t, control.Data, `signalName="`+AcknowledgmentSignalName+`"`)
+		require.Contains(t, control.Data, `label="Acknowledge Ticket"`)
+		require.Contains(t, control.Data, `workflowId="default-test-workflow-id"`)
+		require.Contains(t, control.Data, `input={"ticket_id":"explorer-ack-001","employee_id":"`+BillingEmployeeID+`","assignment_id":"explorer-ack-001:billing:`+BillingEmployeeID+`"}`)
+
+		env.SignalWorkflow(AcknowledgmentSignalName, AcknowledgmentSignal{
+			TicketID:     ticket.TicketID,
+			EmployeeID:   BillingEmployeeID,
+			AssignmentID: assignmentIdentifier(ticket.TicketID, DepartmentBilling, BillingEmployeeID),
+		})
+	}, time.Second)
+
+	env.ExecuteWorkflow(TicketIntakeWorkflow, ticket)
+
+	require.NoError(t, env.GetWorkflowError())
+	var result TicketResult
+	require.NoError(t, env.GetWorkflowResult(&result))
+	require.Equal(t, StatusAcknowledged, result.Status)
+	require.True(t, result.SLAMet)
+	terminalControl := queryAssignmentControl(t, env)
+	require.NotContains(t, terminalControl.Data, "{% signal")
+	require.Contains(t, terminalControl.Data, "Current acknowledgment status:** `ACKNOWLEDGED`")
+	require.Contains(t, terminalControl.Data, "SLA met:** YES")
+}
+
+func TestParentDoesNotForwardSignalAfterChildTimeout(t *testing.T) {
+	env := newWorkflowEnvironment(t)
+	ticket := Ticket{
+		TicketID: "explorer-race-001",
+		Message:  "synthetic billing ticket",
+		SLA:      testSLAConfig(time.Second),
+	}
+	env.OnActivity(ClassifyTicket, mock.Anything, ticket).
+		Return(validDecision(DepartmentBilling), nil).Once()
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow(AcknowledgmentSignalName, AcknowledgmentSignal{
+			TicketID:     ticket.TicketID,
+			EmployeeID:   BillingEmployeeID,
+			AssignmentID: assignmentIdentifier(ticket.TicketID, DepartmentBilling, BillingEmployeeID),
+		})
+	}, time.Second)
+
+	env.ExecuteWorkflow(TicketIntakeWorkflow, ticket)
+
+	require.NoError(t, env.GetWorkflowError())
+	var result TicketResult
+	require.NoError(t, env.GetWorkflowResult(&result))
+	require.Equal(t, StatusSLATimeout, result.Status)
+	require.False(t, result.SLAMet)
 }
 
 func TestDepartmentChildWorkflows(t *testing.T) {
@@ -519,6 +583,59 @@ func TestTicketIntakeWorkflowReturnsUnroutableForLowDepartmentConfidence(t *test
 	env.AssertExpectations(t)
 }
 
+func TestTicketIntakeWorkflowRoutesLayaSelectedAnswerConfidenceAboveThreshold(t *testing.T) {
+	env := newWorkflowEnvironment(t)
+	ticket := Ticket{
+		TicketID: "synthetic-0027",
+		Message:  "Synthetic account merge request.",
+		SLA:      testSLAConfig(10 * time.Second),
+	}
+	decision := validDecision(DepartmentAccount)
+	entropy := 0.0506
+	decision.DepartmentConfidence = 0.4061
+	decision.DepartmentEntropy = &entropy
+	decision.DepartmentThreshold = minimumLayaDepartmentConfidence
+	env.OnActivity(ClassifyTicket, mock.Anything, ticket).Return(decision, nil).Once()
+	env.RegisterDelayedCallback(func() {
+		status := queryParentAssignmentStatus(t, env)
+		require.Equal(t, StatusAwaitingAcknowledgment, status.Status)
+		env.SignalWorkflow(AcknowledgmentSignalName, AcknowledgmentSignal{
+			TicketID:     ticket.TicketID,
+			EmployeeID:   status.EmployeeID,
+			AssignmentID: status.AssignmentID,
+		})
+	}, time.Second)
+
+	env.ExecuteWorkflow(TicketIntakeWorkflow, ticket)
+
+	require.NoError(t, env.GetWorkflowError())
+	var result TicketResult
+	require.NoError(t, env.GetWorkflowResult(&result))
+	require.Equal(t, StatusAcknowledged, result.Status)
+	require.Equal(t, DepartmentAccount, result.Department)
+	require.NotEmpty(t, result.ChildWorkflowID)
+	env.AssertExpectations(t)
+}
+
+func TestTicketIntakeWorkflowRejectsLayaSelectedAnswerConfidenceBelowThreshold(t *testing.T) {
+	env := newWorkflowEnvironment(t)
+	ticket := Ticket{TicketID: "laya-low-001", Message: "Synthetic ambiguous request."}
+	decision := validDecision(DepartmentAccount)
+	decision.DepartmentConfidence = 0.3999
+	decision.DepartmentThreshold = minimumLayaDepartmentConfidence
+	env.OnActivity(ClassifyTicket, mock.Anything, ticket).Return(decision, nil).Once()
+
+	env.ExecuteWorkflow(TicketIntakeWorkflow, ticket)
+
+	require.NoError(t, env.GetWorkflowError())
+	var result TicketResult
+	require.NoError(t, env.GetWorkflowResult(&result))
+	require.Equal(t, StatusUnroutable, result.Status)
+	require.Contains(t, result.Reason, "below 0.40")
+	require.Empty(t, result.ChildWorkflowID)
+	env.AssertExpectations(t)
+}
+
 func TestMockClassifierProducesTypedDecision(t *testing.T) {
 	decision, err := ClassifyTicket(t.Context(), Ticket{
 		TicketID: "mock-001",
@@ -670,7 +787,7 @@ func TestJevClassifierSendsAndParsesDocumentedContract(t *testing.T) {
 	}))
 	defer server.Close()
 
-	classifier, err := newSystemOneClassifier("test-api-key", server.URL+"/v1/systemone", testJevModel, server.Client())
+	classifier, err := newSystemOneClassifier("test-api-key", server.URL+"/v1/systemone", testJevModel, classifierProviderTypeSafe, server.Client())
 	require.NoError(t, err)
 	inferenceStarted := time.Date(2026, time.October, 10, 12, 0, 0, 0, time.UTC)
 	inferenceFinished := inferenceStarted.Add(25 * time.Millisecond)
@@ -691,6 +808,8 @@ func TestJevClassifierSendsAndParsesDocumentedContract(t *testing.T) {
 	require.InDelta(t, 0.81, decision.DepartmentConfidence, 0.0001)
 	require.InDelta(t, 0.72, decision.PriorityConfidence, 0.0001)
 	require.InDelta(t, 0.68, decision.ComplexityConfidence, 0.0001)
+	require.Nil(t, decision.DepartmentEntropy)
+	require.Equal(t, minimumDepartmentConfidence, decision.DepartmentThreshold)
 	require.InDelta(t, 0.88, decision.DepartmentProbabilities["billing"], 0.0001)
 	require.Equal(t, "jev-1.13.0", decision.Model)
 	require.Equal(t, 412, decision.InputTokens)
@@ -707,72 +826,127 @@ func TestLayaClassifierSendsNoAuthorizationHeader(t *testing.T) {
 		var payload jevRequest
 		require.NoError(t, json.NewDecoder(request.Body).Decode(&payload))
 		require.Equal(t, "convaiinnovations/laya", payload.Model)
-		_, err := io.WriteString(writer, validJevResponse)
+		_, err := io.WriteString(writer, validLayaResponse())
 		require.NoError(t, err)
 	}))
 	defer server.Close()
 
-	classifier, err := newSystemOneClassifier("", server.URL, "convaiinnovations/laya", server.Client())
+	classifier, err := newSystemOneClassifier("", server.URL, "convaiinnovations/laya", classifierProviderLaya, server.Client())
 	require.NoError(t, err)
 	decision, err := classifier.ClassifyTicket(t.Context(), Ticket{TicketID: "laya-001", Message: "A synthetic billing request."})
 	require.NoError(t, err)
 	require.Equal(t, DepartmentBilling, decision.Department)
 }
 
+func TestLayaClassifierUsesSelectedAnswerConfidenceForRouting(t *testing.T) {
+	response := layaResponseWithDepartmentConfidence(0.0506, 0.4061)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		_, err := io.WriteString(writer, response)
+		require.NoError(t, err)
+	}))
+	defer server.Close()
+
+	classifier, err := newSystemOneClassifier(
+		"",
+		server.URL,
+		"convaiinnovations/laya",
+		classifierProviderLaya,
+		server.Client(),
+	)
+	require.NoError(t, err)
+	decision, err := classifier.ClassifyTicket(
+		t.Context(),
+		Ticket{TicketID: "synthetic-0027", Message: "Synthetic account merge request."},
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, DepartmentAccount, decision.Department)
+	require.InDelta(t, 0.4061, decision.DepartmentConfidence, 0.000001)
+	require.NotNil(t, decision.DepartmentEntropy)
+	require.InDelta(t, 0.0506, *decision.DepartmentEntropy, 0.000001)
+	require.Equal(t, minimumLayaDepartmentConfidence, decision.DepartmentThreshold)
+	require.Empty(t, invalidClassificationReason(decision))
+}
+
+func TestLocalLayaCorpus(t *testing.T) {
+	if os.Getenv("TICKET_ROUTING_LAYA_CORPUS") != "1" {
+		t.Skip("set TICKET_ROUTING_LAYA_CORPUS=1 to run the 40-ticket local Laya corpus")
+	}
+	config, err := loadClassifier(defaultCatalogDir, "laya-local")
+	require.NoError(t, err)
+	classifier, err := newSystemOneClassifier(
+		"",
+		config.Endpoint,
+		config.Model,
+		config.Provider,
+		&http.Client{Timeout: 20 * time.Second},
+	)
+	require.NoError(t, err)
+
+	file, err := os.Open(filepath.Join("..", "..", "testdata", "tickets.jsonl"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, file.Close()) })
+
+	counts := map[float64]int{0.65: 0, 0.50: 0, 0.40: 0}
+	matchesAtLayaThreshold := 0
+	total := 0
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		var fixture struct {
+			Ticket
+			ExpectedDepartment Department `json:"expected_department"`
+		}
+		require.NoError(t, json.Unmarshal(scanner.Bytes(), &fixture))
+		decision, classifyErr := classifier.ClassifyTicket(t.Context(), fixture.Ticket)
+		require.NoError(t, classifyErr, fixture.TicketID)
+		total++
+		for threshold := range counts {
+			if decision.DepartmentConfidence >= threshold {
+				counts[threshold]++
+			}
+		}
+		if decision.DepartmentConfidence >= minimumLayaDepartmentConfidence &&
+			decision.Department == fixture.ExpectedDepartment {
+			matchesAtLayaThreshold++
+		}
+		t.Logf(
+			"%s expected=%s selected=%s answer_confidence=%.4f entropy_confidence=%.4f",
+			fixture.TicketID,
+			fixture.ExpectedDepartment,
+			decision.Department,
+			decision.DepartmentConfidence,
+			*decision.DepartmentEntropy,
+		)
+	}
+	require.NoError(t, scanner.Err())
+	require.Equal(t, 40, total)
+	t.Logf(
+		"Laya corpus: total=%d routable>=0.65=%d routable>=0.50=%d routable>=0.40=%d label_matches_at_0.40=%d",
+		total,
+		counts[0.65],
+		counts[0.50],
+		counts[0.40],
+		matchesAtLayaThreshold,
+	)
+}
+
 func TestConfiguredClassifierRequiresKeyOnlyForTypeSafe(t *testing.T) {
 	catalogDir := writeTestCatalog(t, testCatalog)
 
 	t.Setenv("CLASSIFIER_AI_KEY", "")
-	_, _, err := configuredClassifier("worker", "jev-default", catalogDir)
+	_, _, err := configuredClassifier("live", "jev-default", catalogDir)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "CLASSIFIER_AI_KEY")
 
-	selected, classifier, err := configuredClassifier("worker", "laya-local", catalogDir)
+	selected, classifier, err := configuredClassifier("live", "laya-local", catalogDir)
 	require.NoError(t, err)
 	require.Equal(t, "laya-local", selected)
 	require.NotNil(t, classifier)
 
 	t.Setenv("CLASSIFIER_AI_KEY", "test-api-key")
-	_, classifier, err = configuredClassifier("worker", "jev-default", catalogDir)
+	_, classifier, err = configuredClassifier("live", "jev-default", catalogDir)
 	require.NoError(t, err)
 	require.NotNil(t, classifier)
-}
-
-func TestLiveStartersRequireExplicitClassifierWithoutCallingProvider(t *testing.T) {
-	catalogDir := writeTestCatalog(t, testCatalog)
-	for _, mode := range []string{"live-demo", "live-batch"} {
-		_, _, err := configuredClassifier(mode, mockClassifierID, catalogDir)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "-classifier-id")
-
-		selected, classifier, err := configuredClassifier(mode, "jev-default", catalogDir)
-		require.NoError(t, err)
-		require.Equal(t, "jev-default", selected)
-		require.Nil(t, classifier, "the starter must not construct or invoke a live HTTP client")
-	}
-}
-
-func TestLiveClassifierModesRequireDedicatedExplicitTaskList(t *testing.T) {
-	require.Error(t, validateLiveTaskList("worker", "jev-default", TaskList, true))
-	require.Error(t, validateLiveTaskList("worker", "laya-local", "ticket-routing-laya", false))
-	require.NoError(t, validateLiveTaskList("worker", "laya-local", "ticket-routing-laya", true))
-	require.Error(t, validateLiveTaskList("live-demo", "jev-default", TaskList, true))
-	require.NoError(t, validateLiveTaskList("live-demo", "jev-default", "ticket-routing-jev", true))
-	require.NoError(t, validateLiveTaskList("worker", mockClassifierID, TaskList, false))
-}
-
-func TestMockOnlyModesRejectLiveClassifiers(t *testing.T) {
-	catalogDir := writeTestCatalog(t, testCatalog)
-	for _, mode := range []string{"demo", "start-ticket", "batch"} {
-		selected, classifier, err := configuredClassifier(mode, mockClassifierID, catalogDir)
-		require.NoError(t, err)
-		require.Equal(t, mockClassifierID, selected)
-		require.NotNil(t, classifier)
-
-		_, _, err = configuredClassifier(mode, "laya-local", catalogDir)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "mock-only")
-	}
 }
 
 func TestLoadClassifierFromRepositoryCatalog(t *testing.T) {
@@ -813,6 +987,7 @@ func TestMutatedCatalogEndpointReachesClassifierTransport(t *testing.T) {
 		"test-api-key",
 		selected.Endpoint,
 		selected.Model,
+		selected.Provider,
 		server.Client(),
 	)
 	require.NoError(t, err)
@@ -889,7 +1064,7 @@ func TestJevClassifierRecordsTimingWhenUsageIsMissing(t *testing.T) {
 	}))
 	defer server.Close()
 
-	classifier, err := newSystemOneClassifier("test-api-key", server.URL, testJevModel, server.Client())
+	classifier, err := newSystemOneClassifier("test-api-key", server.URL, testJevModel, classifierProviderTypeSafe, server.Client())
 	require.NoError(t, err)
 	decision, err := classifier.ClassifyTicket(t.Context(), Ticket{TicketID: "missing-usage-001", Message: "Synthetic request."})
 	require.NoError(t, err)
@@ -907,7 +1082,7 @@ func TestJevClassifierMarksInformationalLowConfidenceAsUncertain(t *testing.T) {
 	}))
 	defer server.Close()
 
-	classifier, err := newSystemOneClassifier("test-api-key", server.URL, testJevModel, server.Client())
+	classifier, err := newSystemOneClassifier("test-api-key", server.URL, testJevModel, classifierProviderTypeSafe, server.Client())
 	require.NoError(t, err)
 	decision, err := classifier.ClassifyTicket(t.Context(), Ticket{TicketID: "uncertain-002", Message: "Synthetic request."})
 	require.NoError(t, err)
@@ -938,7 +1113,7 @@ func TestJevClassifierHTTPErrorRetryClassification(t *testing.T) {
 			}))
 			defer server.Close()
 
-			classifier, err := newSystemOneClassifier("test-api-key", server.URL, testJevModel, server.Client())
+			classifier, err := newSystemOneClassifier("test-api-key", server.URL, testJevModel, classifierProviderTypeSafe, server.Client())
 			require.NoError(t, err)
 			_, err = classifier.ClassifyTicket(t.Context(), Ticket{TicketID: "error-001", Message: "Synthetic request."})
 			require.Error(t, err)
@@ -959,7 +1134,7 @@ func TestJevClassifierTreatsNetworkFailureAsRetryable(t *testing.T) {
 	endpoint := server.URL
 	server.Close()
 
-	classifier, err := newSystemOneClassifier("test-api-key", endpoint, testJevModel, &http.Client{Timeout: 100 * time.Millisecond})
+	classifier, err := newSystemOneClassifier("test-api-key", endpoint, testJevModel, classifierProviderTypeSafe, &http.Client{Timeout: 100 * time.Millisecond})
 	require.NoError(t, err)
 	_, err = classifier.ClassifyTicket(t.Context(), Ticket{TicketID: "network-001", Message: "Synthetic request."})
 	require.Error(t, err)
@@ -989,9 +1164,59 @@ func TestJevClassifierRejectsMalformedSuccessfulResponses(t *testing.T) {
 			}))
 			defer server.Close()
 
-			classifier, err := newSystemOneClassifier("test-api-key", server.URL, testJevModel, server.Client())
+			classifier, err := newSystemOneClassifier("test-api-key", server.URL, testJevModel, classifierProviderTypeSafe, server.Client())
 			require.NoError(t, err)
 			_, err = classifier.ClassifyTicket(t.Context(), Ticket{TicketID: "malformed-001", Message: "Synthetic request."})
+			require.Error(t, err)
+			var customError *cadence.CustomError
+			require.ErrorAs(t, err, &customError)
+			require.Equal(t, errReasonJevMalformedResponse, customError.Reason())
+		})
+	}
+}
+
+func TestLayaClassifierRejectsMalformedOrInconsistentConfidence(t *testing.T) {
+	inconsistent := mustDecodeJevResponse(validLayaResponse())
+	inconsistentValue := 0.40
+	department := inconsistent.Answers["department"]
+	department.AnswerConfidence = &inconsistentValue
+	inconsistent.Answers["department"] = department
+
+	outOfRange := mustDecodeJevResponse(validLayaResponse())
+	outOfRangeValue := 1.1
+	department = outOfRange.Answers["department"]
+	department.AnswerConfidence = &outOfRangeValue
+	outOfRange.Answers["department"] = department
+
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "missing answer confidence", body: validJevResponse},
+		{name: "selected probability mismatch", body: mustEncodeJevResponse(inconsistent)},
+		{name: "answer confidence out of range", body: mustEncodeJevResponse(outOfRange)},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+				_, err := io.WriteString(writer, test.body)
+				require.NoError(t, err)
+			}))
+			defer server.Close()
+
+			classifier, err := newSystemOneClassifier(
+				"",
+				server.URL,
+				"convaiinnovations/laya",
+				classifierProviderLaya,
+				server.Client(),
+			)
+			require.NoError(t, err)
+			_, err = classifier.ClassifyTicket(
+				t.Context(),
+				Ticket{TicketID: "malformed-laya-001", Message: "Synthetic request."},
+			)
 			require.Error(t, err)
 			var customError *cadence.CustomError
 			require.ErrorAs(t, err, &customError)
@@ -1035,6 +1260,48 @@ const validJevResponse = `{
   "usage": {"input_tokens": 412, "output_tokens": 47}
 }`
 
+func validLayaResponse() string {
+	response := mustDecodeJevResponse(validJevResponse)
+	for name, answer := range response.Answers {
+		selectedConfidence := answer.Probabilities[answer.Choice]
+		answer.AnswerConfidence = &selectedConfidence
+		response.Answers[name] = answer
+	}
+	return mustEncodeJevResponse(response)
+}
+
+func layaResponseWithDepartmentConfidence(entropyConfidence, answerConfidence float64) string {
+	response := mustDecodeJevResponse(validLayaResponse())
+	department := response.Answers["department"]
+	department.Choice = string(DepartmentAccount)
+	department.Probabilities = map[string]float64{
+		string(DepartmentBilling):   0.20,
+		string(DepartmentTechnical): 0.1939,
+		string(DepartmentAccount):   answerConfidence,
+		string(DepartmentContent):   0.20,
+	}
+	department.Confidence = &entropyConfidence
+	department.AnswerConfidence = &answerConfidence
+	response.Answers["department"] = department
+	return mustEncodeJevResponse(response)
+}
+
+func mustDecodeJevResponse(body string) jevResponse {
+	var response jevResponse
+	if err := json.Unmarshal([]byte(body), &response); err != nil {
+		panic(err)
+	}
+	return response
+}
+
+func mustEncodeJevResponse(response jevResponse) string {
+	body, err := json.Marshal(response)
+	if err != nil {
+		panic(err)
+	}
+	return string(body)
+}
+
 func validJevResponseWithConfidence(priorityConfidence, complexityConfidence float64) string {
 	var response jevResponse
 	if err := json.Unmarshal([]byte(validJevResponse), &response); err != nil {
@@ -1072,6 +1339,15 @@ func queryAssignmentControl(t *testing.T, env *testsuite.TestWorkflowEnvironment
 	value, err := env.QueryWorkflow(AssignmentQueryName)
 	require.NoError(t, err)
 	var response MarkdownFormattedResponse
+	require.NoError(t, value.Get(&response))
+	return response
+}
+
+func queryParentAssignmentStatus(t *testing.T, env *testsuite.TestWorkflowEnvironment) ParentAssignmentStatus {
+	t.Helper()
+	value, err := env.QueryWorkflow(ParentAssignmentQueryName)
+	require.NoError(t, err)
+	var response ParentAssignmentStatus
 	require.NoError(t, value.Get(&response))
 	return response
 }
