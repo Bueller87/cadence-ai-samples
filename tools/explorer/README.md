@@ -25,6 +25,16 @@ server is needed to browse the explorer.
 Stop with Ctrl+C. The service always binds to `127.0.0.1`; there is no public
 hosting step. Use an SSH tunnel if you run the launcher on another machine.
 
+## Theme
+
+The explorer starts in dark mode unless you previously selected light mode.
+Use the theme button beside **Local checkout** to switch without reloading or
+clearing any Explorer state. The explicit choice is saved for the same browser
+and Explorer origin in `localStorage` under `cadence-explorer-theme`; the
+operating-system theme is not used. Missing, invalid, or unavailable browser
+storage falls back safely to dark, and a blocked storage write does not prevent
+the current page from switching.
+
 ## Selection flow
 
 1. Choose a sample discovered under `recipes/`.

@@ -4,10 +4,12 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="description" content="Choose a Cadence AI recipe and generate matching Linux commands from your local checkout.">
   <title>Cadence Recipe Explorer (Live README)</title>
-  <link rel="icon" href="favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="style.css"><script defer src="app.js"></script>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <script src="theme.js"></script>
+  <link rel="stylesheet" href="style.css"><script defer src="app.js"></script>
 </head>
 <body>
-  <header><div class="header-inner"><div><span class="eyebrow">CADENCE / AI SAMPLES</span><h1>Recipe Explorer (Live README)</h1></div><span class="local-badge">Local checkout</span></div></header>
+  <header><div class="header-inner"><div><span class="eyebrow">CADENCE / AI SAMPLES</span><h1>Recipe Explorer (Live README)</h1></div><div class="header-actions"><span class="local-badge">Local checkout</span><button type="button" id="theme-toggle" class="theme-toggle"></button></div></div></header>
 <main>
   <div class="intro"><div><h2>Choose. Prepare. Run.</h2><p>A first-run companion driven by the recipes on this machine.</p></div></div>
   <div id="load-status" role="status" aria-live="polite">Reading recipes…</div>

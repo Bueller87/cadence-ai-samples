@@ -1600,6 +1600,10 @@ while :; do sleep 1; done
         thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
         connection=http.client.HTTPConnection('127.0.0.1',server.server_port)
         try:
+            connection.request('GET','/theme.js');response=connection.getresponse()
+            self.assertEqual(response.status,200)
+            self.assertEqual(response.getheader('Content-Type'),'text/javascript; charset=utf-8')
+            self.assertIn(b'window.ExplorerTheme',response.read())
             connection.request('GET','/api/state');response=connection.getresponse()
             self.assertEqual(response.status,200);self.assertEqual(response.getheader('Cache-Control'),'no-store')
             state=json.loads(response.read());self.assertEqual(len(state['models']),3)
