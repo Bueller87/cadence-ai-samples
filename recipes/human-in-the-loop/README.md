@@ -39,16 +39,14 @@ From the repository root:
 
 ```bash
 cd recipes/human-in-the-loop/python/openai-agents
-python3.13 -m venv .venv
-source .venv/bin/activate
-python -m pip install -e .
+./run.sh setup
 ```
 
 If your default package index requires unavailable credentials, use the public
 index for this public project:
 
 ```bash
-PIP_INDEX_URL=https://pypi.org/simple python -m pip install -e .
+PIP_INDEX_URL=https://pypi.org/simple .venv/bin/python -m pip install -e .
 ```
 
 ## Offline mock walkthrough
@@ -56,29 +54,29 @@ PIP_INDEX_URL=https://pypi.org/simple python -m pip install -e .
 Start one mock Worker and keep it running:
 
 ```bash
-python main.py worker --mode mock
+./run.sh worker --mode mock
 ```
 
 In another terminal, start an approval run:
 
 ```bash
-python main.py --workflow-id ride-approve start --mode mock \
+./run.sh --workflow-id ride-approve start --mode mock \
   --text "Book a ride from 123 Market Street to 1 Ferry Building."
-python main.py --workflow-id ride-approve status
+./run.sh --workflow-id ride-approve status
 ```
 
 Status is JSON. Copy the pending `call_id`, then approve it:
 
 ```bash
-python main.py --workflow-id ride-approve approve --call-id mock-ride-1
+./run.sh --workflow-id ride-approve approve --call-id mock-ride-1
 ```
 
 Repeat with a different Workflow ID to exercise rejection:
 
 ```bash
-python main.py --workflow-id ride-reject start --mode mock
-python main.py --workflow-id ride-reject status
-python main.py --workflow-id ride-reject reject --call-id mock-ride-1
+./run.sh --workflow-id ride-reject start --mode mock
+./run.sh --workflow-id ride-reject status
+./run.sh --workflow-id ride-reject reject --call-id mock-ride-1
 ```
 
 The approve Run finishes `APPROVED_COMPLETED`; the reject Run finishes
@@ -92,7 +90,7 @@ buttons for the same approve and reject Signals.
 
 The optional recipe-root [`explorer.yaml`](explorer.yaml) declares
 `approve_tool_call` and `reject_tool_call` for the Local Samples Explorer. After
-starting a Run, use **Open queries** or `python main.py status` to obtain the
+starting a Run, use **Open queries** or `./run.sh status` to obtain the
 pending `call_id`. Resolve the exact current Run in the Explorer, enter that ID
 in the rendered field, choose approve or reject, and complete the separate
 confirmation step. The Explorer sends the value as the Signal handler's one
@@ -115,17 +113,17 @@ curl -fsS http://localhost:11434/api/tags
 Start the live Worker. No API key is used for local Ollama:
 
 ```bash
-python main.py worker --mode live --confirm-live \
+./run.sh worker --mode live --confirm-live \
   --model-id llama3.2-local
 ```
 
 Start, inspect, and decide a live Run from another terminal:
 
 ```bash
-python main.py --workflow-id ride-live start --mode live \
+./run.sh --workflow-id ride-live start --mode live \
   --text "Book a ride from 123 Market Street to 1 Ferry Building for one passenger."
-python main.py --workflow-id ride-live status
-python main.py --workflow-id ride-live approve --call-id CALL_ID_FROM_STATUS
+./run.sh --workflow-id ride-live status
+./run.sh --workflow-id ride-live approve --call-id CALL_ID_FROM_STATUS
 ```
 
 ## Other catalog models
@@ -137,7 +135,7 @@ require a loopback endpoint and no key.
 
 ```bash
 export MODEL_AI_KEY="replace-with-your-key"
-python main.py worker --mode live --confirm-live \
+./run.sh worker --mode live --confirm-live \
   --model-id gemini-flash-lite
 ```
 
@@ -175,7 +173,7 @@ before entering Workflow history.
 From `recipes/human-in-the-loop/python/openai-agents`:
 
 ```bash
-python -m unittest discover -s tests -v
+.venv/bin/python -m unittest discover -s tests -v
 python tests/local_cadence_checks.py
 ```
 
@@ -198,3 +196,12 @@ semantics. Modify and test the declaration with any handler change, or remove it
 to keep the copied recipe runnable without Explorer Signal controls. The file
 must not contain commands, Workflow IDs, model or provider configuration,
 endpoints, credentials, query results, or raw JSON templates.
+
+## Manual setup recovery
+
+If the launcher cannot prepare the implementation, run:
+
+```bash
+python3.13 -m venv .venv
+.venv/bin/python -m pip install -e .
+```

@@ -44,24 +44,20 @@ Choose one implementation from the repository root:
 ```bash
 # OpenAI Agents
 cd recipes/agent-handoffs/python/openai-agents
-python3.13 -m venv .venv
-source .venv/bin/activate
-python -m pip install -e .
+./run.sh setup
 ```
 
 ```bash
 # Google ADK
 cd recipes/agent-handoffs/python/google-adk
-python3.13 -m venv .venv
-source .venv/bin/activate
-python -m pip install -e .
+./run.sh setup
 ```
 
 If your default package index requires unavailable credentials, use the public
 index:
 
 ```bash
-PIP_INDEX_URL=https://pypi.org/simple python -m pip install -e .
+PIP_INDEX_URL=https://pypi.org/simple .venv/bin/python -m pip install -e .
 ```
 
 ## Offline mock walkthrough
@@ -69,20 +65,20 @@ PIP_INDEX_URL=https://pypi.org/simple python -m pip install -e .
 From either implementation directory, start one mock Worker and keep it running:
 
 ```bash
-python main.py worker --mode mock
+./run.sh worker --mode mock
 ```
 
 In another terminal, start a short local trip:
 
 ```bash
-python main.py --workflow-id handoffs-short start --mode mock \
+./run.sh --workflow-id handoffs-short start --mode mock \
   --text "Book a ride from 123 Market Street to 1 Ferry Building in San Francisco."
 ```
 
 Start a long inter-city trip with a different Workflow ID:
 
 ```bash
-python main.py --workflow-id handoffs-long start --mode mock \
+./run.sh --workflow-id handoffs-long start --mode mock \
   --text "Book a trip for me from Uber Seattle Office to Uber San Francisco Office tomorrow at 10:00 AM."
 ```
 
@@ -110,13 +106,13 @@ key):
 
 ```bash
 export MODEL_AI_KEY="replace-with-your-key"
-python main.py worker --mode live --confirm-live --model-id gemini-flash-lite
+./run.sh worker --mode live --confirm-live --model-id gemini-flash-lite
 ```
 
 In another terminal:
 
 ```bash
-python main.py start --mode live \
+./run.sh start --mode live \
   --text "Book a trip from Uber Seattle Office to Uber San Francisco Office tomorrow at 10:00 AM."
 ```
 
@@ -146,7 +142,7 @@ Activity failures.
 From either implementation directory:
 
 ```bash
-python -m unittest discover -s tests -v
+.venv/bin/python -m unittest discover -s tests -v
 ```
 
 Local Cadence mock durability (requires Cadence at `localhost:7833`):
@@ -184,3 +180,12 @@ not replace the runner with a mock.
 Copy the entire `recipes/agent-handoffs` directory and keep provider clients and
 model requests at Activity boundaries. Replace trip parsing, handoff instructions,
 and synthetic booking fixtures for your domain.
+
+## Manual setup recovery
+
+If the launcher cannot prepare the implementation, run:
+
+```bash
+python3.13 -m venv .venv
+.venv/bin/python -m pip install -e .
+```

@@ -74,7 +74,9 @@ class Handler(BaseHTTPRequestHandler):
                 self.send(403, 'Use the loopback URL printed by the launcher.', 'text/plain; charset=utf-8')
                 return
             action_path = urlsplit(self.path).path
-            if action_path not in {'/api/warmup', '/api/terminal', '/api/workflow-signal'}:
+            if action_path not in {
+                    '/api/prepare', '/api/warmup', '/api/terminal',
+                    '/api/workflow-signal'}:
                 self.send(405, 'This action is not available.', 'text/plain; charset=utf-8')
                 return
             origin = self.headers.get('Origin')
@@ -95,6 +97,8 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError('Action request must be an object.')
             if action_path == '/api/warmup':
                 result = self.explorer.warmup(request)
+            elif action_path == '/api/prepare':
+                result = self.explorer.prepare(request)
             elif action_path == '/api/terminal':
                 action = request.pop('action', None)
                 if action not in {'worker', 'start'}:
@@ -122,15 +126,28 @@ class Handler(BaseHTTPRequestHandler):
         pass  # Keep local paths and selections out of access logs.
 
 
+class ExplorerHTTPServer(ThreadingHTTPServer):
+    def __init__(self, address, explorer, terminal_launcher=None):
+        self.explorer = explorer
+        super().__init__(address, partial(
+            Handler, explorer=explorer,
+            terminal_launcher=terminal_launcher or MacTerminalLauncher()))
+
+    def server_close(self):
+        self.explorer.close()
+        super().server_close()
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--port', type=int, default=8765, help='loopback port; 0 chooses an available port')
     parser.add_argument('--no-browser', action='store_true', help='print the URL without opening a browser')
     args = parser.parse_args(argv)
     root = Path(__file__).resolve().parents[2]
+    explorer = Explorer(root)
     try:
-        server = ThreadingHTTPServer(('127.0.0.1', args.port), partial(
-            Handler, explorer=Explorer(root), terminal_launcher=MacTerminalLauncher()))
+        server = ExplorerHTTPServer(
+            ('127.0.0.1', args.port), explorer, MacTerminalLauncher())
     except (OSError, OverflowError) as error:
         print(f'Could not start explorer: {error}. Try --port 0.', file=sys.stderr)
         return 1

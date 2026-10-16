@@ -3,6 +3,7 @@ import argparse
 import ast
 import http.client
 import json
+import os
 import shlex
 import shutil
 import signal
@@ -13,6 +14,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import patch
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -23,7 +25,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT/'tools/explorer'))
 from explorer import Explorer
-from server import Handler
+from server import ExplorerHTTPServer, Handler
 from signal_metadata import (MAX_METADATA_BYTES, MAX_OBJECT_FIELDS, MAX_SIGNALS,
                              SignalMetadataError, metadata_revision,
                              serialize_arguments, validate_arguments,
@@ -153,6 +155,36 @@ class ExplorerTests(unittest.TestCase):
         request.update(kwargs)
         return self.explorer.resolve(request)
 
+    def fake_preparation_launcher(self, implementation):
+        path=self.root/implementation
+        launcher=path/'run.sh'
+        launcher.write_text("""#!/bin/sh
+set -eu
+[ "${1-}" = setup ] && [ "$#" -eq 1 ] || exit 64
+state="$PWD/.run-state"; marker="$state/ready.v1"; temporary="$state/ready.tmp.$$"
+mkdir -p "$state"
+trap 'rm -f "$temporary"' EXIT HUP INT TERM
+launcher=$(cksum "$PWD/run.sh" | awk '{print $1 ":" $2}')
+dependency=$(cksum "$PWD/pyproject.toml" | awk '{print $1 ":" $2}')
+printf 'version=1\\nlauncher=%s\\ndependency=pyproject.toml:%s\\n' \
+  "$launcher" "$dependency" >"$temporary"
+mv "$temporary" "$marker"
+echo "Dependencies prepared."
+""")
+        launcher.chmod(0o755)
+        return launcher
+
+    def write_current_readiness(self, implementation):
+        dependencies=self.explorer.dependency_paths(implementation)
+        lines=['version=1',
+            f'launcher={self.explorer.cksum(implementation/"run.sh")}']
+        lines.extend(
+            f'dependency={name}:{self.explorer.cksum(implementation/name)}'
+            for name in dependencies)
+        state=implementation/'.run-state'
+        state.mkdir(exist_ok=True)
+        (state/'ready.v1').write_text('\n'.join(lines)+'\n')
+
     def real_parser(self,framework):
         # Test the actual argparse code without importing its heavy runtime modules.
         path=self.root/f'recipes/recurring-ai-watch/python/{framework}/main.py'
@@ -216,7 +248,7 @@ class ExplorerTests(unittest.TestCase):
                 for command in (result['worker'],result['start']):
                     tokens=shlex.split(command)
                     scope['parser']().parse_args(
-                        tokens[tokens.index('main.py')+1:])
+                        tokens[tokens.index('./run.sh')+1:])
 
     def test_auto_research_resolves_commands_and_typed_signals(self):
         recipe=next(r for r in self.explorer.snapshot()['recipes']
@@ -260,7 +292,7 @@ class ExplorerTests(unittest.TestCase):
                 for command in (result['worker'],result['start']):
                     tokens=shlex.split(command)
                     scope['parser']().parse_args(
-                        tokens[tokens.index('main.py')+1:])
+                        tokens[tokens.index('./run.sh')+1:])
 
     def test_human_in_the_loop_resolves_worker_and_start_without_imports(self):
         implementation='recipes/human-in-the-loop/python/openai-agents'
@@ -283,7 +315,7 @@ class ExplorerTests(unittest.TestCase):
         parsed={}
         for name,line in (('worker',result['worker']),('start',result['start'])):
             tokens=shlex.split(line)
-            args=scope['parser']().parse_args(tokens[tokens.index('main.py')+1:])
+            args=scope['parser']().parse_args(tokens[tokens.index('./run.sh')+1:])
             parsed[name]=args
         self.assertEqual(parsed['worker'].model_id,'llama3.2-local')
         self.assertEqual(parsed['worker'].mode,'live')
@@ -312,8 +344,8 @@ class ExplorerTests(unittest.TestCase):
                             for line in [result['worker']]+result['client'].splitlines():
                                 tokens=shlex.split(line)
                                 self.assertEqual(tokens[:3],['cd',str((self.root/f'recipes/recurring-ai-watch/python/{framework}').resolve()),'&&'])
-                                self.assertEqual(tokens[3:5],['.venv/bin/python','main.py'])
-                                args=parser.parse_args(tokens[5:]);parsed.append(args);commands+=1
+                                self.assertEqual(tokens[3],'./run.sh')
+                                args=parser.parse_args(tokens[4:]);parsed.append(args);commands+=1
                                 self.assertEqual(args.domain,'cadence-ai-samples')
                                 self.assertEqual(args.workflow_id,result['workflow_id'])
                                 if args.command in {'worker','start'}:
@@ -400,8 +432,8 @@ class ExplorerTests(unittest.TestCase):
         commands=[]
         for line in (result['worker'],result['start']):
             tokens=shlex.split(line)
-            self.assertEqual(tokens[:5],['cd',str((self.root/implementation).resolve()),'&&','.venv/bin/python','main.py'])
-            args=scope['parser']().parse_args(tokens[5:])
+            self.assertEqual(tokens[:4],['cd',str((self.root/implementation).resolve()),'&&','./run.sh'])
+            args=scope['parser']().parse_args(tokens[4:])
             self.assertEqual((args.domain,args.task_list),
                              (result['domain'],result['task_list']))
             if args.command == 'start':
@@ -456,21 +488,11 @@ class ExplorerTests(unittest.TestCase):
                     commands={'worker':result['worker'],'start':result['start']}
                     for action,command in commands.items():
                         tokens=shlex.split(command)
-                        if language == 'python':
-                            cli=tokens[tokens.index('main.py')+1:]
-                            actual_action=next(item for item in cli
-                                               if item in {'worker','start'})
-                            actual_mode=cli[cli.index('--mode')+1]
-                        elif language == 'go':
-                            cli=tokens[tokens.index('.')+1:]
-                            actual_action=cli[0]
-                            actual_mode=cli[cli.index('-mode')+1]
-                        else:
-                            argument=next(item for item in tokens
-                                          if item.startswith('--args='))
-                            cli=shlex.split(argument.removeprefix('--args='))
-                            actual_action=cli[0]
-                            actual_mode=cli[cli.index('--mode')+1]
+                        cli=tokens[tokens.index('./run.sh')+1:]
+                        actual_action=next(item for item in cli
+                                           if item in {'worker','start'})
+                        mode_flag='-mode' if language == 'go' else '--mode'
+                        actual_mode=cli[cli.index(mode_flag)+1]
                         self.assertEqual((actual_action,actual_mode),(action,mode))
                         self.assertNotIn(actual_action,forbidden_actions)
                         self.assertNotIn(actual_mode,forbidden_actions)
@@ -482,15 +504,12 @@ class ExplorerTests(unittest.TestCase):
                     confirm='--confirm-live' if language!='go' else '-confirm-live'
                     self.assertEqual(confirm in result['worker'],
                                      mode=='live' and inference)
-                    setup=result['setup'].splitlines()
-                    expected_setup={
-                        'go':['go mod download'],
-                        'java':['./gradlew test'],
-                        'python':['python3 -m venv .venv',
-                                  'source .venv/bin/activate',
-                                  'python -m pip install -e .'],
-                    }[language]
-                    self.assertEqual(setup[1:],expected_setup)
+                    self.assertEqual(
+                        result['setup'],
+                        'cd '+shlex.quote(str((self.root/implementation).resolve()))+
+                        ' && ./run.sh setup')
+                    self.assertRegex(result['launcher_revision'],r'^[0-9a-f]{64}$')
+                    self.assertEqual(result['preparation']['state'],'not prepared')
 
                 if classifier=='systemone' or agent!='none':
                     request=dict(sample=slug,implementation=implementation,mode='live')
@@ -662,6 +681,396 @@ class ExplorerTests(unittest.TestCase):
             self.assertIn('models',self.explorer.snapshot()['catalog_errors'])
             with self.assertRaises(InvalidSelection):self.explorer.source_path('models.yaml')
 
+    def test_revision_bound_preparation_and_readiness_fail_closed(self):
+        implementation='recipes/agent-handoffs/python/google-adk'
+        launcher=self.fake_preparation_launcher(implementation)
+        request=dict(sample='agent-handoffs',implementation=implementation,
+            mode='mock',model='gemini-flash-lite')
+        resolved=self.explorer.resolve(request)
+        self.assertRegex(resolved['launcher_revision'],r'^[0-9a-f]{64}$')
+        self.assertEqual(resolved['preparation']['state'],'not prepared')
+        with self.assertRaisesRegex(InvalidSelection,'revision'):
+            self.explorer.prepare(request)
+        with self.assertRaisesRegex(InvalidSelection,'only the current selection'):
+            self.explorer.prepare({
+                **request,'launcher_revision':resolved['launcher_revision'],
+                'command':'malicious'})
+        with self.assertRaisesRegex(InvalidSelection,'launcher changed'):
+            self.explorer.prepare({**request,'launcher_revision':'0'*64})
+
+        state=launcher.parent/'.run-state'
+        state.mkdir()
+        marker=state/'ready.v1'
+        marker.write_text('version=1\n')
+        self.assertEqual(self.explorer.preparation_state(launcher.parent)['state'],
+                         'not prepared')
+        marker.write_text('x'*4097)
+        self.assertEqual(self.explorer.preparation_state(launcher.parent)['state'],
+                         'not prepared')
+        marker.unlink()
+        outside=self.root/'outside-marker';outside.write_text('version=1\n')
+        marker.symlink_to(outside)
+        self.assertEqual(self.explorer.preparation_state(launcher.parent)['state'],
+                         'not prepared')
+        marker.unlink()
+
+        prepared=self.explorer.prepare({
+            **request,'launcher_revision':resolved['launcher_revision']})
+        self.assertEqual(prepared['state'],'prepared')
+        self.assertEqual(self.explorer.resolve(request)['preparation']['state'],
+                         'prepared')
+        pyproject=launcher.parent/'pyproject.toml'
+        pyproject.write_text(pyproject.read_text()+'\n# stale\n')
+        self.assertEqual(self.explorer.resolve(request)['preparation']['state'],'stale')
+
+    def test_go_and_java_cache_readiness_fails_closed_and_detects_loss(self):
+        go=self.explorer.root/'recipes/ticket-routing/go/systemone'
+        java=self.explorer.root/'java-cache-fixture'
+        java.mkdir()
+        shutil.copy(
+            ROOT/'templates/profiles/java/bare/recipe/java/bare/run.sh',
+            java/'run.sh')
+        (java/'gradlew').write_text('#!/bin/sh\n')
+        (java/'build.gradle.kts').write_text('plugins { application }\n')
+        (java/'settings.gradle.kts').write_text('rootProject.name = "fixture"\n')
+
+        cases=(
+            (go, go/'.run-state/go',
+             ('gopath','gopath/pkg','gopath/pkg/mod','build'),
+             'version=1\ncache=go\n'),
+            (java, java/'.run-state/gradle-home',
+             ('caches','wrapper','wrapper/dists'),
+             'version=1\ncache=gradle\n'),
+        )
+        for implementation, cache, required, evidence_text in cases:
+            with self.subTest(implementation=implementation.name):
+                self.write_current_readiness(implementation)
+
+                def populate():
+                    cache.mkdir(parents=True,exist_ok=True)
+                    for name in required:
+                        (cache/name).mkdir(parents=True,exist_ok=True)
+                    (cache/'prepared.v1').write_text(evidence_text)
+
+                populate()
+                self.assertEqual(
+                    self.explorer.preparation_state(implementation)['state'],
+                    'prepared')
+                shutil.rmtree(cache)
+                self.assertEqual(
+                    self.explorer.preparation_state(implementation)['state'],
+                    'stale')
+                populate()
+                for name in required:
+                    shutil.rmtree(cache)
+                    populate()
+                    shutil.rmtree(cache/name)
+                    self.assertEqual(
+                        self.explorer.preparation_state(implementation)['state'],
+                        'stale')
+                shutil.rmtree(cache)
+                populate()
+                evidence=cache/'prepared.v1'
+                for content in ('malformed\n','x'*129):
+                    evidence.write_text(content)
+                    self.assertEqual(
+                        self.explorer.preparation_state(implementation)['state'],
+                        'not prepared')
+                evidence.unlink()
+                outside=self.root/f'{implementation.name}-outside-evidence'
+                outside.write_text(evidence_text)
+                evidence.symlink_to(outside)
+                self.assertEqual(
+                    self.explorer.preparation_state(implementation)['state'],
+                    'not prepared')
+                evidence.unlink()
+                evidence.write_text(evidence_text)
+                unsafe=cache/required[0]
+                shutil.rmtree(unsafe)
+                external=self.root/f'{implementation.name}-outside-cache'
+                external.mkdir()
+                unsafe.symlink_to(external,target_is_directory=True)
+                self.assertEqual(
+                    self.explorer.preparation_state(implementation)['state'],
+                    'not prepared')
+
+    def test_launcher_revision_is_rechecked_immediately_before_execution(self):
+        implementation='recipes/agent-handoffs/python/google-adk'
+        launcher=self.fake_preparation_launcher(implementation)
+        request=dict(sample='agent-handoffs',implementation=implementation,
+            mode='mock',model='gemini-flash-lite')
+        revision=self.explorer.resolve(request)['launcher_revision']
+        original=self.explorer.launcher
+        calls=0
+
+        def race(path):
+            nonlocal calls
+            result=original(path);calls+=1
+            if calls==1:
+                launcher.write_text(launcher.read_text()+'\n# changed\n')
+            return result
+
+        with patch.object(self.explorer,'launcher',side_effect=race):
+            with self.assertRaisesRegex(InvalidSelection,'immediately before'):
+                self.explorer.prepare({**request,'launcher_revision':revision})
+
+    def test_launcher_replacement_after_descriptor_open_is_rejected(self):
+        implementation='recipes/agent-handoffs/python/google-adk'
+        launcher=self.fake_preparation_launcher(implementation)
+        request=dict(sample='agent-handoffs',implementation=implementation,
+            mode='mock',model='gemini-flash-lite')
+        revision=self.explorer.resolve(request)['launcher_revision']
+        original=self.explorer.open_launcher
+        calls=0
+        executed=self.root/'unverified-executed'
+
+        def replace_after_open(path):
+            nonlocal calls
+            descriptor,current_revision=original(path);calls+=1
+            if calls==3:
+                replacement=launcher.with_suffix('.replacement')
+                replacement.write_text(
+                    f'#!/bin/sh\ntouch {shlex.quote(str(executed))}\n')
+                replacement.chmod(0o755)
+                replacement.replace(launcher)
+            return descriptor,current_revision
+
+        with patch.object(self.explorer,'open_launcher',side_effect=replace_after_open):
+            result=self.explorer.prepare({
+                **request,'launcher_revision':revision})
+        self.assertEqual(result['state'],'stale')
+        self.assertFalse(executed.exists())
+        self.assertFalse((launcher.parent/'.run-state/ready.v1').exists())
+
+    def test_launcher_replacement_during_final_acceptance_is_rejected(self):
+        implementation='recipes/agent-handoffs/python/google-adk'
+        launcher=self.fake_preparation_launcher(implementation)
+        request=dict(sample='agent-handoffs',implementation=implementation,
+            mode='mock',model='gemini-flash-lite')
+        revision=self.explorer.resolve(request)['launcher_revision']
+        original_state=self.explorer.preparation_state
+        replaced=False
+
+        def replace_after_prepared(path):
+            nonlocal replaced
+            state=original_state(path)
+            if state['state']=='prepared' and not replaced:
+                replaced=True
+                replacement=launcher.with_suffix('.final-replacement')
+                replacement.write_text('#!/bin/sh\nexit 0\n')
+                replacement.chmod(0o755)
+                replacement.replace(launcher)
+            return state
+
+        with patch.object(
+                self.explorer,'preparation_state',
+                side_effect=replace_after_prepared):
+            result=self.explorer.prepare({
+                **request,'launcher_revision':revision})
+        self.assertEqual(result['state'],'stale')
+        self.assertFalse((launcher.parent/'.run-state/ready.v1').exists())
+
+    def test_preparation_environment_excludes_secrets_and_redacts_diagnostics(self):
+        implementation='recipes/agent-handoffs/python/google-adk'
+        launcher=self.root/implementation/'run.sh'
+        package_bin=self.root/'package-bin';package_bin.mkdir()
+        package_tool=package_bin/'pip'
+        package_tool.write_text(
+            f"#!{sys.executable}\n"
+            "import os\n"
+            "for key, value in os.environ.items(): print(f'{key}={value}')\n"
+            "print('Authorization: Bearer printed-authorization')\n"
+            "print('MODEL_TOKEN=printed value with spaces')\n"
+            "print('noise-' * 180000)\n"
+            "print('HUGE_TOKEN=' + 'secret-tail-' * 100000)\n"
+            "print('LONG_TOKEN=' + 'x' * 5000)\n"
+            "print('final package failure')\n"
+            "print('retry with the documented setup command')\n"
+            "raise SystemExit(17)\n")
+        package_tool.chmod(0o755)
+        launcher.write_text('#!/bin/sh\nexec pip install\n')
+        launcher.chmod(0o755)
+        request=dict(sample='agent-handoffs',implementation=implementation,
+            mode='mock',model='gemini-flash-lite')
+        environment={
+            'PATH':f'{package_bin}:/usr/bin:/bin',
+            'HOME':'/sensitive/home-sentinel',
+            'GRADLE_USER_HOME':'/sensitive/gradle-home-sentinel',
+            'PIP_INDEX_URL':'https://pypi.org/simple',
+            'MODEL_API_KEY':'inherited-model-sentinel',
+            'CLASSIFIER_TOKEN':'inherited-classifier-sentinel',
+            'UNRELATED_VALUE':'inherited-unrelated-sentinel',
+            'AUTHORIZATION':'Bearer inherited-authorization',
+        }
+        with patch.dict(os.environ,environment,clear=True):
+            revision=self.explorer.resolve(request)['launcher_revision']
+            result=self.explorer.prepare({
+                **request,'launcher_revision':revision})
+        self.assertEqual(result['state'],'failed')
+        diagnostic=result['diagnostic']
+        for secret in (
+                'inherited-model-sentinel','inherited-classifier-sentinel',
+                'inherited-unrelated-sentinel','inherited-authorization',
+                'printed-authorization','printed value with spaces',
+                '/sensitive/home-sentinel','/sensitive/gradle-home-sentinel'):
+            self.assertNotIn(secret,diagnostic)
+        self.assertNotIn('x'*100,diagnostic)
+        self.assertNotIn('secret-tail-',diagnostic)
+        self.assertEqual(
+            self.explorer.sanitize_preparation_output(
+                b'Authorization: Bearer printed-authorization'),
+            'Authorization: [redacted]')
+        self.assertEqual(
+            self.explorer.sanitize_preparation_output(
+                b'MODEL_TOKEN=printed value with spaces'),
+            'MODEL_TOKEN=[redacted]')
+        self.assertEqual(
+            self.explorer.sanitize_preparation_output(
+                b'  MODEL_TOKEN=indented-secret\n'
+                b'+ export MODEL_TOKEN=traced-secret\n'
+                b'++ MODEL_TOKEN=nested-trace-secret'),
+            'MODEL_TOKEN=[redacted]\n'
+            '+ export MODEL_TOKEN=[redacted]\n'
+            '++ MODEL_TOKEN=[redacted]')
+        self.assertIn('final package failure',diagnostic)
+        self.assertIn('retry with the documented setup command',diagnostic)
+        self.assertEqual(
+            self.explorer.sanitize_preparation_output(
+                b'Bearer standalone-secret'),
+            'Bearer [redacted]')
+
+    def test_preparation_rejects_package_urls_with_embedded_credentials(self):
+        implementation='recipes/agent-handoffs/python/google-adk'
+        launcher=self.fake_preparation_launcher(implementation)
+        request=dict(sample='agent-handoffs',implementation=implementation,
+            mode='mock',model='gemini-flash-lite')
+        revision=self.explorer.resolve(request)['launcher_revision']
+        for invalid_url in (
+                'https://user:password@example.test/simple',
+                'http://exa mple.com/path',
+                'http://example.com:bad/path'):
+            with self.subTest(url=invalid_url), patch.dict(
+                    os.environ,{'PIP_INDEX_URL':invalid_url}):
+                with self.assertRaisesRegex(
+                        InvalidSelection,'without credentials|invalid'):
+                    self.explorer.prepare({
+                        **request,'launcher_revision':revision})
+        self.assertFalse((launcher.parent/'.run-state/ready.v1').exists())
+
+    def test_missing_nonexecutable_and_symlinked_launchers_fail_closed(self):
+        implementation='recipes/agent-handoffs/python/google-adk'
+        launcher=self.root/implementation/'run.sh'
+        request=dict(sample='agent-handoffs',implementation=implementation,
+            mode='mock',model='gemini-flash-lite')
+        launcher.unlink()
+        with self.assertRaises(Unsupported):
+            self.explorer.resolve(request)
+        shutil.copy(ROOT/implementation/'run.sh',launcher)
+        launcher.chmod(0o644)
+        with self.assertRaises(Unsupported):
+            self.explorer.resolve(request)
+        launcher.unlink()
+        outside=self.root/'outside-run.sh'
+        shutil.copy(ROOT/implementation/'run.sh',outside)
+        outside.chmod(0o755)
+        launcher.symlink_to(outside)
+        with self.assertRaises(Unsupported):
+            self.explorer.resolve(request)
+
+    def test_preparation_timeout_kills_descendants_and_bounds_output(self):
+        launcher=self.root/'slow-launcher'
+        child_pid=self.root/'child.pid'
+        launcher.write_text(f"""#!/bin/sh
+trap '' TERM
+mkdir -p .run-state/setup.lock
+echo $$ >.run-state/setup.lock/pid
+echo 'token=raw-secret' >.run-state/setup.log.tmp
+touch .run-state/ready.tmp.$$
+(trap '' TERM; while :; do sleep 1; done) &
+echo $! >{shlex.quote(str(child_pid))}
+while :; do printf 'TOKEN=secret-%04096d\\n' 1; done
+""")
+        launcher.chmod(0o755)
+        explorer=Explorer(self.root,prepare_timeout=.05)
+        returncode,timed_out,excerpt=explorer.run_preparation(launcher.resolve())
+        self.assertTrue(timed_out)
+        self.assertNotEqual(returncode,0)
+        self.assertLessEqual(len(excerpt.encode()),4096)
+        self.assertNotIn('TOKEN=secret-',excerpt)
+        self.assertFalse((self.root/'.run-state/setup.lock').exists())
+        self.assertFalse((self.root/'.run-state/setup.log.tmp').exists())
+        self.assertEqual(list((self.root/'.run-state').glob('ready.tmp.*')),[])
+        invalid=explorer.sanitize_preparation_output(b'\\xff'*4096)
+        self.assertLessEqual(len(invalid.encode()),4096)
+        deadline=time.time()+2
+        while child_pid.exists() and time.time()<deadline:
+            try:
+                os.kill(int(child_pid.read_text()),0)
+            except ProcessLookupError:
+                break
+            time.sleep(.02)
+        if child_pid.exists():
+            with self.assertRaises(ProcessLookupError):
+                os.kill(int(child_pid.read_text()),0)
+
+    def test_server_shutdown_stops_active_preparation_descendants(self):
+        implementation='recipes/agent-handoffs/python/google-adk'
+        launcher=self.root/implementation/'run.sh'
+        child_pid=self.root/'shutdown-child.pid'
+        launcher.write_text(f"""#!/bin/sh
+trap '' TERM
+(trap '' TERM; while :; do sleep 1; done) &
+echo $! >{shlex.quote(str(child_pid))}
+while :; do sleep 1; done
+""")
+        launcher.chmod(0o755)
+        explorer=Explorer(self.root,prepare_timeout=30)
+        request=dict(sample='agent-handoffs',implementation=implementation,
+            mode='mock',model='gemini-flash-lite')
+        request['launcher_revision']=explorer.resolve(request)['launcher_revision']
+        server=ExplorerHTTPServer(('127.0.0.1',0),explorer)
+        server_thread=threading.Thread(target=server.serve_forever,daemon=True)
+        server_thread.start()
+        response={}
+
+        def post_prepare():
+            connection=http.client.HTTPConnection(
+                '127.0.0.1',server.server_port,timeout=10)
+            try:
+                body=json.dumps(request)
+                connection.request('POST','/api/prepare',body=body,headers={
+                    'Content-Type':'application/json',
+                    'Origin':f'http://127.0.0.1:{server.server_port}',
+                    'Host':f'127.0.0.1:{server.server_port}',
+                })
+                reply=connection.getresponse()
+                response['status']=reply.status
+                response['body']=reply.read()
+            finally:
+                connection.close()
+
+        request_thread=threading.Thread(target=post_prepare)
+        request_thread.start()
+        deadline=time.time()+3
+        while not child_pid.exists() and time.time()<deadline:
+            time.sleep(.01)
+        self.assertTrue(child_pid.exists())
+        server.shutdown()
+        server.server_close()
+        server_thread.join(timeout=3)
+        request_thread.join(timeout=5)
+        self.assertFalse(request_thread.is_alive())
+        pid=int(child_pid.read_text())
+        deadline=time.time()+3
+        while time.time()<deadline:
+            try:
+                os.kill(pid,0)
+            except ProcessLookupError:
+                break
+            time.sleep(.02)
+        with self.assertRaises(ProcessLookupError):
+            os.kill(pid,0)
+
     def test_probe_states_and_bounded_local_warmup(self):
         stub=ThreadingHTTPServer(('127.0.0.1',0),ProbeStub)
         thread=threading.Thread(target=stub.serve_forever,daemon=True);thread.start()
@@ -699,6 +1108,8 @@ class ExplorerTests(unittest.TestCase):
         watch_source=self.root/'recipes/recurring-ai-watch/python/google-adk'
         shutil.copy(watch_source/'main.py',generic/'main.py')
         shutil.copy(watch_source/'live.py',generic/'live.py')
+        shutil.copy(watch_source/'run.sh',generic/'run.sh')
+        shutil.copy(watch_source/'pyproject.toml',generic/'pyproject.toml')
         stub=ThreadingHTTPServer(('127.0.0.1',0),WorkflowStub)
         thread=threading.Thread(target=stub.serve_forever,daemon=True);thread.start()
         base=f'http://127.0.0.1:{stub.server_port}'
@@ -1210,6 +1621,22 @@ class ExplorerTests(unittest.TestCase):
                 'Content-Type':'application/json','Origin':f'http://127.0.0.1:{server.server_port}'})
             response=connection.getresponse();self.assertEqual(response.status,200)
             self.assertEqual(json.loads(response.read())['components'],[])
+            prepare_selection=dict(sample='agent-handoffs',
+                implementation='recipes/agent-handoffs/python/google-adk',
+                mode='mock',model='gemini-flash-lite')
+            self.fake_preparation_launcher(prepare_selection['implementation'])
+            revision=self.explorer.resolve(prepare_selection)['launcher_revision']
+            prepare_headers={'Content-Type':'application/json',
+                'Origin':f'http://127.0.0.1:{server.server_port}'}
+            connection.request('POST','/api/prepare',body=json.dumps({
+                **prepare_selection,'launcher_revision':revision,'path':'/tmp/evil'}),
+                headers=prepare_headers)
+            response=connection.getresponse();self.assertEqual(response.status,422);response.read()
+            connection.request('POST','/api/prepare',body=json.dumps({
+                **prepare_selection,'launcher_revision':revision}),
+                headers=prepare_headers)
+            response=connection.getresponse();self.assertEqual(response.status,200)
+            self.assertEqual(json.loads(response.read())['state'],'prepared')
             terminal_request=dict(sample='recurring-ai-watch',
                 implementation='recipes/recurring-ai-watch/python/google-adk',mode='mock',
                 model='gemini-flash-lite',classifier='jev-default',action='worker',
@@ -1226,7 +1653,7 @@ class ExplorerTests(unittest.TestCase):
             response=connection.getresponse();self.assertEqual(response.status,200)
             self.assertEqual(json.loads(response.read())['state'],'prefilled')
             self.assertEqual(len(terminal.commands),1)
-            self.assertIn('.venv/bin/python',terminal.commands[0])
+            self.assertIn('./run.sh',terminal.commands[0])
             self.assertNotIn('malicious command',terminal.commands[0])
             terminal_request['action']='start';body=json.dumps(terminal_request)
             connection.request('POST','/api/terminal',body=body,headers=headers)

@@ -21,6 +21,7 @@ From the repository root:
 
 ```bash
 cd recipes/__RECIPE_SLUG__/java/bare
+./run.sh setup
 ./gradlew test
 ```
 
@@ -35,13 +36,13 @@ The CLI has exactly two positional actions, `worker` and `start`. Each requires
 Start the Worker:
 
 ```bash
-./gradlew run --args="worker --mode mock"
+./run.sh worker --mode mock
 ```
 
 Start the example Workflow in another terminal:
 
 ```bash
-./gradlew run --args="start --mode mock --text 'Investigate this example request.'"
+./run.sh start --mode mock --text 'Investigate this example request.'
 ```
 
 Both commands default to domain `cadence-ai-samples`, task list
@@ -66,3 +67,11 @@ policy without a Cadence server or credentials.
 
 All source and dependencies are contained under `java/bare`; the recipe imports
 no other recipe and can be copied as a unit.
+
+## Manual setup recovery
+
+If the launcher cannot prepare the implementation, verify Java and the checked-in Gradle wrapper, then run:
+
+```bash
+./gradlew --no-daemon classes
+```

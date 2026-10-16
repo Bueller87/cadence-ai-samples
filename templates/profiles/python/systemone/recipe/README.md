@@ -8,15 +8,14 @@ Profile: `systemone`. The live path classifies through SystemOne.
 From `python/systemone`:
 
 ```bash
-python3.12 -m venv .venv
-.venv/bin/pip install -e .
+./run.sh setup
 ```
 
 The mock path reads no catalogs or credentials:
 
 ```bash
-.venv/bin/python main.py worker --mode mock
-.venv/bin/python main.py start --mode mock
+./run.sh worker --mode mock
+./run.sh start --mode mock
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
@@ -29,8 +28,8 @@ inference configuration.
 
 
 ```bash
-.venv/bin/python main.py worker --mode live --confirm-live --classifier-id laya-local
-.venv/bin/python main.py start --mode live
+./run.sh worker --mode live --confirm-live --classifier-id laya-local
+./run.sh start --mode live
 ```
 
 Provider, model, and endpoint values come only from the selected catalog
@@ -42,3 +41,12 @@ never enters Workflow input or history. The starter reads no catalog.
 The stable demo Workflow ID uses `ALLOW_DUPLICATE`, so a closed run may be
 started again. Cadence still rejects a duplicate while a run is open; pass a
 different `--workflow-id` or wait for it to close.
+
+## Manual setup recovery
+
+If the launcher cannot prepare the implementation, run:
+
+```bash
+python3.13 -m venv .venv
+.venv/bin/python -m pip install -e .
+```

@@ -37,21 +37,19 @@ From the repository root:
 
 ```bash
 cd recipes/__RECIPE_SLUG__/python/bare
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -e .
+./run.sh setup
 ```
 
 Start the Worker in terminal 1:
 
 ```bash
-python main.py worker --mode mock
+./run.sh worker --mode mock
 ```
 
 Start the example Workflow in terminal 2:
 
 ```bash
-python main.py start --mode mock --text "Investigate this example request."
+./run.sh start --mode mock --text "Investigate this example request."
 ```
 
 Both commands default to domain `cadence-ai-samples`, task list
@@ -86,7 +84,7 @@ behavior.
 From `recipes/__RECIPE_SLUG__/python/bare` with the virtual environment active:
 
 ```bash
-python -m unittest discover -s tests -v
+.venv/bin/python -m unittest discover -s tests -v
 ```
 
 The tests run offline. They need no Cadence server or credentials.
@@ -97,3 +95,12 @@ Edit `workflow.py` for business input, Activities, and deterministic
 orchestration. Edit `main.py` only to change the command interface. Keep
 external and nondeterministic calls in Activities. The files are deliberately
 local so the recipe remains independently copyable.
+
+## Manual setup recovery
+
+If the launcher cannot prepare the implementation, run:
+
+```bash
+python3.13 -m venv .venv
+.venv/bin/python -m pip install -e .
+```

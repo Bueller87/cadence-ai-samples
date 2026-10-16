@@ -18,6 +18,8 @@
     for(const id of ["setup-block","worker-block","client-block","controls-block"])$(id).hidden=true;
     for(const id of ["setup-command","worker-command","client-command"])$(id).textContent="";
     $("control-commands").replaceChildren();$("warmup").disabled=true;
+    $("prepare").disabled=true;$("prepare-status").className="small";$("prepare-status").textContent="unchecked: Complete a selection to check preparation.";
+    $("prepare-diagnostic").hidden=true;$("prepare-diagnostic").querySelector("code").textContent="";
     for(const id of ["worker-terminal-status","start-terminal-status"])$(id).textContent="";
     for(const id of ["open-worker","open-start"]){$(id).hidden=true;$(id).disabled=false;}
     $("terminal-note").hidden=true;
@@ -108,15 +110,26 @@
     catch(error){if(version===requestVersion)clear(error.message,true);}
   }
 
+  function renderTerminalNote(){
+    const terminalAvailable=state?.terminal_handoff===true;
+    $("terminal-note").hidden=!terminalAvailable;
+    if(terminalAvailable)$("terminal-note").textContent=result?.preparation?.state==="prepared"?
+      "macOS may ask for Automation or Accessibility permission. The command is pasted for review and is never run automatically.":
+      "The launcher will prepare changed dependencies after you press Enter. Prepare them in Step 2 first for predictable timing. The command is pasted for review and is never run automatically.";
+  }
+
   function render(){
     $("selection-status").className="notice ready";$("selection-status").textContent=result.live?"Live selection ready. Credentials and services stay in your local Worker.":result.mock?"Mock selection ready. No provider calls.":"Commands resolved from this implementation.";
     $("setup-command").textContent=result.setup;$("setup-block").hidden=false;
+    const preparation=result.preparation||{state:"unchecked",detail:"Preparation has not been checked."};
+    $("prepare").disabled=false;$("prepare-status").className="small "+preparation.state.replaceAll(" ","-");
+    $("prepare-status").textContent=`${preparation.state}: ${preparation.detail}`;
     $("worker-command").textContent=result.worker;$("worker-block").hidden=false;
     $("client-command").textContent=result.start;$("client-block").hidden=!result.start;
     const terminalAvailable=state?.terminal_handoff===true;
     $("open-worker").hidden=!terminalAvailable;
     $("open-start").hidden=!terminalAvailable||!result.start;
-    $("terminal-note").hidden=!terminalAvailable;
+    renderTerminalNote();
     $("controls-block").hidden=!result.controls.length;$("control-commands").replaceChildren();
     for(const control of result.controls){const head=node("div");head.className="code-head";head.append(node("span",control.name));const button=node("button","Copy "+control.name);button.type="button";button.addEventListener("click",()=>copyText(control.command,button));head.append(button);const pre=node("pre");pre.append(node("code",control.command));$("control-commands").append(head,pre);}
     $("credentials").textContent=result.credentials.length?"Worker environment variables: "+result.credentials.join(", ")+". Set values only in Terminal 1.":result.live?"This selection needs no AI API keys.":"Mock mode needs no AI API keys.";
@@ -156,16 +169,40 @@
     if(!result)return;
     const version=requestVersion;$("check-status").className="small";$("check-status").textContent="Checking selected services…";$("refresh").disabled=true;
     try{const response=await fetch("/api/check?"+query(),{cache:"no-store"});const body=await response.json();if(version!==requestVersion)return;if(!response.ok)throw Error(body.error||"Service checks failed.");checkedSelection=body.selection;renderServices($("service-results"),body.services);$("check-status").textContent="Checked "+new Date(body.checked_at).toLocaleTimeString()+". Results are advisory.";}
-    catch(error){$("check-status").className="small error";$("check-status").textContent=error.message;}
-    finally{$("refresh").disabled=false;}
+    catch(error){if(version===requestVersion){$("check-status").className="small error";$("check-status").textContent=error.message;}}
+    finally{if(version===requestVersion)$("refresh").disabled=false;}
   }
 
   async function warmup(){
     if(!result||!result.local.length)return;
     const version=requestVersion;$("warmup").disabled=true;$("warmup-status").textContent="Warming selected local services…";$("warmup-results").replaceChildren();
     try{const response=await fetch("/api/warmup",{method:"POST",headers:{"Content-Type":"application/json","Origin":location.origin},body:JSON.stringify(Object.fromEntries(query()))});const body=await response.json();if(version!==requestVersion)return;if(!response.ok)throw Error(body.error||"Warm-up failed.");renderServices($("warmup-results"),body.components);$("warmup-status").textContent=body.note;}
-    catch(error){$("warmup-status").className="small error";$("warmup-status").textContent=error.message;}
+    catch(error){if(version===requestVersion){$("warmup-status").className="small error";$("warmup-status").textContent=error.message;}}
     finally{if(version===requestVersion)$("warmup").disabled=!result?.local.length;}
+  }
+
+  async function prepareRecipe(){
+    if(!result?.launcher_revision)return;
+    const version=requestVersion;
+    $("prepare").disabled=true;$("prepare-status").className="small preparing";
+    $("prepare-status").textContent="preparing: Installing this implementation's declared dependencies…";
+    $("prepare-diagnostic").hidden=true;$("prepare-diagnostic").querySelector("code").textContent="";
+    try{
+      const payload={...Object.fromEntries(query()),launcher_revision:result.launcher_revision};
+      const response=await fetch("/api/prepare",{method:"POST",headers:{"Content-Type":"application/json","Origin":location.origin},body:JSON.stringify(payload)});
+      const body=await response.json();if(version!==requestVersion)return;
+      if(!response.ok)throw Error(body.error||"Preparation failed.");
+      result.preparation={state:body.state,detail:body.detail};
+      renderTerminalNote();
+      $("prepare-status").className="small "+body.state.replaceAll(" ","-");
+      $("prepare-status").textContent=`${body.state}: ${body.detail}`;
+      if(body.diagnostic){$("prepare-diagnostic").querySelector("code").textContent=body.diagnostic;$("prepare-diagnostic").hidden=false;}
+    }catch(error){
+      if(version!==requestVersion)return;
+      result.preparation={state:"failed",detail:error.message};
+      renderTerminalNote();
+      $("prepare-status").className="small failed";$("prepare-status").textContent=`failed: ${error.message}`;
+    }finally{if(version===requestVersion)$("prepare").disabled=false;}
   }
 
   async function copyText(text,button){
@@ -379,7 +416,7 @@
   $("framework").addEventListener("change",()=>{$("mode").value="";flow();});
   for(const id of ["mode","model","classifier"])$(id).addEventListener("change",flow);
   for(const id of ["count","concurrency"])$(id).addEventListener("input",flow);
-  $("refresh").addEventListener("click",()=>refresh(true));$("warmup").addEventListener("click",warmup);
+  $("refresh").addEventListener("click",()=>refresh(true));$("prepare").addEventListener("click",prepareRecipe);$("warmup").addEventListener("click",warmup);
   $("resolve-run").addEventListener("click",resolveWorkflowRun);$("run-id").addEventListener("input",()=>{runRequestVersion++;$("resolve-run").disabled=!$("web-workflow-id").value.trim();updateRunLinks("entered");});
   $("web-workflow-id").addEventListener("input",()=>{if($("web-workflow-id").readOnly)return;runRequestVersion++;$("run-id").value="";$("resolve-run").disabled=!$("web-workflow-id").value.trim();updateRunLinks("entered");});
   document.querySelectorAll("[data-copy]").forEach(button=>button.addEventListener("click",()=>{if(result)copyText(result[button.dataset.copy],button);}));

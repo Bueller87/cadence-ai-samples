@@ -33,9 +33,7 @@ From the repository root:
 
 ```bash
 cd recipes/__RECIPE_SLUG__/python/google-adk
-python3.13 -m venv .venv
-source .venv/bin/activate
-python -m pip install -e .
+./run.sh setup
 ```
 
 ## Mock run
@@ -43,20 +41,20 @@ python -m pip install -e .
 Start the Worker in terminal 1:
 
 ```bash
-python main.py worker --mode mock
+./run.sh worker --mode mock
 ```
 
 Start the example Workflow in terminal 2:
 
 ```bash
-python main.py start --mode mock \
+./run.sh start --mode mock \
   --prompt "Summarize the next step for this request."
 ```
 
 Both commands default to domain `cadence-ai-samples`, task list
 `__RECIPE_SLUG__-google-adk`, and Workflow ID
 `__RECIPE_SLUG__-google-adk-demo`. Put global options before the command, for
-example `python main.py --task-list another-list worker`.
+example `./run.sh --task-list another-list worker`.
 
 ## Live run
 
@@ -79,7 +77,7 @@ confirm that the Worker may use a live provider:
 
 ```bash
 export MODEL_AI_KEY='your-provider-key'
-python main.py --task-list __RECIPE_SLUG__-google-adk-live \
+./run.sh --task-list __RECIPE_SLUG__-google-adk-live \
   worker --mode live --confirm-live --model-id gemini-flash-lite
 ```
 
@@ -90,7 +88,7 @@ In terminal 2, use the same task list. The starter has no catalog, model, or
 credential options:
 
 ```bash
-python main.py --task-list __RECIPE_SLUG__-google-adk-live \
+./run.sh --task-list __RECIPE_SLUG__-google-adk-live \
   start --mode live --prompt "Summarize the next step for this request."
 ```
 
@@ -122,7 +120,7 @@ failure messages.
 From `recipes/__RECIPE_SLUG__/python/google-adk`:
 
 ```bash
-python -m unittest discover -s tests -v
+.venv/bin/python -m unittest discover -s tests -v
 python -m py_compile config.py workflow.py inference.py main.py
 ```
 
@@ -137,3 +135,12 @@ Keep `config.py`, `workflow.py`, `inference.py`, and `main.py` together. Replace
 the synthetic Activity and agent instruction with recipe-specific behavior while
 keeping external calls inside Activities. Preserve a mock path so core tests stay
 offline, and update `SPEC.md` before adding business behavior.
+
+## Manual setup recovery
+
+If the launcher cannot prepare the implementation, run:
+
+```bash
+python3.13 -m venv .venv
+.venv/bin/python -m pip install -e .
+```

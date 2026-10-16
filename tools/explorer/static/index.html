@@ -31,6 +31,9 @@
     <button type="button" id="refresh">Refresh and check services</button>
     <p id="check-status" class="small" role="status" aria-live="polite">Services have not been checked.</p>
     <div id="service-results" class="service-grid"></div>
+    <button type="button" id="prepare" disabled>Prepare recipe dependencies</button>
+    <p id="prepare-status" class="small" role="status" aria-live="polite">unchecked: Complete a selection to check preparation.</p>
+    <pre id="prepare-diagnostic" class="prepare-diagnostic" hidden><code></code></pre>
     <details id="setup-block" class="setup" hidden><summary>One-time recipe setup</summary><div class="code-head"><span>Prepare dependencies</span><button type="button" data-copy="setup">Copy setup</button></div><pre><code id="setup-command"></code></pre></details>
     <p id="credentials" class="small"></p>
     <a href="/source?path=README.md" target="_blank" rel="noopener">Local services and domain setup</a>

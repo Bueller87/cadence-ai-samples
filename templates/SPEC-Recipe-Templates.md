@@ -229,6 +229,37 @@ making a live provider call.
 
 ## Explorer relationship
 
+Every implemented profile includes an executable `run.sh` in the implementation
+root. `./run.sh setup` prepares only that implementation; every other invocation
+first ensures readiness and then replaces the launcher with the existing
+application CLI. The launcher resolves its own directory, so callers do not need
+to activate an environment or start in the implementation directory.
+
+Readiness uses an ignored `.run-state/ready.v1` marker. The bounded, versioned
+marker contains only checksums of `run.sh` and the implementation's dependency
+declarations. It is written atomically after successful setup. A lock serializes
+setup, interrupted work is removed by traps, and atomically published ownership
+allows empty legacy locks and hard-killed recovery attempts to recover without
+manual deletion or taking over a live initializer. Malformed, partial, oversized,
+stale, or symlinked state is never ready. A launcher replacement during setup
+cannot publish readiness. Python launchers recreate incomplete regular local
+`.venv` directories but reject symlinked roots, unsafe nested links, and external
+environments before reading, executing, installing into, or removing them. They
+deterministically select an installed interpreter that satisfies the local
+`pyproject.toml` `requires-python`; Explorer does not choose a Python version.
+Go module/build caches and Java's explicit `GRADLE_USER_HOME` remain isolated
+under the ignored implementation-local `.run-state` directory for setup and
+subsequent launcher execution. Go and Java readiness additionally requires
+bounded, regular, non-symlinked cache evidence published only after successful
+preparation, plus each launcher's required cache directories. Missing or unsafe
+cache state fails closed and causes setup to repair the cache.
+
+Explorer resolution reports a deterministic launcher revision. Preparation must
+submit that revision with the selection, re-resolve it server-side, reject a
+missing or changed revision, and check it again immediately before invoking only
+`run.sh setup`. The browser never supplies a command, executable, path, package,
+or launcher argument.
+
 The Local Samples Explorer is a consumer of the generated recipe contract, not
 the owner of it. Future Explorer work should prefer validated template
 conventions over inference about arbitrary source trees.

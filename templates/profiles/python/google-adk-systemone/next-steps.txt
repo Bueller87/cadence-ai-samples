@@ -1,8 +1,9 @@
 Next steps for __RECIPE_TITLE__:
   cd recipes/__RECIPE_SLUG__/python/google-adk-systemone
-  python3.12 -m venv .venv
-  .venv/bin/pip install -e .
+  ./run.sh setup
   .venv/bin/python -m unittest discover -s tests -v
-  .venv/bin/python main.py worker --mode mock
+  ./run.sh worker --mode mock
   # In another terminal:
-  .venv/bin/python main.py start --mode mock
+  ./run.sh start --mode mock
+
+Manual recovery: python3.13 -m venv .venv && .venv/bin/python -m pip install -e .

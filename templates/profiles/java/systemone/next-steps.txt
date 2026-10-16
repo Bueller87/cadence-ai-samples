@@ -1,10 +1,13 @@
 Next steps (Java 17):
   cd recipes/__RECIPE_SLUG__/java/systemone
+  ./run.sh setup
   ./gradlew test
 
 Run the offline mock path:
-  ./gradlew run --args="worker --mode mock"
-  ./gradlew run --args="start --mode mock"
+  ./run.sh worker --mode mock
+  ./run.sh start --mode mock
 
 Then adapt recipes/__RECIPE_SLUG__/SPEC.md and the Workflow for the business
 decision. Live classifier setup: recipes/__RECIPE_SLUG__/README.md
+
+Manual recovery: ./gradlew --no-daemon classes
