@@ -67,8 +67,8 @@ signals:
   let output='';server.stdout.on('data',chunk=>output+=chunk);server.stderr.on('data',chunk=>errors.push(String(chunk)));
   await waitFor(()=>/http:\/\/127\.0\.0\.1:\d+\//.test(output),'server startup');
   const url=output.match(/http:\/\/127\.0\.0\.1:\d+\//)[0];
-  const copies=[],terminalRequests=[],terminalEvents=[],runRequests=[],signalRequests=[],signalRequestUrls=[];const watchRunIds=['run-current','run-continued'];
-  let rejectClipboard=false,terminalState='prefilled',holdTerminal=false,releaseTerminal,holdRun=false,releaseRun,signalState='accepted',holdSignal=false,releaseSignal;
+  const copies=[],prepareRequests=[],terminalRequests=[],terminalEvents=[],runRequests=[],signalRequests=[],signalRequestUrls=[];const watchRunIds=['run-current','run-continued'];
+  let rejectClipboard=false,holdPrepare=false,releasePrepare,terminalState='prefilled',holdTerminal=false,releaseTerminal,holdRun=false,releaseRun,signalState='accepted',holdSignal=false,releaseSignal,holdCheck=false,releaseCheck,holdWarmup=false,releaseWarmup;
   const virtualConsole=new VirtualConsole();virtualConsole.on('jsdomError',error=>errors.push(error.message));
   dom=await JSDOM.fromURL(url,{runScripts:'dangerously',resources:'usable',pretendToBeVisual:true,virtualConsole,
     beforeParse(window){
@@ -78,6 +78,12 @@ signals:
           terminalEvents.push('terminal');terminalRequests.push(JSON.parse(options.body));
           const response=()=>new Response(JSON.stringify({state:terminalState,detail:terminalState==='opened-copy-only'?'Terminal opened, but macOS blocked automatic prefill. Press Cmd+V to paste the copied command.':'test terminal result'}),{status:200,headers:{'Content-Type':'application/json'}});
           if(holdTerminal)return new Promise(resolve=>releaseTerminal=()=>resolve(response()));
+          return response();
+        }
+        if(target.pathname==='/api/prepare'){
+          prepareRequests.push(JSON.parse(options.body));
+          const response=()=>new Response(JSON.stringify({state:'prepared',detail:'Declared dependencies are prepared.',diagnostic:'Dependencies prepared.'}),{status:200,headers:{'Content-Type':'application/json'}});
+          if(holdPrepare)return new Promise(resolve=>releasePrepare=()=>resolve(response()));
           return response();
         }
         if(target.pathname==='/api/workflow-run'){
@@ -96,6 +102,8 @@ signals:
           if(holdSignal)return new Promise(resolve=>releaseSignal=()=>resolve(response()));
           return response();
         }
+        if(target.pathname==='/api/check'&&holdCheck)return new Promise(resolve=>releaseCheck=()=>resolve(new Response(JSON.stringify({error:'stale check failure'}),{status:500,headers:{'Content-Type':'application/json'}})));
+        if(target.pathname==='/api/warmup'&&holdWarmup)return new Promise(resolve=>releaseWarmup=()=>resolve(new Response(JSON.stringify({error:'stale warm-up failure'}),{status:500,headers:{'Content-Type':'application/json'}})));
         const response=await fetch(target,options);
         if(target.pathname==='/api/state'){
           const body=await response.json();body.terminal_handoff=true;
@@ -123,6 +131,15 @@ signals:
   assert.equal($('mode').value,'');assert.equal($('worker-block').hidden,true);
   assert.equal($('model').value,'gemini-flash-lite');assert.equal($('classifier').value,'jev-default');
   change('mode','live');await ready();
+  assert.ok($('setup-command').textContent.endsWith('&& ./run.sh setup'));
+  assert.ok($('worker-command').textContent.includes('./run.sh'));
+  assert.ok($('prepare-status').textContent.startsWith('not prepared:'));
+  holdPrepare=true;$('prepare').click();await waitFor(()=>typeof releasePrepare==='function','held recipe preparation');
+  assert.ok($('prepare-status').textContent.startsWith('preparing:'));
+  assert.equal(prepareRequests.length,1);assert.equal(prepareRequests[0].launcher_revision.length,64);
+  for(const forbidden of ['command','executable','path','package','arguments'])assert.equal(forbidden in prepareRequests[0],false);
+  releasePrepare();await waitFor(()=>$('prepare-status').textContent.startsWith('prepared:'),'prepared recipe feedback');
+  assert.equal($('prepare-diagnostic').hidden,false);assert.ok(!$('terminal-note').textContent.includes('will prepare'));holdPrepare=false;releasePrepare=undefined;
   assert.ok($('worker-command').textContent.includes('--confirm-live'));assert.ok(!$('worker-command').textContent.includes('--agent-id'));
   assert.equal(runRequests.length,0);assert.equal($('workflow-run-panel').hidden,false);assert.equal($('resolve-run').hidden,false);
   assert.equal($('web-cluster').textContent,'cluster0');assert.ok($('web-workflow-id').value.endsWith('-demo'));assert.equal($('web-workflow-id').readOnly,true);
@@ -204,7 +221,7 @@ signals:
 
   change('sample','generated-go-systemone');change('framework','recipes/generated-go-systemone/go/systemone');change('mode','mock');
   assert.equal($('classifier-field').hidden,true);await ready();
-  assert.ok($('worker-command').textContent.includes('go run .'));assert.ok($('worker-command').textContent.includes('-mode mock'));
+  assert.ok($('worker-command').textContent.includes('./run.sh'));assert.ok($('worker-command').textContent.includes('-mode mock'));
   assert.ok($('client-command').textContent.includes('start'));assert.ok($('client-command').textContent.includes('-mode mock'));
   assert.ok(!$('client-command').textContent.includes('-classifier-id'));assert.ok(!$('client-command').textContent.includes('-catalog-dir'));
   change('mode','live');assert.equal($('classifier-field').hidden,false);assert.equal($('worker-block').hidden,true);
@@ -230,6 +247,12 @@ signals:
   change('classifier','laya-local');change('model','llama3.2-local');await ready();
   assert.equal($('warmup').disabled,false);assert.ok($('warmup-status').textContent.includes('Ollama'));
   assert.ok($('credentials').textContent.includes('no AI API keys'));
+  holdCheck=true;$('refresh').click();await waitFor(()=>typeof releaseCheck==='function','held service check');
+  change('mode','mock');releaseCheck();await ready();assert.ok(!$('check-status').textContent.includes('stale check failure'));holdCheck=false;releaseCheck=undefined;
+  change('mode','live');change('classifier','laya-local');change('model','llama3.2-local');await ready();
+  holdWarmup=true;$('warmup').click();await waitFor(()=>typeof releaseWarmup==='function','held warm-up');
+  change('mode','mock');releaseWarmup();await ready();assert.ok(!$('warmup-status').textContent.includes('stale warm-up failure'));holdWarmup=false;releaseWarmup=undefined;
+  change('mode','live');change('classifier','laya-local');change('model','llama3.2-local');await ready();
   const modelFile=path.join(fixture,'models.yaml');fs.writeFileSync(modelFile,fs.readFileSync(modelFile,'utf8').replace('llama3.2:latest','llama3.2:edited'));
   $('refresh').click();await waitFor(()=>$('service-results').textContent.includes('llama3.2:edited'),'refresh checks edited catalog');
   assert.ok($('check-status').textContent.includes('advisory'));

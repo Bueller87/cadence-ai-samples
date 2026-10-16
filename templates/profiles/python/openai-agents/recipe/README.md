@@ -39,21 +39,19 @@ From the repository root:
 
 ```bash
 cd recipes/__RECIPE_SLUG__/python/openai-agents
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -e .
+./run.sh setup
 ```
 
 Start the mock Worker in terminal 1:
 
 ```bash
-python main.py worker --mode mock
+./run.sh worker --mode mock
 ```
 
 Start the mock Workflow in terminal 2:
 
 ```bash
-python main.py start --mode mock --text "Review this example request."
+./run.sh start --mode mock --text "Review this example request."
 ```
 
 Mock mode does not read `models.yaml`, inspect credentials, or make network
@@ -83,14 +81,14 @@ when needed, explicitly confirm live use, then select the Worker model:
 
 ```bash
 export MODEL_AI_KEY="replace-with-your-key"
-python main.py worker --mode live --confirm-live \
+./run.sh worker --mode live --confirm-live \
   --model-id gemini-flash-lite
 ```
 
 Start a matching live Workflow in another terminal:
 
 ```bash
-python main.py start --mode live \
+./run.sh start --mode live \
   --text "Review this request and suggest a next step."
 ```
 
@@ -119,7 +117,7 @@ failures because they may contain sensitive request details.
 From `recipes/__RECIPE_SLUG__/python/openai-agents`:
 
 ```bash
-python -m unittest discover -s tests -v
+.venv/bin/python -m unittest discover -s tests -v
 ```
 
 The suite is fully offline. It tests Workflow and Activity behavior, model
@@ -133,3 +131,12 @@ Copy the recipe with its `models.yaml` catalog convention, then replace the
 starter input, instruction, and mock Activity. Keep provider clients and model
 requests at Activity boundaries. Add tools or handoffs only with matching
 Activity registration, serialization tests, retry policy, and documentation.
+
+## Manual setup recovery
+
+If the launcher cannot prepare the implementation, run:
+
+```bash
+python3.13 -m venv .venv
+.venv/bin/python -m pip install -e .
+```

@@ -43,9 +43,10 @@ never contain inference configuration.
 
 The six numbered steps generate setup, Worker, and matching client commands. Commands
 include this checkout's absolute implementation directory so they can be pasted
-into either terminal without navigating by hand. Python commands use that
-implementation's `.venv/bin/python`; run its one-time setup first. A dedicated
-task list includes the sample, implementation, mode, and selected catalog IDs.
+into either terminal without navigating by hand. Every command uses the selected
+implementation's `run.sh`; the launcher chooses the compatible runtime, prepares
+changed dependencies, and replaces itself with the existing application CLI. A
+dedicated task list includes the sample, implementation, mode, and selected catalog IDs.
 The Watch's Workflow ID is shared by start/status/check-now/stop. Copy its run
 command and controls separately so pasting a command does not immediately start
 and stop the Watch.
@@ -87,13 +88,36 @@ fetch GitHub or pull a branch. Resolution rereads and revalidates selections too
 A removed ID, malformed catalog, or rejected selection clears the previous
 commands rather than leaving a stale command ready to copy.
 
-## Checks and local warm-up
+## Checks, preparation, and local warm-up
 
 **Refresh and check services** rereads the checkout and runs bounded, advisory
 checks for Cadence, Cadence-Web, and inference dependencies relevant to the
 selection. Checks never run automatically on page load or selection changes, and
 their results never disable valid commands or links. A TCP connection does not
 prove that a domain or Worker is ready.
+
+**Prepare recipe dependencies** invokes only the selected implementation's fixed
+`run.sh setup`. Resolution supplies a SHA-256 launcher revision, and the POST
+returns that revision with the selection. The server re-resolves it and checks
+the executable regular non-symlinked launcher again immediately before
+execution. Missing or changed revisions fail closed. The browser cannot provide
+a command, executable, path, package, or launcher argument. The server checks the
+launcher revision again after setup and removes readiness if the launcher changed.
+
+Preparation reports unchecked, not prepared, preparing, prepared, stale, and
+failed states. The launcher's bounded `.run-state/ready.v1` marker contains only
+its schema version and launcher/dependency checksums. Malformed, oversized,
+partial, stale, or symlinked state is never treated as ready. Setup runs in its
+own process group with a five-minute bound; timeout or Explorer shutdown stops
+descendants. Selection changes hide superseded results but do not cancel setup.
+Preparation receives a small allowlisted environment; forwarded package-index
+and proxy URLs must be credential-free HTTP(S) URLs. Go and Gradle caches remain
+inside the implementation's ignored `.run-state` directory across setup and
+execution. Their readiness also requires bounded, non-symlinked cache evidence
+and required cache directories created by successful preparation; cache loss or
+unsafe cache state is never reported as prepared. Failure output retains a bounded tail before it is sanitized, and
+temporary logs are removed. The copyable `./run.sh setup` command remains
+available for manual use.
 
 For a live selection using Ollama or Laya, **Warm up selected local services**
 sends the smallest configured request to those loopback services. Warm-up is
@@ -104,7 +128,8 @@ to install services or models before retrying.
 Keys remain in the local Worker environment. The explorer does not read `.env`
 files, accept credential values, or put keys in commands. Its HTTP endpoints are
 uncached and loopback-only. Warm-up and Terminal handoff actions additionally
-require same-origin JSON requests. Warm-up accepts only resolved loopback targets,
+require same-origin JSON requests. Preparation additionally binds the current
+selection to its launcher revision. Warm-up accepts only resolved loopback targets,
 and Terminal handoff accepts only re-resolved Worker/start actions. File viewing
 is limited to public recipe README/evidence/CLI files and the two root catalogs.
 
@@ -122,7 +147,8 @@ can be changed under **System Settings → Privacy & Security → Automation** o
 or `osascript`, depending on how the explorer was launched.
 
 The action is limited to commands resolved from the current checkout. The browser
-cannot send arbitrary command text, and setup/control commands remain copy-only.
+cannot send arbitrary command text. Workflow controls remain separate explicit
+actions, and recipe setup is limited to the revision-bound Step 2 action.
 Windows command tabs and terminal handoff are deferred. The Python server remains
 independent of the Bash launcher so another entry point can reuse it later.
 
@@ -195,7 +221,8 @@ generated profile,
 non-execution of recipe modules, quoting of paths with spaces, probe/warm-up
 failures, Terminal handoff and fallback, action protection, HTTP refresh
 behavior, source-file boundaries, strict Signal metadata, backend Signal
-serialization, and exact-current-Run revalidation.
+serialization, exact-current-Run revalidation, launcher revisions, malformed and
+stale readiness state, process-group timeout cleanup, and bounded diagnostics.
 
 The optional DOM workflow check requires Node.js and jsdom 26.1.0, solely for
 development; these are not explorer runtime dependencies. Install jsdom into a

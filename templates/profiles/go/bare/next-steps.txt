@@ -1,15 +1,17 @@
 Next steps (Go 1.23):
   cd recipes/__RECIPE_SLUG__/go/bare
-  go mod download
+  ./run.sh setup
   go test ./...
 
 Run the synthetic mock path:
-  go run . worker -mode mock
-  go run . start -mode mock
+  ./run.sh worker -mode mock
+  ./run.sh start -mode mock
 
 The live mode is a scaffold lane and still uses synthetic Activities:
-  go run . worker -mode live
-  go run . start -mode live
+  ./run.sh worker -mode live
+  ./run.sh start -mode live
 
 Then complete recipes/__RECIPE_SLUG__/SPEC.md and replace the starter Workflow.
 Run instructions: recipes/__RECIPE_SLUG__/README.md
+
+Manual recovery: go mod download

@@ -2,10 +2,19 @@
 from __future__ import annotations
 
 import ast
+import hashlib
+import ipaddress
 import json
+import os
 import re
 import shlex
+import shutil
+import signal
 import socket
+import stat
+import subprocess
+import tempfile
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -73,12 +82,16 @@ def evidence(directory):
 class Explorer:
     def __init__(self, root, cadence_web_url=CADENCE_WEB_URL,
                  cadence_cluster=CADENCE_CLUSTER, opener=urlopen,
-                 workflow_timeout=1.5):
+                 workflow_timeout=1.5, prepare_timeout=300):
         self.root = Path(root).resolve()
         self.cadence_web_url = cadence_web_url.rstrip('/')
         self.cadence_cluster = cadence_cluster
         self.opener = opener
         self.workflow_timeout = workflow_timeout
+        self.prepare_timeout = prepare_timeout
+        self._preparation_lock = threading.Lock()
+        self._preparations = {}
+        self._closed = False
 
     def inside(self, path):
         path = Path(path).absolute()
@@ -96,6 +109,377 @@ class Explorer:
                 return False
             current = parent
         return not self.root.is_symlink()
+
+    def open_launcher(self, launcher):
+        launcher = Path(launcher)
+        implementation = launcher.parent
+        if not self.inside(implementation) or not self.inside(launcher):
+            raise Unsupported(
+                'This implementation needs an executable, regular run.sh inside the checkout.')
+        descriptor = None
+        try:
+            descriptor = os.open(
+                launcher, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0))
+            metadata = os.fstat(descriptor)
+            if (not stat.S_ISREG(metadata.st_mode) or
+                    metadata.st_mode & 0o111 == 0):
+                raise OSError('launcher is not an executable regular file')
+            content = bytearray()
+            while len(content) <= 1024 * 1024:
+                chunk = os.read(descriptor, 65536)
+                if not chunk:
+                    break
+                content.extend(chunk)
+            if len(content) > 1024 * 1024:
+                raise OSError('launcher is too large')
+            os.lseek(descriptor, 0, os.SEEK_SET)
+        except OSError as error:
+            if descriptor is not None:
+                os.close(descriptor)
+                descriptor = None
+            raise Unsupported(
+                'This implementation needs an executable, regular run.sh inside the checkout.') from error
+        return descriptor, hashlib.sha256(content).hexdigest()
+
+    def launcher(self, implementation):
+        launcher = Path(implementation) / 'run.sh'
+        descriptor, revision = self.open_launcher(launcher)
+        os.close(descriptor)
+        return launcher, revision
+
+    @staticmethod
+    def dependency_paths(implementation):
+        if implementation.joinpath('pyproject.toml').is_file():
+            names = ['pyproject.toml']
+        elif implementation.joinpath('go.mod').is_file():
+            names = ['go.mod'] + (
+                ['go.sum'] if implementation.joinpath('go.sum').is_file() else [])
+        else:
+            names = [
+                name for name in (
+                    'build.gradle.kts', 'settings.gradle.kts',
+                    'gradle/wrapper/gradle-wrapper.properties',
+                    'gradle/wrapper/gradle-wrapper.jar',
+                ) if implementation.joinpath(name).is_file()
+            ]
+        return names
+
+    @staticmethod
+    def cksum(path):
+        result = subprocess.run(
+            ['cksum', str(path)], capture_output=True, text=True, timeout=2,
+            check=True)
+        fields = result.stdout.split()
+        if len(fields) < 2 or not all(field.isdigit() for field in fields[:2]):
+            raise OSError('cksum returned an unreadable fingerprint')
+        return ':'.join(fields[:2])
+
+    def preparation_state(self, implementation):
+        implementation = Path(implementation)
+        state = implementation / '.run-state'
+        marker = state / 'ready.v1'
+        if not state.exists():
+            return dict(state='not prepared', detail='Prepare dependencies before starting.')
+        if (not self.inside(state) or state.is_symlink() or not state.is_dir() or
+                not self.inside(marker) or marker.is_symlink() or not marker.is_file()):
+            return dict(state='not prepared', detail='Launcher state is incomplete or unsafe.')
+        try:
+            with marker.open('rb') as stream:
+                raw = stream.read(4097)
+            if len(raw) > 4096:
+                raise ValueError('oversized marker')
+            lines = raw.decode('utf-8').splitlines()
+            dependencies = self.dependency_paths(implementation)
+            if any(
+                    not self.inside(implementation / name) or
+                    (implementation / name).is_symlink() or
+                    not (implementation / name).is_file()
+                    for name in dependencies):
+                return dict(
+                    state='not prepared',
+                    detail='Dependency declaration paths are incomplete or unsafe.')
+            expected = [
+                'version=1',
+                f'launcher={self.cksum(implementation / "run.sh")}',
+                *(f'dependency={name}:{self.cksum(implementation / name)}'
+                  for name in dependencies),
+            ]
+            valid_shape = (
+                bool(dependencies) and len(lines) == len(expected) and
+                lines[0] == 'version=1' and
+                re.fullmatch(r'launcher=\d+:\d+', lines[1]) is not None and
+                all(re.fullmatch(
+                    rf'dependency={re.escape(name)}:\d+:\d+', line) is not None
+                    for name, line in zip(dependencies, lines[2:]))
+            )
+            if not valid_shape:
+                return dict(state='not prepared', detail='Launcher state is malformed or incomplete.')
+            if lines != expected:
+                return dict(state='stale', detail='Dependency declarations changed. Prepare again.')
+        except (OSError, UnicodeError, ValueError, subprocess.SubprocessError):
+            return dict(state='not prepared', detail='Launcher state is malformed or incomplete.')
+        cache = None
+        if (implementation / 'go.mod').is_file():
+            root = state / 'go'
+            cache = (
+                root / 'prepared.v1',
+                b'version=1\ncache=go\n',
+                (root, root / 'gopath', root / 'gopath/pkg',
+                 root / 'gopath/pkg/mod', root / 'build'))
+        elif (implementation / 'gradlew').is_file():
+            root = state / 'gradle-home'
+            cache = (
+                root / 'prepared.v1',
+                b'version=1\ncache=gradle\n',
+                (root, root / 'caches', root / 'wrapper',
+                 root / 'wrapper/dists'))
+        if cache is not None:
+            evidence, expected_evidence, directories = cache
+            if any(
+                    not self.inside(path) or path.is_symlink()
+                    for path in (*directories, evidence)):
+                return dict(
+                    state='not prepared',
+                    detail='Launcher cache state is unsafe.')
+            if any(not path.is_dir() for path in directories):
+                return dict(
+                    state='stale',
+                    detail='Launcher cache is incomplete. Prepare again.')
+            if not evidence.is_file():
+                return dict(
+                    state='stale',
+                    detail='Launcher cache readiness is missing. Prepare again.')
+            try:
+                with evidence.open('rb') as stream:
+                    cache_raw = stream.read(129)
+                if len(cache_raw) > 128 or cache_raw != expected_evidence:
+                    raise ValueError('invalid cache evidence')
+            except (OSError, ValueError):
+                return dict(
+                    state='not prepared',
+                    detail='Launcher cache state is malformed or incomplete.')
+        return dict(state='prepared', detail='Declared dependencies are prepared.')
+
+    @staticmethod
+    def sanitize_preparation_output(raw):
+        text = raw.decode('utf-8', errors='replace')
+        text = re.sub(r'https?://\S+', '[redacted-url]', text)
+        text = re.sub(
+            r'^([ \t]*(?:\++\s*)?(?:export[ \t]+)?)'
+            r'([A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|AUTHORIZATION)'
+            r'[A-Za-z0-9_]*\s*=\s*)[^\r\n]*',
+            r'\1\2[redacted]', text, flags=re.I | re.M)
+        text = re.sub(
+            r'^(authorization\s*:\s*)[^\r\n]+',
+            r'\1[redacted]', text, flags=re.I | re.M)
+        text = re.sub(
+            r'\bBearer\s+[A-Za-z0-9._~+/=-]+',
+            'Bearer [redacted]', text, flags=re.I)
+        bounded = text.encode('utf-8')[-4096:]
+        return bounded.decode('utf-8', errors='ignore').strip()
+
+    @staticmethod
+    def stop_process_group(process):
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            return
+        try:
+            process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            pass
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        if process.poll() is None:
+            process.wait()
+
+    def cleanup_preparation_state(self, implementation):
+        state = Path(implementation) / '.run-state'
+        if (not state.exists() or state.is_symlink() or not state.is_dir() or
+                not self.inside(state)):
+            return
+        for path in [state / 'setup.log.tmp', *state.glob('ready.tmp.*')]:
+            if self.inside(path) and path.exists() and not path.is_symlink() and path.is_file():
+                path.unlink()
+        lock = state / 'setup.lock'
+        if self.inside(lock) and lock.exists() and not lock.is_symlink():
+            owner = lock / 'pid' if lock.is_dir() else lock
+            try:
+                pid = int(owner.read_text().strip())
+                alive = pid > 0 and self.process_alive(pid)
+            except (OSError, ValueError):
+                alive = False
+            if not alive:
+                if lock.is_dir():
+                    shutil.rmtree(lock)
+                elif lock.is_file():
+                    lock.unlink()
+        recovery = state / 'setup.recovery'
+        if (self.inside(recovery) and recovery.exists() and
+                not recovery.is_symlink() and recovery.is_dir()):
+            shutil.rmtree(recovery)
+        for recovery in state.glob('setup.recovery.*'):
+            if (not self.inside(recovery) or recovery.is_symlink() or
+                    not recovery.is_dir()):
+                continue
+            try:
+                pid = int(recovery.name.rsplit('.', 1)[1])
+            except ValueError:
+                continue
+            if not self.process_alive(pid):
+                shutil.rmtree(recovery)
+
+    def remove_readiness_marker(self, implementation):
+        marker = Path(implementation) / '.run-state' / 'ready.v1'
+        if (self.inside(marker) and marker.exists() and not marker.is_symlink() and
+                marker.is_file()):
+            marker.unlink()
+
+    @staticmethod
+    def process_alive(pid):
+        try:
+            os.kill(pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+
+    @staticmethod
+    def descriptor_cksum(descriptor):
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        result = subprocess.run(
+            ['cksum', f'/dev/fd/{descriptor}'], pass_fds=(descriptor,),
+            capture_output=True, text=True, timeout=2, check=True)
+        fields = result.stdout.split()
+        if len(fields) < 2 or not all(field.isdigit() for field in fields[:2]):
+            raise OSError('cksum returned an unreadable fingerprint')
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        return ':'.join(fields[:2])
+
+    @staticmethod
+    def forwarded_url(name, value):
+        if value != value.strip() or any(character.isspace() for character in value):
+            raise InvalidSelection(f'{name} contains an invalid package or proxy URL.')
+        parsed = urlsplit(value)
+        try:
+            parsed.port
+            host_is_valid = (
+                re.fullmatch(r'[A-Za-z0-9.-]+', parsed.hostname or '') is not None or
+                ipaddress.ip_address(parsed.hostname or '') is not None)
+        except ValueError:
+            host_is_valid = False
+        if (parsed.scheme not in {'http', 'https'} or not parsed.hostname or
+                not host_is_valid or
+                parsed.username is not None or parsed.password is not None or
+                parsed.query or parsed.fragment):
+            raise InvalidSelection(
+                f'{name} must be an HTTP(S) URL without credentials, query, or fragment.')
+        return value
+
+    def preparation_environment(self, launcher, launcher_cksum, isolated_home):
+        environment = {
+            'PATH': os.environ.get('PATH', os.defpath),
+            'HOME': str(isolated_home),
+            'CADENCE_RECIPE_LAUNCHER_PATH': str(launcher),
+            'CADENCE_RECIPE_LAUNCHER_CKSUM': launcher_cksum,
+            'CADENCE_RECIPE_LAUNCHER_BOUND': '1',
+        }
+        for name in ('LANG', 'LC_ALL', 'JAVA_HOME', 'TMPDIR', 'TMP', 'TEMP',
+                     'SSL_CERT_FILE', 'SSL_CERT_DIR', 'REQUESTS_CA_BUNDLE',
+                     'CURL_CA_BUNDLE', 'NO_PROXY', 'no_proxy'):
+            if name in os.environ:
+                environment[name] = os.environ[name]
+        for name in ('PIP_INDEX_URL', 'PIP_EXTRA_INDEX_URL', 'HTTP_PROXY',
+                     'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy',
+                     'all_proxy'):
+            if value := os.environ.get(name):
+                environment[name] = self.forwarded_url(name, value)
+        return environment
+
+    def close(self):
+        with self._preparation_lock:
+            self._closed = True
+            preparations = list(self._preparations.items())
+        for process, _ in preparations:
+            self.stop_process_group(process)
+        for _, implementation in preparations:
+            self.cleanup_preparation_state(implementation)
+
+    def run_preparation(self, launcher, expected_revision=None):
+        descriptor, revision = self.open_launcher(launcher)
+        if expected_revision is not None and revision != expected_revision:
+            os.close(descriptor)
+            raise InvalidSelection(
+                'The launcher changed immediately before preparation. Retry from the refreshed selection.')
+        launcher_cksum = self.descriptor_cksum(descriptor)
+        isolated_home = tempfile.TemporaryDirectory(
+            prefix='cadence-explorer-prepare-')
+        try:
+            environment = self.preparation_environment(
+                launcher, launcher_cksum, isolated_home.name)
+            with self._preparation_lock:
+                if self._closed:
+                    raise Unsupported('Explorer is shutting down.')
+                process = subprocess.Popen(
+                    ['/bin/sh', f'/dev/fd/{descriptor}', 'setup'],
+                    cwd=launcher.parent, env=environment, pass_fds=(descriptor,),
+                    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT, start_new_session=True)
+                self._preparations[process] = launcher.parent
+        except BaseException:
+            isolated_home.cleanup()
+            raise
+        finally:
+            os.close(descriptor)
+        output = bytearray()
+        discard_partial_line = False
+
+        def drain():
+            nonlocal discard_partial_line
+            while True:
+                chunk = process.stdout.read(4096)
+                if not chunk:
+                    return
+                if discard_partial_line:
+                    newline = chunk.find(b'\n')
+                    if newline < 0:
+                        continue
+                    chunk = chunk[newline + 1:]
+                    discard_partial_line = False
+                output.extend(chunk)
+                if len(output) > 1024 * 1024:
+                    del output[:len(output) - 1024 * 1024]
+                    newline = output.find(b'\n')
+                    if newline < 0:
+                        output.clear()
+                        discard_partial_line = True
+                    else:
+                        del output[:newline + 1]
+
+        reader = threading.Thread(target=drain, daemon=True)
+        reader.start()
+        timed_out = False
+        try:
+            process.wait(timeout=self.prepare_timeout)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            self.stop_process_group(process)
+            self.cleanup_preparation_state(launcher.parent)
+        except BaseException:
+            self.stop_process_group(process)
+            self.cleanup_preparation_state(launcher.parent)
+            raise
+        finally:
+            reader.join(timeout=2)
+            if process.stdout:
+                process.stdout.close()
+            with self._preparation_lock:
+                self._preparations.pop(process, None)
+            isolated_home.cleanup()
+        return process.returncode, timed_out, self.sanitize_preparation_output(bytes(output))
 
     def read_cli(self, path, kind):
         entry = path / {
@@ -300,7 +684,7 @@ class Explorer:
         if not isinstance(domain,str) or not domain:
             raise Unsupported('No readable default Cadence domain in this CLI.')
         if cli['kind'] == 'python' and cli['generic']:
-            common = ['.venv/bin/python','main.py',domain_flag,domain,
+            common = ['./run.sh',domain_flag,domain,
                       '--task-list',task_list]
             worker = list(common)
             worker_scope = cli['commands']['worker']
@@ -316,7 +700,7 @@ class Explorer:
             starter = common+['--workflow-id',workflow_id,'start','--mode',mode]
             controls = []
         elif cli['kind'] == 'python':
-            base = ['.venv/bin/python','main.py',domain_flag,domain,
+            base = ['./run.sh',domain_flag,domain,
                     '--task-list',task_list,'--workflow-id',workflow_id]
             for flag,config in (('--model-id',model),('--classifier-id',classifier)):
                 if config and flag in flags:
@@ -332,7 +716,7 @@ class Explorer:
             controls = []
             for command in cli['commands']:
                 if command not in {'worker','start'} and not any(s.get('required') for s in cli['commands'][command].values()):
-                    controls.append(['.venv/bin/python','main.py',domain_flag,domain,'--workflow-id',workflow_id,command])
+                    controls.append(['./run.sh',domain_flag,domain,'--workflow-id',workflow_id,command])
         elif cli['kind'] == 'go' and cli['generic']:
             common = [domain_flag,domain,'-task-list',task_list]
             worker_args = ['worker','-mode',mode]+common
@@ -343,14 +727,14 @@ class Explorer:
             starter_args = ['start','-mode',mode]+common
             if '-workflow-id' in flags:
                 starter_args += ['-workflow-id',workflow_id]
-            worker = ['go','run','.']+worker_args
-            starter = ['go','run','.']+starter_args
+            worker = ['./run.sh']+worker_args
+            starter = ['./run.sh']+starter_args
             controls = []
         elif cli['kind'] == 'go':
             if mode not in cli['live_modes'] + cli['mock_modes'] + ['worker']:
                 raise InvalidSelection('This action needs identifiers from a running ticket. Follow the manual acknowledgment section in the README.' if mode=='acknowledge' else
                     'No safe generated command flow is available for this action. Follow the recipe README.')
-            base = ['go','run','.',domain_flag,domain,'-task-list',task_list]
+            base = ['./run.sh',domain_flag,domain,'-task-list',task_list]
             if '-workflow-id' in flags:
                 base += ['-workflow-id',workflow_id]
             if variant['classifier']:
@@ -387,16 +771,12 @@ class Explorer:
                 worker_args += ['--confirm-live']
             starter_args = ['start','--mode',mode]+common+[
                 '--workflow-id',workflow_id]
-            worker = ['./gradlew','run','--args='+shlex.join(worker_args)]
-            starter = ['./gradlew','run','--args='+shlex.join(starter_args)]
+            worker = ['./run.sh']+worker_args
+            starter = ['./run.sh']+starter_args
             controls = []
-        setup = ['cd '+shlex.quote(str(path))]
-        if cli['kind'] == 'python':
-            setup += ['python3 -m venv .venv','source .venv/bin/activate','python -m pip install -e .']
-        elif cli['kind'] == 'go':
-            setup += ['go mod download']
-        else:
-            setup += ['./gradlew test']
+        launcher, launcher_revision = self.launcher(path)
+        preparation = self.preparation_state(path)
+        setup = ['cd '+shlex.quote(str(path))+' && ./run.sh setup']
         record = next((e for e in evidence(self.root/'recipes'/recipe['id']) if live and
             e['framework']==variant['framework'] and model and e['model_id']==model['id'] and classifier and
             e['classifier_id']==classifier['id'] and model['model'] in e['model_description']),None)
@@ -424,6 +804,7 @@ class Explorer:
             workflow_id=workflow_id if ('--workflow-id' in flags or '-workflow-id' in flags) else None,
             cadence_web_url=self.cadence_web_url, cadence_cluster=self.cadence_cluster,
             implementation=variant['id'],mode=mode,live=live,model=model,classifier=classifier,
+            launcher_revision=launcher_revision,preparation=preparation,
             evidence=record,credentials=credentials,local=self.local_commands(model,classifier) if live else [],
             signals=signals,signal_metadata_revision=signal_metadata_revision,
             signal_metadata_error=signal_metadata_error,
@@ -687,6 +1068,80 @@ class Explorer:
             if components else 'No selected local inference component needs warm-up.')
         return dict(selection=self.selection_key(resolved), components=components, note=note)
 
+    def prepare(self, request):
+        allowed = {
+            'sample', 'implementation', 'mode', 'model', 'classifier',
+            'count', 'concurrency', 'launcher_revision',
+        }
+        unexpected = sorted(set(request) - allowed)
+        if unexpected:
+            raise InvalidSelection(
+                'Preparation accepts only the current selection and launcher revision.')
+        submitted_revision = request.get('launcher_revision')
+        if (not isinstance(submitted_revision, str) or
+                not re.fullmatch(r'[0-9a-f]{64}', submitted_revision)):
+            raise InvalidSelection('A current launcher revision is required.')
+        selection = {key: value for key, value in request.items()
+                     if key != 'launcher_revision'}
+        resolved = self.resolve(selection)
+        if resolved['launcher_revision'] != submitted_revision:
+            raise InvalidSelection(
+                'The launcher changed. Resolve the selection again before preparing.')
+        implementation = self.root / resolved['implementation']
+        launcher, immediate_revision = self.launcher(implementation)
+        if immediate_revision != submitted_revision:
+            raise InvalidSelection(
+                'The launcher changed immediately before preparation. Retry from the refreshed selection.')
+        returncode, timed_out, excerpt = self.run_preparation(
+            launcher, expected_revision=submitted_revision)
+        try:
+            _, final_revision = self.launcher(implementation)
+        except Unsupported:
+            final_revision = None
+        if final_revision != submitted_revision:
+            self.remove_readiness_marker(implementation)
+            return dict(
+                state='stale', selection=self.selection_key(resolved),
+                launcher_revision=submitted_revision,
+                detail='The launcher changed during preparation. Resolve the selection and prepare again.',
+                diagnostic=excerpt)
+        state = self.preparation_state(implementation)
+        if timed_out:
+            return dict(
+                state='failed', selection=self.selection_key(resolved),
+                launcher_revision=submitted_revision,
+                detail='Preparation timed out and its process group was stopped.',
+                diagnostic=excerpt)
+        if returncode != 0:
+            return dict(
+                state='failed', selection=self.selection_key(resolved),
+                launcher_revision=submitted_revision,
+                detail=f'Preparation exited with status {returncode}.',
+                diagnostic=excerpt)
+        if state['state'] != 'prepared':
+            if state['state'] == 'stale':
+                self.remove_readiness_marker(implementation)
+            return dict(
+                state='failed', selection=self.selection_key(resolved),
+                launcher_revision=submitted_revision,
+                detail='Preparation finished without a current readiness marker.',
+                diagnostic=excerpt)
+        try:
+            _, accepted_revision = self.launcher(implementation)
+        except Unsupported:
+            accepted_revision = None
+        if accepted_revision != submitted_revision:
+            self.remove_readiness_marker(implementation)
+            return dict(
+                state='stale', selection=self.selection_key(resolved),
+                launcher_revision=submitted_revision,
+                detail='The launcher changed while accepting preparation. Resolve the selection and prepare again.',
+                diagnostic=excerpt)
+        return dict(
+            state='prepared', selection=self.selection_key(resolved),
+            launcher_revision=submitted_revision,
+            detail=state['detail'], diagnostic=excerpt)
+
     def post_json(self, name, endpoint, body, timeout, required_key=None):
         parsed = urlsplit(endpoint)
         if parsed.scheme not in {'http', 'https'} or parsed.hostname not in {'localhost','127.0.0.1','::1'}:
@@ -722,14 +1177,9 @@ class Explorer:
 
     def validate_command(self,cli,command):
         """Every generated argument must still exist in the current CLI source."""
-        if cli['kind']=='python':
-            args=command[2:]
-        elif cli['kind']=='go':
-            args=command[3:]
-        else:
-            if len(command)!=3 or not command[2].startswith('--args='):
-                raise Unsupported('The generated Gradle command no longer matches the Java adapter.')
-            args=shlex.split(command[2].removeprefix('--args='))
+        if not command or command[0] != './run.sh':
+            raise Unsupported('The generated command no longer uses the recipe launcher.')
+        args=command[1:]
         flags=cli['root']
         if cli['generic'] and cli['kind'] in {'go','java'}:
             if not args or args.pop(0) not in cli['actions']:

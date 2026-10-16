@@ -32,20 +32,20 @@ From the repository root:
 
 ```bash
 cd recipes/__RECIPE_SLUG__/go/systemone
-go mod download
+./run.sh setup
 go test ./...
 ```
 
 Start the mock Worker in terminal 1:
 
 ```bash
-go run . worker -mode mock
+./run.sh worker -mode mock
 ```
 
 Start the mock Workflow in terminal 2:
 
 ```bash
-go run . start -mode mock -text "Investigate this urgent example request."
+./run.sh start -mode mock -text "Investigate this urgent example request."
 ```
 
 Both commands default to domain `cadence-ai-samples`, task list
@@ -69,12 +69,12 @@ Use a dedicated task list for each live Worker and its starts.
 For local Laya:
 
 ```bash
-go run . worker -mode live -classifier-id laya-local \
+./run.sh worker -mode live -classifier-id laya-local \
   -task-list __RECIPE_SLUG__-laya -confirm-live
 ```
 
 ```bash
-go run . start -mode live -task-list __RECIPE_SLUG__-laya \
+./run.sh start -mode live -task-list __RECIPE_SLUG__-laya \
   -workflow-id __RECIPE_SLUG__-laya-demo
 ```
 
@@ -82,14 +82,14 @@ For TypeSafe Jev, export the key only in the Worker shell:
 
 ```bash
 export CLASSIFIER_AI_KEY='your-personal-key'
-go run . worker -mode live -classifier-id jev-default \
+./run.sh worker -mode live -classifier-id jev-default \
   -task-list __RECIPE_SLUG__-jev -confirm-live
 ```
 
 The starter does not need the key:
 
 ```bash
-go run . start -mode live -task-list __RECIPE_SLUG__-jev \
+./run.sh start -mode live -task-list __RECIPE_SLUG__-jev \
   -workflow-id __RECIPE_SLUG__-jev-demo
 ```
 
@@ -138,3 +138,11 @@ Edit `workflow.go` to replace `RecipeInput`, the route criteria, and
 implementation for offline development. Edit `main.go` only when the Worker or
 starter interface changes. The implementation imports no other recipe and is
 intended to be copied as a unit.
+
+## Manual setup recovery
+
+If the launcher cannot prepare the implementation, run:
+
+```bash
+go mod download
+```

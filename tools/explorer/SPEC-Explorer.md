@@ -85,8 +85,35 @@ omission, and keep the earlier working path reliable.
 - Show short inline setup steps with copy buttons: services, recipe runtime,
   dependencies, environment, and required credential names. Users choose where to
   resume; do not assume whether software is installed or running.
-- Users perform setup themselves. Do not start infrastructure, install recipe
-  dependencies, download models, or change machine settings from this step.
+- Show the selected implementation's launcher state as unchecked, not prepared,
+  preparing, prepared, stale, or failed. Keep `./run.sh setup` as the copyable
+  fallback.
+- Resolution returns a deterministic launcher revision. An explicit preparation
+  request submits that revision with the selection. The server re-resolves,
+  rejects a missing or stale revision, and checks the launcher again immediately
+  before invoking the fixed `run.sh setup` entrypoint. It rechecks the revision
+  after setup and removes readiness published by a replaced launcher. The browser
+  supplies no command, executable, path, package, or launcher arguments.
+- Launcher state is bounded and versioned and contains only launcher and
+  dependency fingerprints. Explorer accepts only regular, non-symlinked state
+  paths inside the implementation; malformed, oversized, partial, symlinked, or
+  stale state is not prepared.
+- Preparation may install only the selected recipe's declared dependencies. It
+  runs in a bounded process group, terminates descendants on cancellation or
+  timeout, returns only a bounded sanitized diagnostic excerpt, and removes
+  temporary logs. Explorer shutdown also terminates every active preparation
+  process group. Selection changes hide superseded results but do not cancel
+  preparation. Preparation receives only an allowlisted tool-discovery and
+  temporary-file environment; package-index and proxy URLs reject credentials.
+  Recipe launchers keep Go and Gradle dependency caches in their ignored
+  implementation-local state, independent of Explorer's temporary home.
+  Go and Java are prepared only when the current dependency marker and bounded,
+  safe cache evidence are both present with the required cache directories.
+  Missing, malformed, oversized, or symlinked cache state fails closed.
+  Diagnostic collection retains a bounded tail so the final failure and retry
+  guidance survive noisy package output, then sanitizes before returning it.
+  It does not start infrastructure, download models, perform inference, read or
+  modify `.env`, or change machine settings.
 - Derive instructions from repository documentation and source. Where executable
   facts require metadata, place minimal structured metadata with the recipe and
   validate it against the implementation; avoid brittle runtime prose scraping or
@@ -375,14 +402,13 @@ ownership. This section preserves requirements and historical delivered scope.
    Enter. It never presses Enter automatically; copy remains the permission
    fallback. Other terminal applications and platforms remain future work.
 7. **Recipe runtime bootstrap ([Issue #8](https://github.com/cadence-workflow/cadence-ai-samples/issues/8)):**
-   make the first five minutes after clone reliable
-   by detecting whether the selected implementation is prepared and offering one
-   explicit, recipe-scoped setup action. For Python, create/reuse the implementation
-   virtual environment and install its declared dependencies; support equivalent
-   dependency preparation for other languages. Keep manual setup available, show
-   progress and bounded failures, handle partial/repeated setup safely, and never
-   turn the Explorer into an arbitrary package installer or shell executor. Worker
-   and Workflow handoff must explain when preparation is still required.
+   the recipe-owned launcher contract makes the first five minutes after clone
+   reliable by detecting whether the selected implementation is prepared and
+   offering one explicit, recipe-scoped setup action. Python creates or reuses
+   the implementation virtual environment; Go and Java prepare their declared
+   projects through the same user-facing contract. Manual setup remains
+   available, failures are bounded, and Explorer never becomes an arbitrary
+   package installer or shell executor.
 8. **Secure live credential handoff ([Issue #10](https://github.com/cadence-workflow/cadence-ai-samples/issues/10)):**
    before opening a live Worker command,
    identify the required LLM and classifier credential names and let the user

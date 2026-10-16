@@ -1,13 +1,13 @@
 Next steps (Python 3.12 or 3.13):
   cd recipes/__RECIPE_SLUG__/python/bare
-  python3 -m venv .venv
-  source .venv/bin/activate
-  python -m pip install -e .
-  python -m unittest discover -s tests -v
-  python main.py worker --mode mock
-  python main.py start --mode mock
+  ./run.sh setup
+  .venv/bin/python -m unittest discover -s tests -v
+  ./run.sh worker --mode mock
+  ./run.sh start --mode mock
 
 Then complete recipes/__RECIPE_SLUG__/SPEC.md and replace the starter Workflow.
 Both mock and live modes are synthetic scaffold lanes until you add an external
 Activity.
 Run instructions: recipes/__RECIPE_SLUG__/README.md
+
+Manual recovery: python3.13 -m venv .venv && .venv/bin/python -m pip install -e .

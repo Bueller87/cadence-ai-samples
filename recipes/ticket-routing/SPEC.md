@@ -168,10 +168,10 @@ Workflow code uses Cadence timers and time APIs, never wall-clock sleeps.
 The only actions are:
 
 ```text
-go run . worker -mode mock
-go run . start -mode mock
-go run . worker -mode live -classifier-id laya-local -confirm-live
-go run . start -mode live
+./run.sh worker -mode mock
+./run.sh start -mode mock
+./run.sh worker -mode live -classifier-id laya-local -confirm-live
+./run.sh start -mode live
 ```
 
 Shared flags are `-address`, `-domain`, and `-task-list`. Start-only flags are

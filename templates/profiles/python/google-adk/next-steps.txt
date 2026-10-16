@@ -1,14 +1,14 @@
 Next steps (Python 3.12 or 3.13):
   cd recipes/__RECIPE_SLUG__/python/google-adk
-  python3.13 -m venv .venv
-  source .venv/bin/activate
-  python -m pip install -e .
-  python -m unittest discover -s tests -v
+  ./run.sh setup
+  .venv/bin/python -m unittest discover -s tests -v
 
 Run the offline mock:
-  python main.py worker --mode mock
-  python main.py start --mode mock --prompt "Summarize the next step for this request."
+  ./run.sh worker --mode mock
+  ./run.sh start --mode mock --prompt "Summarize the next step for this request."
 
 Then customize recipes/__RECIPE_SLUG__/SPEC.md and the starter agent behavior.
 Live Worker setup, required confirmation, and supported models:
 recipes/__RECIPE_SLUG__/README.md
+
+Manual recovery: python3.13 -m venv .venv && .venv/bin/python -m pip install -e .

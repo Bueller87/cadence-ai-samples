@@ -1,10 +1,13 @@
 Next steps (Java 17):
   cd recipes/__RECIPE_SLUG__/java/bare
+  ./run.sh setup
   ./gradlew test
 
 Run the offline synthetic scaffold:
-  ./gradlew run --args="worker --mode mock"
-  ./gradlew run --args="start --mode mock --text 'Investigate this example request.'"
+  ./run.sh worker --mode mock
+  ./run.sh start --mode mock --text 'Investigate this example request.'
 
 Then complete recipes/__RECIPE_SLUG__/SPEC.md and replace the scaffold Workflow.
 Run instructions: recipes/__RECIPE_SLUG__/README.md
+
+Manual recovery: ./gradlew --no-daemon classes

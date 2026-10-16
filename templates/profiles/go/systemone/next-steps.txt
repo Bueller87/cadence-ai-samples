@@ -1,12 +1,14 @@
 Next steps (Go 1.23):
   cd recipes/__RECIPE_SLUG__/go/systemone
-  go mod download
+  ./run.sh setup
   go test ./...
 
 Run the offline mock path:
-  go run . worker -mode mock
-  go run . start -mode mock
+  ./run.sh worker -mode mock
+  ./run.sh start -mode mock
 
 Then adapt recipes/__RECIPE_SLUG__/SPEC.md and workflow.go for the business
 decision. Live classifier setup and confirmation commands:
 recipes/__RECIPE_SLUG__/README.md
+
+Manual recovery: go mod download

@@ -30,9 +30,7 @@ the existing domain `cadence-ai-samples`. Run from the repository root:
 
 ```bash
 cd recipes/recurring-ai-watch/python/google-adk
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -e .
+./run.sh setup
 ```
 
 Both folders pin the Cadence Python SDK to PR #176 commit
@@ -47,16 +45,16 @@ Give each folder its own virtual environment so the pinned SDK doesn't affect ot
 Terminal 1 (leave the Worker running):
 
 ```bash
-python main.py worker
+./run.sh worker
 ```
 
 Terminal 2 (same directory and interpreter selection):
 
 ```bash
-python main.py start
-python main.py status
-python main.py check-now
-python main.py stop
+./run.sh start
+./run.sh status
+./run.sh check-now
+./run.sh stop
 ```
 
 The default Workflow ID is `recurring-ai-watch-google-adk-demo` (or
@@ -94,7 +92,7 @@ commands saved to the repository, catalog files, or Workflow inputs.
 ```bash
 export MODEL_AI_KEY='your-google-gemini-key'
 export CLASSIFIER_AI_KEY='your-typesafe-jev-key'
-python main.py --domain cadence-ai-samples \
+./run.sh --domain cadence-ai-samples \
     --task-list recurring-ai-watch-live \
     --model-id gemini-flash-lite --classifier-id jev-default \
     worker --mode live --confirm-live
@@ -103,12 +101,12 @@ python main.py --domain cadence-ai-samples \
 Terminal 2:
 
 ```bash
-python main.py --task-list recurring-ai-watch-live \
+./run.sh --task-list recurring-ai-watch-live \
     --model-id gemini-flash-lite --classifier-id jev-default \
     start --mode live
-python main.py status
-python main.py check-now
-python main.py stop
+./run.sh status
+./run.sh check-now
+./run.sh stop
 ```
 
 Worker/start resolve command-line IDs through `models.yaml` and
@@ -194,7 +192,7 @@ terminal status/history to determine success or failure.
 ## Validation
 
 ```bash
-python -m unittest discover -s tests -v
+.venv/bin/python -m unittest discover -s tests -v
 python -m py_compile config.py workflow.py live.py inference.py main.py
 # Optional: existing local Cadence server; isolated mock Worker, no AI calls.
 python tests/local_cadence_checks.py
@@ -217,3 +215,12 @@ The released SDK's in-memory tests auto-fire timers, so they cannot faithfully
 inject stop while timer-waiting or demonstrate server-side Activity retries.
 The smoke and local-server checks cover those boundaries. Local checks exercise
 Continue-As-New, exhausted-retry recovery, and stop during an active Activity.
+
+## Manual setup recovery
+
+If the launcher cannot prepare the implementation, run:
+
+```bash
+python3.13 -m venv .venv
+.venv/bin/python -m pip install -e .
+```

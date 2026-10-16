@@ -38,19 +38,19 @@ From the repository root:
 
 ```bash
 cd recipes/__RECIPE_SLUG__/go/bare
-go mod download
+./run.sh setup
 ```
 
 Start the Worker in terminal 1:
 
 ```bash
-go run . worker -mode mock
+./run.sh worker -mode mock
 ```
 
 Start the example Workflow in terminal 2:
 
 ```bash
-go run . start -mode mock -text "Investigate this example request."
+./run.sh start -mode mock -text "Investigate this example request."
 ```
 
 Both commands default to domain `cadence-ai-samples`, task list
@@ -61,8 +61,8 @@ actions require an explicit `-mode mock` or `-mode live`.
 To exercise the scaffold lane without adding a provider:
 
 ```bash
-go run . worker -mode live
-go run . start -mode live
+./run.sh worker -mode live
+./run.sh start -mode live
 ```
 
 ## Workflow ID reuse
@@ -105,3 +105,11 @@ orchestration. Edit `main.go` only to change configuration or the command
 interface. Keep external and nondeterministic calls in Activities. All source
 and dependencies are local to this directory so the recipe remains
 independently copyable.
+
+## Manual setup recovery
+
+If the launcher cannot prepare the implementation, run:
+
+```bash
+go mod download
+```

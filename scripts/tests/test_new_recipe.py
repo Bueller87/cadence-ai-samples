@@ -115,6 +115,11 @@ class NewRecipeTests(unittest.TestCase):
             command = f"{action} {command_mode} mock"
             self.assertIn(command, readme, f"{profile}: README command drift")
             self.assertIn(command, next_steps, f"{profile}: next-steps command drift")
+        launcher = recipe / profile / "run.sh"
+        self.assertTrue(launcher.is_file(), f"{profile}: run.sh missing")
+        self.assertTrue(os.access(launcher, os.X_OK), f"{profile}: run.sh not executable")
+        self.assertIn("./run.sh setup", readme, f"{profile}: README launcher drift")
+        self.assertIn("./run.sh setup", next_steps, f"{profile}: next-steps launcher drift")
         setup = {
             "go": "go test ./...",
             "java": "./gradlew test",
@@ -239,22 +244,22 @@ class NewRecipeTests(unittest.TestCase):
             "\n"
             "Next steps (Python 3.12 or 3.13):\n"
             "  cd recipes/invoice-review/python/bare\n"
-            "  python3 -m venv .venv\n"
-            "  source .venv/bin/activate\n"
-            "  python -m pip install -e .\n"
-            "  python -m unittest discover -s tests -v\n"
-            "  python main.py worker --mode mock\n"
-            "  python main.py start --mode mock\n"
+            "  ./run.sh setup\n"
+            "  .venv/bin/python -m unittest discover -s tests -v\n"
+            "  ./run.sh worker --mode mock\n"
+            "  ./run.sh start --mode mock\n"
             "\n"
             "Then complete recipes/invoice-review/SPEC.md and replace the starter Workflow.\n"
             "Both mock and live modes are synthetic scaffold lanes until you add an external\n"
             "Activity.\n"
-            "Run instructions: recipes/invoice-review/README.md\n"))
+            "Run instructions: recipes/invoice-review/README.md\n"
+            "\n"
+            "Manual recovery: python3.13 -m venv .venv && .venv/bin/python -m pip install -e .\n"))
         recipe = self.root / "recipes/invoice-review"
         self.assertEqual([p.name for p in (self.root / "recipes").iterdir()], ["invoice-review"])
         self.assertEqual(sorted(tree(recipe)), [
             "PROMPT.md", "README.md", "SPEC.md",
-            "python/bare/main.py", "python/bare/pyproject.toml",
+            "python/bare/main.py", "python/bare/pyproject.toml", "python/bare/run.sh",
             "python/bare/tests/test_recipe.py", "python/bare/workflow.py",
         ])
         for name, content in tree(recipe).items():

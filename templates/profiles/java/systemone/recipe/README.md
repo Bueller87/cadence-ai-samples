@@ -17,6 +17,7 @@ the provider, model, and endpoint.
 
 ```bash
 cd recipes/__RECIPE_SLUG__/java/systemone
+./run.sh setup
 ./gradlew test
 ```
 
@@ -31,13 +32,13 @@ The CLI has exactly two positional actions, `worker` and `start`. Each requires
 Start the Worker:
 
 ```bash
-./gradlew run --args="worker --mode mock"
+./run.sh worker --mode mock
 ```
 
 Start the Workflow in another terminal:
 
 ```bash
-./gradlew run --args="start --mode mock --text 'Investigate this urgent example request.'"
+./run.sh start --mode mock --text 'Investigate this urgent example request.'
 ```
 
 The mock path does not read a catalog, `.env.example`, or any credential.
@@ -52,21 +53,21 @@ hosts, and unsupported schemes. No provider host is hardcoded.
 For local Laya, use the same dedicated task list and classifier ID:
 
 ```bash
-./gradlew run --args="worker --mode live --classifier-id laya-local --task-list __RECIPE_SLUG__-laya --confirm-live"
-./gradlew run --args="start --mode live --task-list __RECIPE_SLUG__-laya --workflow-id __RECIPE_SLUG__-laya-demo"
+./run.sh worker --mode live --classifier-id laya-local --task-list __RECIPE_SLUG__-laya --confirm-live
+./run.sh start --mode live --task-list __RECIPE_SLUG__-laya --workflow-id __RECIPE_SLUG__-laya-demo
 ```
 
 For TypeSafe, export the key only in the Worker shell:
 
 ```bash
 export CLASSIFIER_AI_KEY='your-personal-key'
-./gradlew run --args="worker --mode live --classifier-id jev-default --task-list __RECIPE_SLUG__-jev --confirm-live"
+./run.sh worker --mode live --classifier-id jev-default --task-list __RECIPE_SLUG__-jev --confirm-live
 ```
 
 The start command needs no key, classifier ID, or catalog:
 
 ```bash
-./gradlew run --args="start --mode live --task-list __RECIPE_SLUG__-jev --workflow-id __RECIPE_SLUG__-jev-demo"
+./run.sh start --mode live --task-list __RECIPE_SLUG__-jev --workflow-id __RECIPE_SLUG__-jev-demo
 ```
 
 The live Worker's default `--catalog-dir ../../../..` points to the repository
@@ -87,3 +88,11 @@ an open duplicate remains an error. `./gradlew test` covers the Workflow, mock
 path, catalogs, endpoint safety, credentials, literal CLI flags, a mutated
 endpoint reaching a local HTTP stub, start-command isolation from Worker
 configuration, and an in-memory duplicate-open rejection without live calls.
+
+## Manual setup recovery
+
+If the launcher cannot prepare the implementation, verify Java and the checked-in Gradle wrapper, then run:
+
+```bash
+./gradlew --no-daemon classes
+```

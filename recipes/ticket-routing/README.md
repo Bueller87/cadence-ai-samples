@@ -49,18 +49,24 @@ cadence --domain cadence-ai-samples domain register
 
 Cadence Web is normally available at <http://localhost:8088>.
 
+Prepare this implementation from any working directory:
+
+```bash
+recipes/ticket-routing/go/systemone/run.sh setup
+```
+
 ## Run offline with the mock classifier
 
 Use two terminals:
 
 ```bash
 cd recipes/ticket-routing/go/systemone
-go run . worker -mode mock
+./run.sh worker -mode mock
 ```
 
 ```bash
 cd recipes/ticket-routing/go/systemone
-go run . start -mode mock
+./run.sh start -mode mock
 ```
 
 The starter randomly selects one record from `testdata/tickets.jsonl`, prints
@@ -70,7 +76,7 @@ between processes. The Workflow and Worker never select or mutate the input.
 For a reproducible custom request, use the profile-supported `-text` flag:
 
 ```bash
-go run . start -mode mock \
+./run.sh start -mode mock \
   -workflow-id ticket-routing-custom-demo \
   -text "I was charged twice for my StreamWave subscription."
 ```
@@ -126,7 +132,7 @@ task list in both terminals:
 
 ```bash
 cd recipes/ticket-routing/go/systemone
-go run . worker -mode live \
+./run.sh worker -mode live \
   -classifier-id laya-local \
   -task-list ticket-routing-laya \
   -confirm-live
@@ -134,7 +140,7 @@ go run . worker -mode live \
 
 ```bash
 cd recipes/ticket-routing/go/systemone
-go run . start -mode live -task-list ticket-routing-laya
+./run.sh start -mode live -task-list ticket-routing-laya
 ```
 
 The starter reads no classifier catalog or credentials. Live configuration
@@ -167,14 +173,14 @@ This path consumes external API usage and must be explicitly authorized:
 ```bash
 cd recipes/ticket-routing/go/systemone
 export CLASSIFIER_AI_KEY='your-personal-key'
-go run . worker -mode live \
+./run.sh worker -mode live \
   -classifier-id jev-default \
   -task-list ticket-routing-jev \
   -confirm-live
 ```
 
 ```bash
-go run . start -mode live -task-list ticket-routing-jev
+./run.sh start -mode live -task-list ticket-routing-jev
 unset CLASSIFIER_AI_KEY
 ```
 
@@ -226,3 +232,11 @@ dependencies. The implementation imports no other recipe.
 This sample does not implement batch execution, throughput or cost reporting,
 classification benchmarking, reassignment, workload balancing, multi-level
 escalation, or full ticket resolution.
+
+## Manual setup recovery
+
+If the launcher cannot prepare the implementation, run:
+
+```bash
+go mod download
+```

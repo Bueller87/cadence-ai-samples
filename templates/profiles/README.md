@@ -44,16 +44,18 @@ Implemented profiles:
 
 ## Generic command contract
 
-Every profile exposes exactly `worker` and `start`, each with an explicit
-`mock` or `live` mode. The language-specific shapes are:
+Every profile has an executable implementation-local launcher. Prepare it once
+with `./run.sh setup`; Worker and Workflow commands also prepare automatically
+when dependency declarations change. Every profile exposes exactly `worker` and
+`start`, each with an explicit `mock` or `live` mode:
 
 ```text
-python main.py worker --mode mock
-go run . worker -mode mock
-./gradlew run --args='worker --mode mock'
+./run.sh worker --mode mock
+./run.sh worker -mode mock
 ```
 
-Replace `worker` with `start` for the starter command. Inference selections,
+Python and Java use `--mode`; Go uses `-mode`. Replace `worker` with `start` for
+the starter command. Inference selections,
 catalog paths, credentials, and live-confirmation flags belong only to live
 Workers. Start commands contain business input and Cadence routing values, never
 model, classifier, catalog, credential, or confirmation configuration.

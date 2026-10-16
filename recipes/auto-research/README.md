@@ -41,9 +41,7 @@ Choose either independent implementation:
 ```bash
 cd recipes/auto-research/python/openai-agents
 # or: cd recipes/auto-research/python/google-adk
-python3.13 -m venv .venv
-source .venv/bin/activate
-python -m pip install -e .
+./run.sh setup
 ```
 
 Use a publication directory outside the checkout:
@@ -59,30 +57,30 @@ The Worker defaults to `research_reports` when this variable is absent.
 Terminal 1:
 
 ```bash
-python main.py worker --mode mock
+./run.sh worker --mode mock
 ```
 
 Terminal 2:
 
 ```bash
-python main.py start --mode mock \
+./run.sh start --mode mock \
   --text "The impact of AI on drug discovery"
-python main.py status
+./run.sh status
 ```
 
 The initial draft is revision `0`. Read the current revision before every
 action:
 
 ```bash
-python main.py revise --expected-revision 0 \
+./run.sh revise --expected-revision 0 \
   --feedback "Make the executive summary shorter."
-python main.py status
+./run.sh status
 
-python main.py expand --expected-revision 1 \
+./run.sh expand --expected-revision 1 \
   --topic "Operational adoption constraints"
-python main.py status
+./run.sh status
 
-python main.py approve --expected-revision 2
+./run.sh approve --expected-revision 2
 ```
 
 Only the first eligible action for a revision wins. Early, stale, duplicate,
@@ -118,17 +116,17 @@ ollama list
 Terminal 1:
 
 ```bash
-python main.py worker --mode live --confirm-live \
+./run.sh worker --mode live --confirm-live \
   --model-id llama3.2-local
 ```
 
 Terminal 2:
 
 ```bash
-python main.py start --mode live \
+./run.sh start --mode live \
   --text "The impact of AI on drug discovery"
-python main.py status
-python main.py approve --expected-revision 0
+./run.sh status
+./run.sh approve --expected-revision 0
 ```
 
 This live path uses the complete production state machine: planner, every
@@ -174,7 +172,7 @@ search/read Activities make no network requests.
 From each implementation directory:
 
 ```bash
-python -m unittest discover -s tests -v
+.venv/bin/python -m unittest discover -s tests -v
 python tests/local_cadence_checks.py
 ```
 
@@ -208,3 +206,12 @@ Copy the whole recipe directory. It imports neither templates nor another
 recipe. Preserve Activity boundaries for model calls, simulated tools, progress,
 and publication; keep Worker-local configuration out of Workflow data; and
 replace synthetic fixtures and role instructions together.
+
+## Manual setup recovery
+
+If the launcher cannot prepare the implementation, run:
+
+```bash
+python3.13 -m venv .venv
+.venv/bin/python -m pip install -e .
+```

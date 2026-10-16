@@ -35,13 +35,15 @@ the copy/paste commands and acknowledgment walkthrough.
 
 Run `./scripts/explore.sh` to open a localhost explorer of this checkout. Choose a
 sample, follow its setup and service checks, warm local inference when applicable,
-and copy matching Worker and Workflow commands. Refresh reads the current recipe
-files and catalogs, including local edits.
+prepare the selected recipe's declared dependencies explicitly, and copy matching
+Worker and Workflow commands. Refresh reads the current recipe files and catalogs,
+including local edits.
 
 The launcher needs Python 3.10+ with venv support and installs its one small
 dependency on first use. Those are explorer prerequisites only. Each recipe lists
-its own Go or Python runtime and service requirements. The explorer previews
-commands; run them in your terminal.
+its own Go, Java, or Python runtime and service requirements. Recipe commands use
+an implementation-local `run.sh`; Explorer may invoke only its fixed `setup`
+action, while Worker and Workflow commands remain for your terminal.
 See [explorer usage and validation](tools/explorer/README.md).
 
 ## Local AI services

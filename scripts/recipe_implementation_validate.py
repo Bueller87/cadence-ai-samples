@@ -12,6 +12,7 @@ ARTIFACT_SEGMENTS = (
     "venv",
     "__pycache__",
     ".pytest_cache",
+    ".run-state",
     ".gradle",
     "build",
     ".DS_Store",
@@ -151,6 +152,13 @@ def main() -> int:
     symlinks = symlink_hits(tree_root)
     if symlinks:
         print(f"symlink in {symlink_label}: {symlinks[0]}", file=sys.stderr)
+        return 1
+    launcher = tree_root / "run.sh"
+    if not launcher.is_file() or not launcher.stat().st_mode & 0o111:
+        print(
+            f"missing executable run.sh in {artifact_label}",
+            file=sys.stderr,
+        )
         return 1
     cross = cross_recipe_hits(tree_root, slug)
     if cross:
