@@ -132,15 +132,14 @@ async def main() -> None:
                             ".venv", "venv", "__pycache__"))
         for name in ("README.md", "models.yaml", "classifiers.yaml"):
             shutil.copy(ROOT / name, checkout / name)
-        (checkout / "recipes" / "ticket-routing" /
+        (checkout / "recipes" / "auto-research" /
          "explorer.yaml").write_text(metadata())
 
         explorer = Explorer(checkout)
         selection = {
-            "sample": "ticket-routing",
-            "implementation": "recipes/ticket-routing/go",
-            "mode": "demo",
-            "classifier": "mock",
+            "sample": "auto-research",
+            "implementation": "recipes/auto-research/python/openai-agents",
+            "mode": "mock",
         }
         resolved = explorer.resolve(selection)
         workflow_id = "explorer-structured-check-" + uuid.uuid4().hex

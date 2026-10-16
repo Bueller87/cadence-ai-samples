@@ -1,174 +1,240 @@
-# High-volume support ticket router: implementation specification
+# StreamWave ticket routing implementation specification
 
-**Repository:** `cadence-workflow/cadence-ai-samples`
-**Recipe path:** `recipes/ticket-routing/`  
-**Status:** Implemented through Phase 4C, including the corrections approved in
-[Issue #17](https://github.com/cadence-workflow/cadence-ai-samples/issues/17).
-Automatic acknowledgment simulation and classification-accuracy benchmarking
-are non-goals.
-**Language:** Go  
-**Scenario:** StreamWave, a fictional streaming service
+## Purpose
 
-## 1. Problem and story
+Demonstrate why Cadence remains useful after an AI classification decision:
+durable department Child Workflows, fixed employee assignment, validated
+acknowledgment Signals, SLA timers, replay, and Cadence Web Custom Workflow
+Controls.
 
-StreamWave receives free-form customer-support tickets at high volume. A specialized decision model interprets each message once. Ordinary code and Cadence then handle routing, retries, acknowledgments, and service-level agreement (SLA) timers. An optional Custom Workflow Control (CWC) lets a user acknowledge an assignment in Cadence Web.
+The sample is independently copyable and uses only synthetic StreamWave support
+tickets.
 
-The sample must be easy to **run and copy into another Go application**. Keep it focused on this ticket-routing use case instead of building a reusable AI framework or production customer-service platform.
+## Repository implementation profile
 
-## 2. Scope
+- **Cadence language:** Go
+- **Classifier integration:** SystemOne
+- **Agent integration:** none
+- **Implementation directory:** `go/systemone`
+- **CLI contract:** positional `worker|start` with required `-mode mock|live`
+- **Mock behavior:** deterministic local classification without catalogs,
+  credentials, or provider calls
+- **Live behavior:** a confirmed live Worker selects `jev-default` or
+  `laya-local` from the repository classifier catalog
+- **Workflow ID reuse:** stable `ticket-routing-demo` with
+  `ALLOW_DUPLICATE`; an open duplicate remains rejected
+- **Profile deviations:** a text-less start selects a bundled fixture, the
+  Workflow input is a typed ticket instead of generic text, and the business
+  workflow includes Child Workflows, Queries, Signals, and SLA timers
 
-### Required
-
-- One parent workflow per ticket: `TicketIntakeWorkflow`.
-- One Jev request per ticket containing **three independent typed questions**: Department, Priority, Complexity.
-- Four department-specific Child Workflow routes: Billing, Technical, Account, Content. Thin wrappers around common local logic are acceptable if clearer than duplicating code.
-- Assign one **fixed fictional employee ID per department** (no employee-selection algorithm).
-- Child Workflow waits for a matching acknowledgment Signal or a durable, configurable SLA deadline. Acknowledgment completes with `ACKNOWLEDGED`; timeout completes with `SLA_TIMEOUT`.
-- A simple CWC Markdown acknowledgment button and the CLI acknowledgment command drive the **same child-workflow Signal**.
-- Mock classifier by default; real Jev use must be explicitly opted into on the user's personal machine.
-- Bundled synthetic text tickets; optional `PROMPT.md` for generating more; a bounded batch runner with clearly labeled metrics.
-- Reliable Activity retry policy and deterministic workflow replay; unit tests including the signal/timeout race.
-
-### Explicit non-goals
-
-- No generative agent, multimodal extraction, human-in-the-loop (HITL) review queue, refund execution, full ticket resolution, skill matching, workload balancing, employee availability, reassignment, or multi-level escalation.
-- No automatic acknowledgment simulation or unattended signal sender.
-- No classification-accuracy scoring or benchmarking against the provisional fixture labels.
-- No automatic rerouting of ambiguous tickets: record them as `UNROUTABLE`, without starting a Child Workflow.
-- No real customer data, actual streaming-company integration, web dashboard, shared integration framework, or production-scale performance claims.
-- No Go-versus-Python/four-way model benchmark in this first recipe.
-
-## 3. Layout and copy-out rule
+## Layout
 
 ```text
 recipes/ticket-routing/
 ├── README.md
 ├── SPEC.md
 ├── PROMPT.md
+├── explorer.yaml
 ├── testdata/
 │   └── tickets.jsonl
 └── go/
-    ├── go.mod
-    ├── go.sum
-    ├── .env.example
-    ├── main.go
-    ├── catalog.go
-    ├── batch.go
-    ├── workflow.go
-    ├── workflow_test.go
-    └── batch_test.go
+    └── systemone/
+        ├── .env.example
+        ├── go.mod
+        ├── go.sum
+        ├── main.go
+        ├── main_test.go
+        ├── catalog.go
+        ├── workflow.go
+        └── workflow_test.go
 ```
 
-Put workflow functions, Activities, small business structs, and small provider implementations in `workflow.go`. `catalog.go` loads `classifiers.yaml`. Register workflows and Activities and implement the command-line interface (CLI) starter in `main.go`. `batch.go` contains the bounded batch runner and its reporting so the copy-out files stay free of the dataset runner. No cross-recipe imports, `integrations/`, or shared framework. `go build ./...` and `go test ./...` must work from `go/`. Copy `workflow.go`, `main.go`, and `catalog.go`, plus their normal module dependencies, into an existing Cadence project, without importing this recipe's dataset or benchmark tooling. `.env.example` names `CLASSIFIER_AI_KEY`. The worker does not load that file.
+The implementation must not import another recipe or a shared AI integration
+layer.
 
-Do not replace the scaffold or alter unrelated files. The spec lives at the recipe root, not in `go/`.
+## Input selection
 
-## 4. Inputs, outputs, and classification contract
+Each parent Workflow receives one `Ticket{ticket_id,message,acknowledgment_sla}`
+as explicit input.
 
-**Input:** `Ticket{TicketID, Message}`. Each ID must be unique per batch; input is synthetic text only. Use a small fixture dataset with at least 30 diverse tickets, including ambiguous and incomplete messages. No account identifiers or real customer information.
+- When `-text` is omitted, the external starter selects one random record from
+  the 40-ticket JSON Lines fixture and prints its ID and message.
+- Selection may repeat across processes. No persistent or Workflow-local
+  round-robin state is permitted.
+- When `-text` is present, the starter derives a deterministic synthetic ID and
+  uses the supplied text.
+- File I/O and randomness remain in the starter. The Worker and Workflow do not
+  choose or mutate input.
+- Activity retries and replay retain the ticket recorded in Workflow history.
 
-**Classification:** exactly one TypeSafe System One API request (`POST /v1/systemone` with configured model; default alias `jev-latest`) per ticket attempt, with the following three **independent `choice` questions**:
+## Classification Activity
 
-| Question | Allowed values | Meaning |
-|---|---|---|
-| `department` | `billing`, `technical`, `account`, `content` | Primary team best placed to handle the issue. |
-| `priority` | `low`, `normal`, `high`, `critical` | Operational urgency based on issue impact/time-sensitivity, **not simply sentiment**. |
-| `complexity` | `tier1`, `tier2`, `tier3` | Estimated expertise needed to investigate. Informational only; not used for employee matching in this sample. |
+One `ClassifyTicket` Activity request contains three independent `choice`
+questions:
 
-Use the provider's documented `state`/`model`/`questions` request structure and `answers` schema; define clear option descriptions for the fictional streaming business. Parse the chosen option, per-question probability distribution and confidence, returned model ID, and `usage.input_tokens`/`usage.output_tokens` where available. Do **not** invent an output schema, assume `score` returns categorical values, or pretend a reported confidence is a quality guarantee. All token usage and cost claims must distinguish real API data from mock values.
+| Question | Allowed values |
+| --- | --- |
+| department | `billing`, `technical`, `account`, `content` |
+| priority | `low`, `normal`, `high`, `critical` |
+| complexity | `tier1`, `tier2`, `tier3` |
 
-Normalize to `RoutingDecision{Department, Priority, Complexity, DepartmentConfidence, PriorityConfidence, ComplexityConfidence, Model, InputTokens, OutputTokens, ...}`. Exact Go field names may vary; use explicit JSON tags as needed. Keep provider-specific response parsing inside the Activity/provider code, not workflow code.
+The result records choices, probabilities, provider-specific confidence values,
+model, and token usage when reported. Provider parsing stays inside Activity
+code.
 
-**Low-confidence/error policy:** If the provider returns an invalid label, missing response field, or a classification with department confidence below a configurable, documented threshold (illustrative default `0.65`), mark `UNROUTABLE` with a reason and complete without a department Child Workflow. If priority/complexity are low-confidence, retain the chosen values but mark the result as uncertain; never silently treat these as verified facts. Live demo logs and `live-batch -show-classifications` print `priority-uncertain` and `complexity-uncertain` with the chosen values. Nonretryable configuration/API failures should yield an explicit failed execution or structured error, not a fabricated classification.
+TypeSafe/Jev uses its `confidence` field as selected-answer confidence and keeps
+the `0.65` department threshold. Laya uses `answer_confidence`, the selected
+choice probability, and routes departments at `0.40` or higher. Laya's raw
+`confidence` value is normalized distribution entropy; it is preserved
+separately as `*_entropy_confidence` and never used or described as
+selected-answer confidence. For Laya, `answer_confidence` is required to equal
+the selected entry in `probabilities`. Missing, out-of-range, or inconsistent
+confidence data is a nonretryable malformed-response error.
 
-**Result:** `TicketResult` records ticket ID, classification (if available), department/employee/child execution identifier (if applicable), status (`ACKNOWLEDGED`, `SLA_TIMEOUT`, `UNROUTABLE`), and relevant timings. Separate terminal business status from workflow-engine execution failure.
+An unsupported choice or provider-specific department confidence below its
+threshold returns `UNROUTABLE` without a Child Workflow. Low priority or
+complexity selected-answer confidence sets informational uncertainty flags
+without changing the chosen value.
 
-## 5. Cadence execution and activity boundaries
+Mock mode uses deterministic local rules. Live mode uses one catalog-selected
+SystemOne request per Activity attempt. TypeSafe requires
+`CLASSIFIER_AI_KEY`; Laya requires a loopback endpoint and no key.
+
+## Workflow topology
 
 ```text
-One ticket → TicketIntakeWorkflow
-  → ClassifyTicket Activity (mock or Jev)
-      ├─ UNROUTABLE → record result; complete parent
-      └─ valid department → selected department Child Workflow
-            → fixed department employee ID
-            → start durable acknowledgment deadline
-            → wait for matching acknowledgment Signal OR deadline
-                ├─ Signal first → ACKNOWLEDGED
-                └─ deadline first → SLA_TIMEOUT
-            → return child result to parent; parent completes
+TicketIntakeWorkflow
+  -> ClassifyTicket Activity
+  -> UNROUTABLE, or one department Child Workflow
+  -> fixed employee assignment
+  -> acknowledgment Signal or durable SLA timer
+  -> ACKNOWLEDGED or SLA_TIMEOUT
 ```
 
-- `TicketIntakeWorkflow` starts and **waits for** its Child Workflow's terminal result. Use a deterministic, documented ID derivation so the CLI can locate the child without relying on random IDs or guessing. Define ID rules that prevent collisions between tickets.
-- The department Child Workflow owns assignment state, the signal channel, and the SLA timer. Register a read-only query that exposes current status and, when awaiting acknowledgment, Markdown formatted for Cadence Web CWC.
-- The acknowledgment signal payload must contain at least `ticket_id` and `assignment_id` (or equivalent deterministic assignment token). Accept **only** the current ticket/assignment, ignoring duplicates, invalid payloads, and late signals. A signal received after SLA expiry must never turn `SLA_TIMEOUT` into `ACKNOWLEDGED`. Define deterministic handling of the signal/deadline boundary and test it.
-- The CWC button acknowledges an assignment and does not resolve the ticket; label it `Acknowledge Ticket`. Its `{% signal %}` action targets the **department Child Workflow** and sends the same payload as the CLI acknowledgment command. Render a plain completed-state view without an action button after acknowledgment or expiry. Use Cadence's formatted query response and the Markdown tag syntax documented for Custom Workflow Controls; do not return raw HTML or invent CWC APIs. Document the Cadence Web version needed for CWC and provide the CLI signal alternative when it is unavailable.
-- Use short, configurable demonstration SLA durations (illustrative: critical 5s, high 10s, normal 20s, low 30s). Label these as **demo policy**, not real customer SLAs. Do not create a timer by `time.Sleep` in workflow code.
-- **All external and nondeterministic operations belong in Activities or in the external starter, never in workflow logic.** In particular: Jev HTTP, clocks/wall time, random inputs, logs/metrics external side effects, file I/O. Use Cadence workflow APIs for time, timers, signals, Child Workflows, and query handlers. Completed Activity results must be reused on workflow replay; do not call the provider from a workflow or query handler.
+The four Child Workflows are Billing, Technical, Account, and Content. Their
+fixed employee IDs are `SW-BILLING-101`, `SW-TECH-202`, `SW-ACCOUNT-303`, and
+`SW-CONTENT-404`.
 
-## 6. Execution and demo interfaces
+The caller-provided parent Workflow ID is stable. Child IDs append
+`-child-<department>`. Assignment IDs combine ticket ID, department, and
+employee ID.
 
-Prefer a **single Go executable** (`main.go`) with small documented modes and flags instead of multiple mini-applications. Exact CLI flag spelling is left to implementation, but the README must offer copy/paste commands for:
+## Queries, Signals, and CWC
 
-1. Starting the worker with mock classification.
-2. Starting one synthetic ticket and viewing its parent and Child Workflow in Cadence Web.
-3. Manually acknowledging the child via CLI Signal **or** the CWC button.
-4. Demonstrating SLA expiry by deliberately sending no acknowledgment.
-5. Running a bounded batch of synthetic tickets. The currently implemented batch sends no acknowledgment Signals, so routed tickets exercise `SLA_TIMEOUT`.
-6. Opting into real Jev with a personal API key, **explicitly** choosing a small initial live call count; never default to real calls or silently retry a batch without a bound.
+The parent registers a read-only `assignment-status` Query before classification.
+It returns:
 
-Batch orchestration must live **outside** individual workflow code, using the Cadence client. Bound submission and simultaneous open executions with configurable concurrency. Each workflow receives one ticket only: no giant workflow looping over thousands of tickets. Do not use a random generator in workflow logic. On an unsuccessful batch, list each failed execution in the summary. The runner waits for every submitted workflow and counts a client wait error as a failed execution. It does not keep a separate pending count. Batch mode does not send acknowledgment Signals.
+- `CLASSIFICATION_PENDING` while the Activity is unresolved;
+- `UNROUTABLE` and a reason when no Child starts; or
+- `AWAITING_ACKNOWLEDGMENT` with Child Workflow ID, department, employee,
+  assignment ID, `acknowledge-assignment` Signal name, and SLA.
 
-## 7. Jev and mock implementation
+After the Child completes, the same typed Query reports `ACKNOWLEDGED` or
+`SLA_TIMEOUT` and whether the SLA was met.
 
-- Provide a minimal Jev HTTP client using Go standard `net/http` in the Activity implementation, with the endpoint/model/configuration read from worker startup configuration. Do not require a Go client library or a generic AI adapter package.
-- Default `-classifier-id mock`. Mock responses should be deterministic based on fixture metadata or a documented rule. Simulated Jev data does not represent model accuracy, latency, token usage, or spend. Provide a way to create a controlled transient failure and a nonretryable failure for tests/demo without touching Jev.
-- Live classifiers are selected by ID from the repository-root `classifiers.yaml` (`-classifier-id jev-default` or `laya-local`). `jev-default` requires an explicitly provided `CLASSIFIER_AI_KEY`; local `laya-local` needs no key and must use a loopback endpoint. `.env.example` documents the variable name and is not loaded by the worker. Do not check secrets into Git or print them. Validate configuration early; never send real API requests from a work machine lacking approval.
-- Use a finite Activity timeout and Cadence-configured retry policy with exponential backoff for network/transient errors, HTTP 429/529, and retryable HTTP 5xx; respect server retry guidance where feasible. Authentication errors, schema/validation errors, and malformed successful responses should fail nonretryably. Avoid stacking an unbounded provider retry loop on top of Cadence retries. Document that failed/timed-out Activities may repeat an inference request; only **completed, recorded** Activity results are replay-safe without a new model call.
+The starter polls this Query at a fixed interval for a bounded period. It prints
+the routed assignment before waiting for terminal completion. A polling timeout
+does not create an unbounded loop.
 
-## 8. Dataset and optional generation prompt
+The Child Workflow owns assignment state and validates
+`AcknowledgmentSignal{ticket_id,employee_id,assignment_id}`. The parent
+`ticket-assignment` Query returns Cadence formatted Markdown with an
+**Acknowledge Ticket** action while an assignment is pending. The action sends
+the complete typed Signal payload to the parent, which deterministically
+forwards it to the current Child, where the same validation runs. The generic
+Explorer resolves the parent and links to its Cadence Web Queries page; it does
+not own a Ticket Routing Signal form.
 
-Commit `testdata/tickets.jsonl` with at least 30 realistic fictional streaming-service customer tickets. Include ticket ID, message, and optional `expected_department`/`expected_priority`/`expected_complexity` for **test fixtures only**. Include examples for all four departments, urgency levels, typos, multi-intent ambiguity, and missing context. Do not present synthetic expected labels as independently validated ground truth.
+The Child `ticket-assignment` Query provides an alternate direct CWC path with
+the same action and payload. Parent and Child formatted Queries have no action
+after completion. Invalid, duplicate, and late Signals are ignored. Timeout
+wins if Signal and timer are ready in the same Workflow task.
 
-`PROMPT.md` should instruct a coding assistant to generate a larger, schema-compatible JSONL corpus using synthetic-only inputs, controlled categories/distributions, varied writing styles, and explicit ambiguous cases. It must avoid real customer data and explain that labels should be reviewed before use in quality comparisons. The recipe must run without generating new data or using a paid model.
+## SLA policy
 
-## 9. Metrics and benchmarks
+Interactive defaults are:
 
-Mock and live batch reports stay separate. Match the report the batch runner prints today. Do not add median, 95th percentile, activity retry count, a pending-workflow count, or classification-accuracy scoring.
+- critical: 2 minutes
+- high: 3 minutes
+- normal: 4 minutes
+- low: 5 minutes
 
-The mock report includes submitted, completed, and failed workflow counts; `ACKNOWLEDGED`, `SLA_TIMEOUT`, and `UNROUTABLE`; department totals; peak in-flight executions; wall-clock duration; per-execution client wait as minimum, average, and maximum; and completed workflows per second. Each failed execution lists workflow ID, ticket ID, start time, elapsed time, and error.
+These are demonstration policy, not customer commitments. SLA configuration is
+typed and internal; the CLI exposes no SLA flags. Tests inject short durations.
+Workflow code uses Cadence timers and time APIs, never wall-clock sleeps.
 
-The live report adds successful recorded classifier responses; classifier HTTP inference latency as minimum, average, and maximum; provider-reported input and output token totals; the count of successful responses missing complete token usage; the business SLA; and per-ticket end-to-end wait. Optional `-show-classifications` prints department, priority, complexity, confidences, uncertainty flags, model, outcome, and classifier latency. It does not print API keys or full ticket messages.
+## CLI and configuration
 
-Cost calculation is **optional and opt-in**. `-input-token-price-per-million` uses real provider input-token counts from successful recorded responses and labels the result as illustrative. The estimate excludes output tokens, Cadence infrastructure, and usage from failed or retried attempts, so it may be lower than billed usage.
+The only actions are:
 
-Document these clocks:
+```text
+go run . worker -mode mock
+go run . start -mode mock
+go run . worker -mode live -classifier-id laya-local -confirm-live
+go run . start -mode live
+```
 
-- Classifier HTTP inference latency is the successful HTTP attempt inside the Activity, including response receipt and parsing.
-- Per-ticket end-to-end client wait runs from client submission through terminal parent completion.
-- Business SLA duration is the Child Workflow acknowledgment timer.
-- Batch wall-clock duration is the runner's elapsed time.
+Shared flags are `-address`, `-domain`, and `-task-list`. Start-only flags are
+`-workflow-id` and `-text`. Worker-only live flags are `-classifier-id`,
+`-catalog-dir`, and `-confirm-live`. Starts never read catalogs, credentials, or
+classifier configuration.
 
-Do not claim a fixed throughput, 10× cost advantage, or Uber/Netflix production-scale performance based on a laptop run. A laptop batch of 10 to 100 tickets is a functional demonstration; larger runs are optional after verifying the local Cadence cluster, Jev rate limits, and costs.
+No `demo`, `start-ticket`, `acknowledge`, `batch`, `live-demo`, `live-batch`,
+concurrency, SLA, metric, token-price, or benchmark CLI is allowed.
 
-## 10. Tests and acceptance criteria
+## Failure and replay behavior
 
-- `go test ./...` and `go build ./...` succeed within this recipe; no AI keys/network needed for unit tests.
-- Workflow tests cover all four department branches, the `UNROUTABLE` path, normal acknowledgment, SLA expiry, invalid/wrong-assignment signal, duplicate/late signal, and a controlled signal/deadline race.
-- Jev transport tests use `httptest` to validate exact request/response parsing and transient versus nonretryable HTTP behavior; no live provider requests in CI.
-- Failure/restart demo or test proves a recorded classification Activity result is not re-inferred on workflow replay. Do not claim exactly-once external Activity execution.
-- The CWC query produces the documented formatted Markdown envelope and a working acknowledgment button on a supported Cadence Web version. An ordinary CLI Signal must also work.
-- Default mock mode can run one ticket and a bounded synthetic batch end to end, with no external AI key; timeout and acknowledgment paths are observable.
-- README contains Bash-first setup and run commands with brief PowerShell equivalents, local Cadence prerequisites, mode/configuration instructions, safety notes for live API usage, optional CWC instructions, results interpretation, and a **copy-out** guide pointing to `workflow.go`, `main.go`, and `catalog.go`.
-- No unapproved/non-public employer code or data; only independently authored code, synthetic inputs, and public APIs/docs.
+Classifier network failures, rate limits, overload, and retryable server errors
+remain retryable within bounded Activity policy. Authentication, validation,
+other client failures, and malformed successful responses are nonretryable.
 
-## 11. Implementation workflow for Codex
+A failed Activity attempt may have reached the provider. Only a completed
+Activity result recorded in history is replay-safe without another inference
+request. Replay tests must prove that the recorded classification and selected
+ticket are reused.
 
-**Do not begin coding until the repository owner approves this SPEC.md.** On approval, inspect the existing scaffold and official Cadence Go/CWC and TypeSafe API docs. Use the actual APIs and verified signatures. Implement the smallest vertical slice in this order: mock single ticket → Child Workflow + acknowledgment/timeout → CLI signal and CWC → tests → synthetic batch → live Jev transport → documentation. Keep functionality and files minimal. Before changing scope or introducing extra packages, stop and explain the trade-off. Do not commit/push until the owner reviews the implementation.
+## Dataset
 
-## References
+`testdata/tickets.jsonl` contains exactly 40 unique synthetic tickets with valid
+provisional labels and ten records per department. Labels are test fixture
+metadata, not independently validated ground truth. Runtime input contains only
+ticket ID, message, and internal SLA configuration.
 
-- [Cadence redesigned Go samples](https://github.com/cadence-workflow/cadence-samples/tree/master/new_samples)
-- [Cadence Custom Workflow Controls documentation](https://cadenceworkflow.io/docs/concepts/workflow-queries-formatted-data)
-- [Cadence CWC Go sample](https://github.com/cadence-workflow/cadence-samples/tree/master/new_samples/query)
-- [TypeSafe Jev API reference](https://docs.typesafe.ai/api)
-- [TypeSafe Quick Start](https://docs.typesafe.ai/introduction/quickstart)
+Ambiguous and cross-department fixtures are retained as usability limitations;
+their messages must not be padded to steer a specific model. In one maintainer
+Laya corpus run, the `0.40` policy routed 35 of 40 fixtures and 32 routed
+choices matched provisional department labels. A subsequent validation run
+routed 37 of 40 with 32 matches; it routed 27 at `0.50` and 14 at `0.65`.
+Variation between runs is expected, and these counts are not accuracy claims.
+
+## Acceptance tests
+
+- CLI accepts only the profile action, mode, and flag matrix.
+- Fixture selection and explicit `-text` override are offline and deterministic
+  under injected selection.
+- Starter output orders selected input, parent execution, routed assignment,
+  terminal wait, and typed result.
+- Parent Query covers pending, routed, and unroutable states.
+- Every department route and fixed employee is tested.
+- Valid, invalid, duplicate, late, and deadline-race Signals are tested.
+- Parent forwarding and direct Child CWC use the same payload contract.
+- Parent and Child CWC Markdown have active and terminal states.
+- Transport tests verify three questions, catalog mutation, key handling,
+  endpoint safety, provider-specific confidence semantics, retry
+  classification, malformed responses, and missing usage.
+- The complete 40-ticket corpus is exercised against local Laya and its routing
+  and provisional-label match counts are reported.
+- Replay does not invoke the recorded classifier Activity again.
+- Go tests/build, generator/isolation tests, Explorer Python and DOM suites,
+  local Cadence mock flows, and one local Laya flow pass.
+
+## Non-goals
+
+- Batch submission, throughput, latency aggregation, cost calculation, or
+  classification-accuracy benchmarking.
+- Reassignment, availability or skill matching, workload balancing,
+  multi-level escalation, or ticket resolution.
+- Guaranteed non-repetition across starter processes.
+- Explorer runtime implementation changes.
+- Java support in this Issue.
+- Paid remote validation without separate authorization.

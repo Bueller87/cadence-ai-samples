@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -18,12 +19,13 @@ import (
 const (
 	TaskList = "ticket-routing"
 
-	AcknowledgmentSignalName = "acknowledge-assignment"
-	AssignmentQueryName      = "ticket-assignment"
-	BillingEmployeeID        = "SW-BILLING-101"
-	TechnicalEmployeeID      = "SW-TECH-202"
-	AccountEmployeeID        = "SW-ACCOUNT-303"
-	ContentEmployeeID        = "SW-CONTENT-404"
+	AcknowledgmentSignalName  = "acknowledge-assignment"
+	AssignmentQueryName       = "ticket-assignment"
+	ParentAssignmentQueryName = "assignment-status"
+	BillingEmployeeID         = "SW-BILLING-101"
+	TechnicalEmployeeID       = "SW-TECH-202"
+	AccountEmployeeID         = "SW-ACCOUNT-303"
+	ContentEmployeeID         = "SW-CONTENT-404"
 
 	StatusAwaitingAcknowledgment = "AWAITING_ACKNOWLEDGMENT"
 	StatusAcknowledged           = "ACKNOWLEDGED"
@@ -31,6 +33,7 @@ const (
 	StatusUnroutable             = "UNROUTABLE"
 
 	minimumDepartmentConfidence      = 0.65
+	minimumLayaDepartmentConfidence  = 0.40
 	minimumInformationalConfidence   = 0.65
 	classificationScheduleToClose    = 2 * time.Minute
 	childWorkflowSchedulingOverhead  = 2 * time.Minute
@@ -93,6 +96,10 @@ type RoutingDecision struct {
 	DepartmentConfidence    float64            `json:"department_confidence"`
 	PriorityConfidence      float64            `json:"priority_confidence"`
 	ComplexityConfidence    float64            `json:"complexity_confidence"`
+	DepartmentEntropy       *float64           `json:"department_entropy_confidence,omitempty"`
+	PriorityEntropy         *float64           `json:"priority_entropy_confidence,omitempty"`
+	ComplexityEntropy       *float64           `json:"complexity_entropy_confidence,omitempty"`
+	DepartmentThreshold     float64            `json:"department_confidence_threshold,omitempty"`
 	DepartmentProbabilities map[string]float64 `json:"department_probabilities,omitempty"`
 	PriorityProbabilities   map[string]float64 `json:"priority_probabilities,omitempty"`
 	ComplexityProbabilities map[string]float64 `json:"complexity_probabilities,omitempty"`
@@ -155,8 +162,38 @@ type TicketResult struct {
 	Reason          string          `json:"reason,omitempty"`
 }
 
+// ParentAssignmentStatus is the read-only starter view of parent routing state.
+type ParentAssignmentStatus struct {
+	Status          string        `json:"status"`
+	TicketID        string        `json:"ticket_id"`
+	Department      Department    `json:"department,omitempty"`
+	Priority        Priority      `json:"priority,omitempty"`
+	EmployeeID      string        `json:"employee_id,omitempty"`
+	AssignmentID    string        `json:"assignment_id,omitempty"`
+	ChildWorkflowID string        `json:"child_workflow_id,omitempty"`
+	SignalName      string        `json:"signal_name,omitempty"`
+	SLADuration     time.Duration `json:"sla_duration,omitempty"`
+	SLAMet          bool          `json:"sla_met"`
+	Reason          string        `json:"reason,omitempty"`
+}
+
 // TicketIntakeWorkflow classifies one ticket and routes it to one department.
 func TicketIntakeWorkflow(ctx workflow.Context, ticket Ticket) (TicketResult, error) {
+	assignmentStatus := ParentAssignmentStatus{
+		Status:   "CLASSIFICATION_PENDING",
+		TicketID: ticket.TicketID,
+	}
+	if err := workflow.SetQueryHandler(ctx, ParentAssignmentQueryName, func() (ParentAssignmentStatus, error) {
+		return assignmentStatus, nil
+	}); err != nil {
+		return TicketResult{}, fmt.Errorf("register parent assignment query: %w", err)
+	}
+	if err := workflow.SetQueryHandler(ctx, AssignmentQueryName, func() (MarkdownFormattedResponse, error) {
+		return parentAssignmentControlResponse(ctx, assignmentStatus), nil
+	}); err != nil {
+		return TicketResult{}, fmt.Errorf("register parent assignment control query: %w", err)
+	}
+
 	activityOptions := workflow.ActivityOptions{
 		ScheduleToStartTimeout: time.Minute,
 		StartToCloseTimeout:    30 * time.Second,
@@ -183,6 +220,8 @@ func TicketIntakeWorkflow(ctx workflow.Context, ticket Ticket) (TicketResult, er
 	}
 
 	if reason := invalidClassificationReason(decision); reason != "" {
+		assignmentStatus.Status = StatusUnroutable
+		assignmentStatus.Reason = reason
 		return TicketResult{
 			TicketID:       ticket.TicketID,
 			Classification: decision,
@@ -194,9 +233,22 @@ func TicketIntakeWorkflow(ctx workflow.Context, ticket Ticket) (TicketResult, er
 	classified := ClassifiedTicket{Ticket: ticket, Classification: decision}
 	parentWorkflowID := workflow.GetInfo(ctx).WorkflowExecution.ID
 	childID := childWorkflowID(parentWorkflowID, decision.Department)
+	employeeID := employeeForDepartment(decision.Department)
+	slaDuration := acknowledgmentSLA(decision.Priority, ticket.SLA)
+	assignmentStatus = ParentAssignmentStatus{
+		Status:          StatusAwaitingAcknowledgment,
+		TicketID:        ticket.TicketID,
+		Department:      decision.Department,
+		Priority:        decision.Priority,
+		EmployeeID:      employeeID,
+		AssignmentID:    assignmentIdentifier(ticket.TicketID, decision.Department, employeeID),
+		ChildWorkflowID: childID,
+		SignalName:      AcknowledgmentSignalName,
+		SLADuration:     slaDuration,
+	}
 	childContext := workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{
 		WorkflowID:                   childID,
-		ExecutionStartToCloseTimeout: childWorkflowExecutionTimeout(acknowledgmentSLA(decision.Priority, ticket.SLA)),
+		ExecutionStartToCloseTimeout: childWorkflowExecutionTimeout(slaDuration),
 		TaskStartToCloseTimeout:      10 * time.Second,
 	})
 
@@ -215,9 +267,41 @@ func TicketIntakeWorkflow(ctx workflow.Context, ticket Ticket) (TicketResult, er
 	}
 
 	var assignment AssignmentResult
-	if err := workflow.ExecuteChildWorkflow(childContext, childWorkflow, classified).Get(childContext, &assignment); err != nil {
+	childFuture := workflow.ExecuteChildWorkflow(childContext, childWorkflow, classified)
+	parentSignalChannel := workflow.GetSignalChannel(ctx, AcknowledgmentSignalName)
+	for !childFuture.IsReady() {
+		var acknowledgment AcknowledgmentSignal
+		signalReceived := false
+		selector := workflow.NewSelector(ctx)
+		selector.AddFuture(childFuture, func(workflow.Future) {})
+		selector.AddReceive(parentSignalChannel, func(channel workflow.Channel, _ bool) {
+			channel.Receive(ctx, &acknowledgment)
+			signalReceived = true
+		})
+		selector.Select(ctx)
+		if childFuture.IsReady() {
+			continue
+		}
+		if signalReceived {
+			if err := workflow.SignalExternalWorkflow(
+				ctx,
+				childID,
+				"",
+				AcknowledgmentSignalName,
+				acknowledgment,
+			).Get(ctx, nil); err != nil {
+				var unknownExternal *workflow.UnknownExternalWorkflowExecutionError
+				if !errors.As(err, &unknownExternal) {
+					return TicketResult{}, fmt.Errorf("forward acknowledgment to child workflow: %w", err)
+				}
+			}
+		}
+	}
+	if err := childFuture.Get(childContext, &assignment); err != nil {
 		return TicketResult{}, fmt.Errorf("run %s child workflow: %w", decision.Department, err)
 	}
+	assignmentStatus.Status = assignment.Status
+	assignmentStatus.SLAMet = assignment.SLAMet
 
 	return TicketResult{
 		TicketID:        ticket.TicketID,
@@ -261,6 +345,7 @@ func ClassifyTicket(_ context.Context, ticket Ticket) (RoutingDecision, error) {
 		Priority:             classifyPriority(message),
 		Complexity:           classifyComplexity(message),
 		DepartmentConfidence: 0.92,
+		DepartmentThreshold:  minimumDepartmentConfidence,
 		PriorityConfidence:   0.88,
 		ComplexityConfidence: 0.84,
 		Model:                "mock-jev-v1",
@@ -276,6 +361,7 @@ type SystemOneClassifier struct {
 	apiKey     string
 	endpoint   string
 	model      string
+	provider   string
 	httpClient *http.Client
 	now        func() time.Time
 }
@@ -299,10 +385,11 @@ type jevResponse struct {
 }
 
 type jevChoiceAnswer struct {
-	Type          string             `json:"type"`
-	Choice        string             `json:"choice"`
-	Probabilities map[string]float64 `json:"probabilities"`
-	Confidence    *float64           `json:"confidence"`
+	Type             string             `json:"type"`
+	Choice           string             `json:"choice"`
+	Probabilities    map[string]float64 `json:"probabilities"`
+	Confidence       *float64           `json:"confidence"`
+	AnswerConfidence *float64           `json:"answer_confidence"`
 }
 
 type jevUsage struct {
@@ -312,12 +399,15 @@ type jevUsage struct {
 
 // newSystemOneClassifier creates a live classifier. An empty apiKey sends no
 // Authorization header, which keyless local servers such as Laya require.
-func newSystemOneClassifier(apiKey, endpoint, model string, httpClient *http.Client) (*SystemOneClassifier, error) {
+func newSystemOneClassifier(apiKey, endpoint, model, provider string, httpClient *http.Client) (*SystemOneClassifier, error) {
 	if strings.TrimSpace(endpoint) == "" {
 		return nil, fmt.Errorf("classifier endpoint is required")
 	}
 	if strings.TrimSpace(model) == "" {
 		return nil, fmt.Errorf("classifier model is required")
+	}
+	if provider != classifierProviderTypeSafe && provider != classifierProviderLaya {
+		return nil, fmt.Errorf("unsupported classifier provider %q", provider)
 	}
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 20 * time.Second}
@@ -327,6 +417,7 @@ func newSystemOneClassifier(apiKey, endpoint, model string, httpClient *http.Cli
 		apiKey:     strings.TrimSpace(apiKey),
 		endpoint:   endpoint,
 		model:      model,
+		provider:   provider,
 		httpClient: httpClient,
 		now:        time.Now,
 	}, nil
@@ -422,7 +513,7 @@ func (classifier *SystemOneClassifier) ClassifyTicket(ctx context.Context, ticke
 		return RoutingDecision{}, malformedJevResponse("response contains trailing data")
 	}
 
-	decision, err := routingDecisionFromJev(decoded)
+	decision, err := routingDecisionFromJev(decoded, classifier.provider)
 	if err != nil {
 		return RoutingDecision{}, err
 	}
@@ -430,37 +521,48 @@ func (classifier *SystemOneClassifier) ClassifyTicket(ctx context.Context, ticke
 	return decision, nil
 }
 
-func routingDecisionFromJev(response jevResponse) (RoutingDecision, error) {
+func routingDecisionFromJev(response jevResponse, provider string) (RoutingDecision, error) {
 	if strings.TrimSpace(response.Model) == "" {
 		return RoutingDecision{}, malformedJevResponse("missing model")
 	}
 
-	department, err := requiredChoiceAnswer(response.Answers, "department")
+	department, err := requiredChoiceAnswer(response.Answers, "department", provider)
 	if err != nil {
 		return RoutingDecision{}, err
 	}
-	priority, err := requiredChoiceAnswer(response.Answers, "priority")
+	priority, err := requiredChoiceAnswer(response.Answers, "priority", provider)
 	if err != nil {
 		return RoutingDecision{}, err
 	}
-	complexity, err := requiredChoiceAnswer(response.Answers, "complexity")
+	complexity, err := requiredChoiceAnswer(response.Answers, "complexity", provider)
 	if err != nil {
 		return RoutingDecision{}, err
 	}
 
+	departmentConfidence := selectedAnswerConfidence(department, provider)
+	priorityConfidence := selectedAnswerConfidence(priority, provider)
+	complexityConfidence := selectedAnswerConfidence(complexity, provider)
 	decision := RoutingDecision{
 		Department:              Department(department.Choice),
 		Priority:                Priority(priority.Choice),
 		Complexity:              Complexity(complexity.Choice),
-		DepartmentConfidence:    *department.Confidence,
-		PriorityConfidence:      *priority.Confidence,
-		ComplexityConfidence:    *complexity.Confidence,
+		DepartmentConfidence:    departmentConfidence,
+		PriorityConfidence:      priorityConfidence,
+		ComplexityConfidence:    complexityConfidence,
 		DepartmentProbabilities: department.Probabilities,
 		PriorityProbabilities:   priority.Probabilities,
 		ComplexityProbabilities: complexity.Probabilities,
-		PriorityUncertain:       *priority.Confidence < minimumInformationalConfidence,
-		ComplexityUncertain:     *complexity.Confidence < minimumInformationalConfidence,
+		PriorityUncertain:       priorityConfidence < minimumInformationalConfidence,
+		ComplexityUncertain:     complexityConfidence < minimumInformationalConfidence,
 		Model:                   response.Model,
+	}
+	if provider == classifierProviderLaya {
+		decision.DepartmentEntropy = department.Confidence
+		decision.PriorityEntropy = priority.Confidence
+		decision.ComplexityEntropy = complexity.Confidence
+		decision.DepartmentThreshold = minimumLayaDepartmentConfidence
+	} else {
+		decision.DepartmentThreshold = minimumDepartmentConfidence
 	}
 
 	if response.Usage != nil {
@@ -482,7 +584,7 @@ func routingDecisionFromJev(response jevResponse) (RoutingDecision, error) {
 	return decision, nil
 }
 
-func requiredChoiceAnswer(answers map[string]jevChoiceAnswer, name string) (jevChoiceAnswer, error) {
+func requiredChoiceAnswer(answers map[string]jevChoiceAnswer, name, provider string) (jevChoiceAnswer, error) {
 	answer, ok := answers[name]
 	if !ok {
 		return jevChoiceAnswer{}, malformedJevResponse("missing " + name + " answer")
@@ -496,6 +598,14 @@ func requiredChoiceAnswer(answers map[string]jevChoiceAnswer, name string) (jevC
 	if answer.Confidence == nil || math.IsNaN(*answer.Confidence) || math.IsInf(*answer.Confidence, 0) || *answer.Confidence < 0 || *answer.Confidence > 1 {
 		return jevChoiceAnswer{}, malformedJevResponse(name + " answer has invalid confidence")
 	}
+	if answer.AnswerConfidence != nil &&
+		(math.IsNaN(*answer.AnswerConfidence) || math.IsInf(*answer.AnswerConfidence, 0) ||
+			*answer.AnswerConfidence < 0 || *answer.AnswerConfidence > 1) {
+		return jevChoiceAnswer{}, malformedJevResponse(name + " answer has invalid answer_confidence")
+	}
+	if provider == classifierProviderLaya && answer.AnswerConfidence == nil {
+		return jevChoiceAnswer{}, malformedJevResponse(name + " answer is missing answer_confidence")
+	}
 	if len(answer.Probabilities) == 0 {
 		return jevChoiceAnswer{}, malformedJevResponse(name + " answer has no probabilities")
 	}
@@ -507,14 +617,25 @@ func requiredChoiceAnswer(answers map[string]jevChoiceAnswer, name string) (jevC
 		}
 		probabilitySum += probability
 	}
-	if _, ok := answer.Probabilities[answer.Choice]; !ok {
+	selectedProbability, ok := answer.Probabilities[answer.Choice]
+	if !ok {
 		return jevChoiceAnswer{}, malformedJevResponse(name + " selected choice is absent from probabilities")
+	}
+	if answer.AnswerConfidence != nil && math.Abs(*answer.AnswerConfidence-selectedProbability) > 0.000001 {
+		return jevChoiceAnswer{}, malformedJevResponse(name + " answer_confidence does not match the selected-choice probability")
 	}
 	if math.Abs(probabilitySum-1) > 0.02 {
 		return jevChoiceAnswer{}, malformedJevResponse(name + " probabilities do not sum to one")
 	}
 
 	return answer, nil
+}
+
+func selectedAnswerConfidence(answer jevChoiceAnswer, provider string) float64 {
+	if provider == classifierProviderLaya {
+		return *answer.AnswerConfidence
+	}
+	return *answer.Confidence
 }
 
 func malformedJevResponse(message string) error {
@@ -577,8 +698,12 @@ func invalidClassificationReason(decision RoutingDecision) string {
 	if !validComplexity(decision.Complexity) {
 		return fmt.Sprintf("unsupported complexity %q", decision.Complexity)
 	}
-	if decision.DepartmentConfidence < minimumDepartmentConfidence {
-		return fmt.Sprintf("department confidence %.2f is below %.2f", decision.DepartmentConfidence, minimumDepartmentConfidence)
+	threshold := decision.DepartmentThreshold
+	if threshold == 0 {
+		threshold = minimumDepartmentConfidence
+	}
+	if decision.DepartmentConfidence < threshold {
+		return fmt.Sprintf("department selected-answer confidence %.2f is below %.2f", decision.DepartmentConfidence, threshold)
 	}
 	return ""
 }
@@ -593,6 +718,21 @@ func validPriority(value Priority) bool {
 
 func validComplexity(value Complexity) bool {
 	return value == ComplexityTier1 || value == ComplexityTier2 || value == ComplexityTier3
+}
+
+func employeeForDepartment(department Department) string {
+	switch department {
+	case DepartmentBilling:
+		return BillingEmployeeID
+	case DepartmentTechnical:
+		return TechnicalEmployeeID
+	case DepartmentAccount:
+		return AccountEmployeeID
+	case DepartmentContent:
+		return ContentEmployeeID
+	default:
+		return ""
+	}
 }
 
 func childWorkflowID(parentWorkflowID string, department Department) string {
@@ -708,6 +848,45 @@ func assignmentControlResponse(ctx workflow.Context, priority Priority, assignme
 	}
 }
 
+func parentAssignmentControlResponse(ctx workflow.Context, assignment ParentAssignmentStatus) MarkdownFormattedResponse {
+	markdown := "## Ticket assignment\n\n"
+	switch assignment.Status {
+	case "CLASSIFICATION_PENDING":
+		markdown += fmt.Sprintf("- **Ticket ID:** `%s`\n- **Routing status:** `CLASSIFICATION_PENDING`\n\n*Classification is still running. Run this Query again after assignment.*\n", assignment.TicketID)
+	case StatusUnroutable:
+		markdown += fmt.Sprintf("- **Ticket ID:** `%s`\n- **Routing status:** `UNROUTABLE`\n- **Reason:** %s\n\n*No department assignment was created.*\n", assignment.TicketID, assignment.Reason)
+	default:
+		markdown += fmt.Sprintf("- **Ticket ID:** `%s`\n- **Department:** `%s`\n- **Assigned employee:** `%s`\n- **Priority:** `%s`\n- **Child Workflow ID:** `%s`\n- **SLA duration:** `%s`\n- **Current acknowledgment status:** `%s`\n",
+			assignment.TicketID,
+			assignment.Department,
+			assignment.EmployeeID,
+			assignment.Priority,
+			assignment.ChildWorkflowID,
+			assignment.SLADuration,
+			assignment.Status,
+		)
+		if assignment.Status == StatusAwaitingAcknowledgment {
+			payload, err := json.Marshal(AcknowledgmentSignal{
+				TicketID:     assignment.TicketID,
+				EmployeeID:   assignment.EmployeeID,
+				AssignmentID: assignment.AssignmentID,
+			})
+			if err == nil {
+				info := workflow.GetInfo(ctx)
+				markdown += fmt.Sprintf("\n{%% signal signalName=%q label=%q domain=%q cluster=%q workflowId=%q runId=%q input=%s /%%}\n",
+					AcknowledgmentSignalName, "Acknowledge Ticket", info.Domain, "cluster0", info.WorkflowExecution.ID, info.WorkflowExecution.RunID, payload)
+			}
+		} else {
+			markdown += fmt.Sprintf("\n- **SLA met:** %s\n\n*Assignment is complete; no actions are available.*\n", slaMetLabel(assignment.Status, assignment.SLAMet))
+		}
+	}
+	return MarkdownFormattedResponse{
+		CadenceResponseType: "formattedData",
+		Format:              "text/markdown",
+		Data:                markdown,
+	}
+}
+
 func slaMetLabel(status string, slaMet bool) string {
 	switch {
 	case status == StatusAcknowledged && slaMet:
@@ -773,9 +952,9 @@ func parentWorkflowExecutionTimeout(config SLAConfig) time.Duration {
 
 func defaultSLAConfig() SLAConfig {
 	return SLAConfig{
-		Critical: 5 * time.Second,
-		High:     10 * time.Second,
-		Normal:   20 * time.Second,
-		Low:      30 * time.Second,
+		Critical: 2 * time.Minute,
+		High:     3 * time.Minute,
+		Normal:   4 * time.Minute,
+		Low:      5 * time.Minute,
 	}
 }

@@ -13,9 +13,9 @@ bin/
 *.out
 coverage.out
 *.exe
-recipes/ticket-routing/go/ticket-router
-# go build ./... names this main package binary "go"
-recipes/ticket-routing/go/go
+recipes/ticket-routing/go/systemone/ticket-router
+# go build ./... names this main package binary "systemone"
+recipes/ticket-routing/go/systemone/systemone
 
 # Credential-bearing environment files (keep examples)
 .env

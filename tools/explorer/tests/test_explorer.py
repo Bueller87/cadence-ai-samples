@@ -148,7 +148,8 @@ class ExplorerTests(unittest.TestCase):
         return self.explorer.resolve(request)
 
     def ticket(self,**kwargs):
-        request=dict(sample='ticket-routing',implementation='recipes/ticket-routing/go',mode='demo',classifier='mock')
+        request=dict(sample='ticket-routing',
+            implementation='recipes/ticket-routing/go/systemone',mode='mock')
         request.update(kwargs)
         return self.explorer.resolve(request)
 
@@ -180,8 +181,11 @@ class ExplorerTests(unittest.TestCase):
                             hitl['variants']+watch['variants']+ticket['variants']))
         self.assertEqual(hitl['variants'][0]['modes'],['mock','live'])
         self.assertEqual(watch['variants'][0]['modes'],['mock','live'])
-        self.assertEqual(ticket['variants'][0]['live_modes'],['live-demo','live-batch'])
-        self.assertEqual(ticket['variants'][0]['mock_modes'],['demo','start-ticket','batch'])
+        ticket_variant=next(v for v in ticket['variants']
+                            if v['id']=='recipes/ticket-routing/go/systemone')
+        self.assertTrue(ticket_variant['generic'])
+        self.assertEqual(set(ticket_variant['actions']),{'start','worker'})
+        self.assertEqual(set(ticket_variant['modes']),{'live','mock'})
         self.assertEqual(
             sorted(entry['id'] for entry in state['classifiers']),
             ['jev-default', 'laya-local'],
@@ -624,24 +628,24 @@ class ExplorerTests(unittest.TestCase):
         self.watch()
         self.assertFalse(sentinel.exists())
 
-    def test_go_actions_candidates_and_live_batch_bounds(self):
-        for mode in ('demo','batch','start-ticket'):
-            result=self.ticket(mode=mode)
-            self.assertIn('-classifier-id mock',result['worker'])
-            self.assertIn('-mode '+mode,result['client'])
+    def test_ticket_routing_uses_generic_go_commands(self):
+        result=self.ticket(mode='mock')
+        self.assertIn('worker -mode mock',result['worker'])
+        self.assertIn('start -mode mock',result['client'])
+        self.assertNotIn('-classifier-id',result['worker'])
+        self.assertNotIn('-text',result['client'])
         for classifier in ('jev-default','laya-local'):
-            result=self.ticket(mode='live-demo',classifier=classifier)
-            self.assertTrue(result['live']);self.assertIn(classifier,result['worker']);self.assertIn(classifier,result['client'])
-            result=self.ticket(mode='live-batch',classifier=classifier,count='3',concurrency='1')
-            self.assertIn('-count 3 -concurrency 1 -confirm-live',result['client'])
+            result=self.ticket(mode='live',classifier=classifier)
+            self.assertTrue(result['live'])
+            self.assertIn('-classifier-id '+classifier,result['worker'])
+            self.assertIn('-confirm-live',result['worker'])
+            self.assertNotIn('-classifier-id',result['client'])
+            self.assertNotIn('-confirm-live',result['client'])
         for classifier in ('kev-local','von-local','reflex-local'):
-            with self.assertRaises(InvalidSelection):self.ticket(mode='live-demo',classifier=classifier)
-        for count,concurrency in [('', ''),('11','1'),('3','6'),('1','2'),('0','1')]:
-            with self.assertRaises(InvalidSelection):self.ticket(mode='live-batch',classifier='laya-local',count=count,concurrency=concurrency)
-        with self.assertRaises(InvalidSelection):self.ticket(mode='acknowledge')
-        batch=self.root/'recipes/ticket-routing/go/batch.go'
-        batch.write_text(batch.read_text().replace('maximumLiveBatchCount   = 10','maximumLiveBatchCount   = 2'))
-        with self.assertRaises(InvalidSelection):self.ticket(mode='live-batch',classifier='laya-local',count='3',concurrency='1')
+            with self.assertRaises(InvalidSelection):
+                self.ticket(mode='live',classifier=classifier)
+        for mode in ('demo','batch','start-ticket','acknowledge','live-batch'):
+            with self.assertRaises(InvalidSelection):self.ticket(mode=mode)
 
     def test_bad_catalogs_and_source_paths_are_reported(self):
         for name in ('../outside','.git/config','tools/explorer/server.py','recipes/recurring-ai-watch/.env'):
@@ -739,28 +743,13 @@ class ExplorerTests(unittest.TestCase):
                     'run-generic'))
 
             ticket=dict(sample='ticket-routing',
-                implementation='recipes/ticket-routing/go',mode='demo',
-                classifier='mock')
-            for workflow_id in ('ticket-routing-parent-001',
-                    'ticket-routing-parent-001-child-billing',
-                    'ticket-routing-batch-token-ticket-001'):
-                WorkflowStub.run_id='run-ticket'
-                selected=self.explorer.workflow_run(
-                    {**ticket,'workflow_id':workflow_id})
-                self.assertEqual((selected['state'],selected['workflow_id']),
-                    ('found',workflow_id))
-                self.assertTrue(WorkflowStub.paths[-1].endswith(
-                    '/workflows/'+workflow_id))
-            encoded=self.explorer.workflow_run(
-                {**ticket,'workflow_id':'ticket parent/001'})
-            self.assertEqual(encoded['workflow_id'],'ticket parent/001')
+                implementation='recipes/ticket-routing/go/systemone',mode='mock')
+            WorkflowStub.run_id='run-ticket'
+            selected=self.explorer.workflow_run(ticket)
+            self.assertEqual((selected['state'],selected['workflow_id']),
+                ('found','ticket-routing-go-systemone-mock-demo'))
             self.assertTrue(WorkflowStub.paths[-1].endswith(
-                '/workflows/ticket%20parent%2F001'))
-            with self.assertRaises(Unsupported):
-                self.explorer.workflow_run(ticket)
-            with self.assertRaises(InvalidSelection):
-                self.explorer.workflow_run(
-                    {**ticket,'workflow_id':'bad\nworkflow'})
+                '/workflows/ticket-routing-go-systemone-mock-demo'))
 
             for mode,state in [('not-found','no execution'),('auth','authentication required'),
                     ('malformed','malformed response'),('missing','no execution')]:
@@ -1020,19 +1009,20 @@ class ExplorerTests(unittest.TestCase):
                     self.explorer.workflow_signal({
                         **request,'signal_id':signal_id,'arguments':{}})
             ticket=dict(sample='ticket-routing',
-                implementation='recipes/ticket-routing/go',mode='demo',
-                classifier='mock')
-            ticket['signal_metadata_revision']=self.explorer.resolve(
-                ticket)['signal_metadata_revision']
+                implementation='recipes/ticket-routing/go/systemone',mode='mock')
+            resolved_ticket=self.explorer.resolve(ticket)
+            self.assertEqual(resolved_ticket['signals'],[])
             path_count=len(WorkflowStub.paths)
+            post_count=len(WorkflowStub.posts)
             with self.assertRaises(InvalidSelection):
                 self.explorer.workflow_signal({
                     **ticket,
-                    'workflow_id':'ticket-routing-parent-001',
-                    'run_id':'run-current','signal_id':'check-now',
+                    'signal_metadata_revision':None,
+                    'run_id':'run-current',
+                    'signal_id':'acknowledge-assignment',
                     'arguments':{}})
-            self.assertEqual(len(WorkflowStub.posts),post_count)
             self.assertEqual(len(WorkflowStub.paths),path_count)
+            self.assertEqual(len(WorkflowStub.posts),post_count)
 
             hitl={**request,'sample':'human-in-the-loop',
                 'implementation':'recipes/human-in-the-loop/python/openai-agents',
@@ -1246,8 +1236,9 @@ class ExplorerTests(unittest.TestCase):
             connection.request('POST','/api/terminal',body=body,headers=headers)
             response=connection.getresponse();self.assertEqual(response.status,422);response.read()
             self.assertEqual(len(terminal.commands),2)
-            unavailable=dict(sample='ticket-routing',implementation='recipes/ticket-routing/go',
-                mode='worker',classifier='mock',action='start')
+            unavailable=dict(sample='ticket-routing',
+                implementation='recipes/ticket-routing/go/systemone',
+                mode='demo',action='start')
             connection.request('POST','/api/terminal',body=json.dumps(unavailable),headers=headers)
             response=connection.getresponse();self.assertEqual(response.status,422);response.read()
             self.assertEqual(len(terminal.commands),2)
