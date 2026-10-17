@@ -4,13 +4,28 @@ Use these phrases as written. [AGENTS.md](AGENTS.md) is the canonical agent
 contract; this page is its short interface. GitHub and Git, not chat or terminal
 history, hold durable project state.
 
+## Plan before building
+
+Plan before claiming or editing. Use a dedicated planning mode when available;
+otherwise explicitly prohibit repository and GitHub writes during planning.
+Review assumptions, dependencies, scope, non-goals, validation, and authority
+blockers before proceeding.
+
+`Follow AGENTS.md. Read Issue #N and its linked specifications. Do not claim or
+edit yet. Show me your implementation plan, validation, assumptions, and
+blockers.`
+
+For substantial work, see [Optional collaboration](#optional-collaboration).
+If prior chat context is unavailable, see
+[Recover current work without chat history](#recover-current-work-without-chat-history).
+
 ## From idea to merge
 
 | Say | Expected behavior |
 | --- | --- |
-| `Capture this idea: ...` | Create or update an upstream `status:needs-triage` Issue with the problem, scope, non-goals, acceptance criteria, validation approach, and spec path. Do not implement it or mark it agent-ready. |
+| `Capture this idea: ...` | Follow the [permission-aware proposal path](agent-context/README.md#creating-a-proposal) to create or update an upstream `status:needs-triage` Issue, prepare its web-form submission, or request maintainer help. Missing classification labels never authorize implementation. |
 | `Find approved work.` | Inspect upstream open `status:agent-ready` Issues and report claimable work. Do not claim anything. |
-| `Proceed with Issue #N.` | Recheck the Issue's assignee, comments, labels, and active linked PRs. If it remains available, comment intent, replace `status:agent-ready` with `status:in-progress`, then create `issue-N-short-slug`. |
+| `Proceed with Issue #N.` | Recheck the Issue's assignee, comments, labels, and active linked PRs, then follow the [claim path](CONTRIBUTING.md#claim-approved-work). Create `issue-N-short-slug` only after the Issue is `status:in-progress` and identifies the contributor as owner. |
 | `Prepare a durable handoff.` | Post the local-completion evidence described below, re-read it, and verify its URL and `status:in-progress`. Do not commit, push, or open a PR unless separately authorized. |
 | `Prepare this for commit.` | Verify the worktree and durable evidence, then follow the contributor's commit policy. If the contributor owns commits, provide the conventional commit message, remind them to create the commit with lowercase `-s`, and stop. |
 | `Write the PR description.` | Return a ready-to-paste PR title and body only. Make no GitHub write. |
@@ -33,6 +48,36 @@ Re-read the Issue, open the comment URL, and verify `status:in-progress`.
 “Ready” is false until this evidence exists. This checkpoint comes before commit
 or PR handoff and applies whether the contributor or an authorized agent creates
 the required DCO-signed commit.
+
+## Optional collaboration
+
+For substantial work, an optional two-agent pattern separates coordination from
+implementation:
+
+- A coordination agent maintains cross-Issue context, grooms work, reviews plans
+  and evidence, and prepares durable handoffs.
+- A fresh implementation agent handles one approved Issue.
+
+Exactly one writing implementation agent owns an Issue. Additional agents may
+perform read-only planning or review, but they do not share implementation
+ownership or write competing changes. This separation keeps implementation
+context focused, provides early independent pushback, reduces scope drift, and
+makes either role replaceable from GitHub and Git state. It does not require a
+particular coding tool.
+
+## Recover current work without chat history
+
+Use this read-only prompt:
+
+`Follow AGENTS.md and agent-context/README.md. Inspect Git, GitHub, and the
+current checkout. Find work assigned to or otherwise owned by this contributor,
+matching in-progress branches, and open PRs. Report the authoritative current
+state and next action. Do not edit anything.`
+
+Inspect the checkout and remotes, upstream Issue ownership and claim records,
+matching `issue-N-*` branches, and open PRs. Report conflicts or one authoritative
+next action without changing repository or GitHub state. Chat history and agent
+memory are not recovery sources.
 
 ## Resume on another computer
 

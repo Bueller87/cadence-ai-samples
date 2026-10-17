@@ -2,35 +2,97 @@
 
 Start a contribution with a specific problem or use case, not a library feature.
 
-## Contribution workflow
+## First-time contributor path
 
-1. Open an upstream Issue describing the problem, scope, non-goals, acceptance
-   criteria, and offline validation path.
-2. Wait for a maintainer to add `status:agent-ready` before implementation.
-3. Before taking an Issue, check for an assignee, claim comment, or active linked
-   PR. Recheck immediately before claiming, comment your intent, replace
-   `status:agent-ready` with `status:in-progress`, then create an
-   `issue-N-short-slug` branch.
-4. Work on that branch, then post and verify the local-completion evidence
+Your fork and the canonical repository have different roles:
+
+- `origin` is your contributor fork. Create and push implementation branches
+  there.
+- `upstream` is `cadence-workflow/cadence-ai-samples`. Issues, approvals, and
+  pull-request targets live there.
+
+Run `git remote -v` before starting. If the canonical repository is missing, add
+it with:
+
+```bash
+git remote add upstream https://github.com/cadence-workflow/cadence-ai-samples.git
+```
+
+An open Issue's lifecycle label tells you what you may do:
+
+- `status:needs-triage` means proposed work. It is not claimable, so do not
+  self-assign or implement it.
+- `status:agent-ready` means a maintainer approved the work. It is claimable only
+  when it has no assignee, claim comment, or active linked implementation PR.
+- `status:in-progress` means the work is already claimed. Do not start a
+  competing implementation.
+
+Assignment records ownership of approved work, not interest or priority. Only a
+human maintainer may promote a proposal to `status:agent-ready`.
+
+### Find and plan work
+
+1. Find an open upstream `status:agent-ready` Issue.
+2. Check its assignee, comments, and linked PRs. Do not take work owned by
+   someone else.
+3. Follow [Plan before building](WORKFLOW.md#plan-before-building). Review the
+   assumptions, dependencies, scope, non-goals, validation, and decisions that
+   need maintainer authority before claiming or editing.
+4. Recheck the Issue immediately before claiming it.
+
+If no claimable Issue exists, do not self-assign a `status:needs-triage` Issue.
+Outside contributors should use the repository
+[Issue forms](https://github.com/cadence-workflow/cadence-ai-samples/issues/new/choose)
+to submit the problem, scope, non-goals, acceptance criteria, validation
+approach, and spec path. The form applies only its configured initial labels,
+including `status:needs-triage`. Maintainer triage applies any missing
+`source:agent`, type, area, or other classification labels. Missing
+classification labels never make a proposal claimable.
+
+Maintainers and contributors with upstream label permission may instead use the
+[labeled CLI proposal path](agent-context/README.md#creating-a-proposal). An
+agent without that permission prepares the proposal for human form submission
+or requests maintainer assistance; it must not run the labeled command. Then
+wait for a maintainer to add `status:agent-ready`.
+
+### Claim approved work
+
+If you can update the upstream Issue, comment your intent with your GitHub
+username and proposed branch, replace `status:agent-ready` with
+`status:in-progress`, and then create an `issue-N-short-slug` branch on your
+fork. The claim comment and `status:in-progress` together record your ownership.
+
+If you cannot change upstream labels or assignment, post this comment:
+
+> I would like to claim this approved Issue. Proposed branch:
+> `issue-N-short-slug`. I cannot change upstream labels or assignment.
+> Maintainer, please record me as the owner and change `status:agent-ready` to
+> `status:in-progress`.
+
+Do not create the branch or begin implementation until the upstream Issue has
+`status:in-progress` and identifies you as the owner through either assignment
+or a maintainer comment confirming the claim.
+
+### Complete and hand off the work
+
+1. Work on the Issue branch, then post and verify the local-completion evidence
    required by [AGENTS.md](AGENTS.md) before calling it ready for review or commit.
-5. Follow the contributor's commit policy. Every commit requires DCO sign-off
+2. Follow the contributor's commit policy. Every commit requires DCO sign-off
    with lowercase `git commit -s`, regardless of who creates it.
-6. After the signed commit is pushed, open a draft PR against
+3. After the signed commit is pushed, open a draft PR against
    `cadence-workflow/cadence-ai-samples:main`.
-7. Link the Issue and include actual test commands/results, untested behavior, and
-   known limitations.
-8. Wait for repository-owner approval. Never self-approve. A coding agent may
+4. Link the Issue and include actual test commands/results, untested behavior,
+   and known limitations.
+5. Wait for repository-owner approval. Never self-approve. A coding agent may
    execute a merge only after explicit repository-owner direction and after
    verifying required approval and checks; without authorization, it reports the
    remaining gate and stops.
 
-Anyone may propose work. Unapproved ideas use `status:needs-triage`; only a human
-maintainer promotes them to `status:agent-ready`.
-
-Keep claimed work `status:in-progress` until merge closes the Issue. If abandoning
-it, comment the reason and current state, replace `status:in-progress` with
-`status:agent-ready`, and ask before deleting the branch. Branch names identify
-the Issue, not the coding tool, because work may move between agents.
+Keep claimed work `status:in-progress` until merge closes the Issue. If
+abandoning it, comment the reason and current state, replace
+`status:in-progress` with `status:agent-ready`, and ask before deleting the
+branch. Branch names identify the Issue, not the coding tool, because work may
+move between agents.
 
 ## Coding-agent contributions
 
@@ -40,7 +102,9 @@ requirements as human-written changes. Coding agents must begin with
 [repository context map](agent-context/README.md). The
 [contribution workflow cheat sheet](WORKFLOW.md) maps short intent phrases to
 these gates. Agents may create upstream `status:needs-triage` proposals but may
-not approve priority or architecture, approve PRs, or authorize merges.
+not approve priority or architecture, approve PRs, or authorize merges. Agents
+without upstream label permission prepare an Issue-form submission or ask a
+maintainer to file it.
 
 ## Recipe contributions
 
