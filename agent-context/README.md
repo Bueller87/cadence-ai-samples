@@ -111,7 +111,9 @@ gh issue list --repo cadence-workflow/cadence-ai-samples \
 
 Before taking an Issue, inspect its assignee, comments, labels, and active linked
 PRs. Recheck immediately before claiming. Any contributor may claim an unclaimed
-`status:agent-ready` Issue in this order:
+`status:agent-ready` Issue. Follow the
+[permission-aware claim path](../CONTRIBUTING.md#claim-approved-work).
+Contributors with upstream label permission claim in this order:
 
 ```bash
 gh issue comment N --repo cadence-workflow/cadence-ai-samples \
@@ -120,6 +122,10 @@ gh issue edit N --repo cadence-workflow/cadence-ai-samples \
   --remove-label status:agent-ready --add-label status:in-progress
 git switch -c issue-N-short-slug
 ```
+
+Without upstream label or assignment permission, request maintainer help and
+wait for both `status:in-progress` and repository-visible ownership before
+creating the branch.
 
 Only a human may mark an Issue agent-ready. Keep it in-progress through the draft
 PR handoff. On abandonment, comment the reason and current state, then return it
@@ -136,7 +142,16 @@ draft PR, never an agent-specific branch prefix or chat history.
 
 ## Creating a proposal
 
-Agents may file discovered work without separate permission only as upstream
+Outside contributors should use the repository
+[Issue forms](https://github.com/cadence-workflow/cadence-ai-samples/issues/new/choose)
+by default. Forms apply only their configured initial labels. For example, the
+work proposal form adds `status:needs-triage`, while the recipe proposal form
+also adds its configured type and area labels.
+
+An agent without upstream label permission prepares the proposal for a human to
+submit through a form or requests maintainer assistance. It must not run a
+labeled Issue command it cannot authorize. Maintainers or contributors with
+upstream label permission may file discovered work directly as
 `status:needs-triage`:
 
 ```bash
@@ -152,9 +167,12 @@ gh issue create --repo cadence-workflow/cadence-ai-samples \
 The body must contain the problem, context/source, scope, non-goals, acceptance
 criteria, validation approach, and canonical spec link or intended future spec
 path. Replace the example `type:*` and `area:*` labels when the proposal is not a
-recipe. Agents add `source:agent` explicitly; human-created web forms do not.
-Never add `status:agent-ready`, assign priority, or create the Issue in a
-contributor fork.
+recipe. The labeled command adds `source:agent` explicitly; human-created web
+forms do not. When a proposer cannot apply `source:agent`, type, area, or another
+classification label, maintainer triage applies it. Missing classification
+labels never authorize implementation. Every proposal must receive or request
+`status:needs-triage`; never add `status:agent-ready`, assign priority, or create
+the Issue in a contributor fork.
 
 ## Local completion and handoff
 

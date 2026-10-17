@@ -101,10 +101,12 @@ AI Activities in Recurring AI Watch have a 30-second execution budget. A cold La
 
 ## Contributing
 
-Contributions are welcome. Start with a concrete real-world problem, write an
-implementation specification, and keep the resulting recipe focused and
-portable. See [CONTRIBUTING.md](CONTRIBUTING.md) and the implementation
-profiles in [templates/profiles](templates/profiles/).
+Contributions are welcome. First-time contributors should start with the
+[contributor and Issue claim path](CONTRIBUTING.md#first-time-contributor-path),
+then [plan before building](WORKFLOW.md#plan-before-building). Start with a
+concrete real-world problem, write an implementation specification, and keep the
+resulting recipe focused and portable. See the implementation profiles in
+[templates/profiles](templates/profiles/).
 
 Create a recipe from an implementation profile. All three choices are required:
 

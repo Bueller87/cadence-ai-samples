@@ -16,7 +16,8 @@ or contradict it.
 Read [agent-context/README.md](agent-context/README.md) for the repository map,
 reading order, and handoff commands. Use the
 [contribution workflow cheat sheet](WORKFLOW.md) for short intent phrases;
-this file remains authoritative.
+this file remains authoritative. Human contributors start with the
+[first-time contributor path](CONTRIBUTING.md#first-time-contributor-path).
 
 ## Startup
 
@@ -26,9 +27,9 @@ this file remains authoritative.
    the current contributor's fork; never assume a particular fork owner.
 3. Read only the assigned Issue/PR, linked specification, relevant README, code,
    and tests. Do not read the whole repository by default.
-4. Begin new implementation only for an open Issue labeled
-   `status:agent-ready`. Resume `status:in-progress` work only when the Issue
-   claim or assignee identifies the contributor whose fork and checkout are in
+4. Claim new work only from an open Issue labeled `status:agent-ready`. Begin or
+   resume implementation only after the Issue is `status:in-progress`, its claim
+   record or assignee identifies the contributor whose fork and checkout are in
    use, and a matching local or remote `issue-N-short-slug` branch exists. If
    authorization begins in conversation, record it in an upstream Issue and wait
    for `status:agent-ready` so the next agent can reconstruct the decision
@@ -39,15 +40,28 @@ this file remains authoritative.
 ## Issues and ownership
 
 - Agents may create new upstream Issues without separate approval only when the
-  Issue is labeled `status:needs-triage`.
+  resulting Issue is labeled `status:needs-triage`. Follow the
+  [permission-aware proposal path](agent-context/README.md#creating-a-proposal).
+- An agent without upstream label permission prepares the proposal for human
+  Issue-form submission or requests maintainer assistance. It must not run a
+  labeled Issue command it cannot authorize.
+- `status:needs-triage` is proposed work, not approved work. Never self-assign,
+  claim, or implement it. Missing type, area, source, or other classification
+  labels never authorize implementation; maintainer triage applies labels the
+  proposer cannot.
 - Every Issue and label command must explicitly target
   `cadence-workflow/cadence-ai-samples`; never infer the target from `origin`.
 - Only a human may promote an Issue to `status:agent-ready`, approve architecture
   or priority, approve a PR, or authorize a merge.
 - Any contributor may claim an unassigned `status:agent-ready` Issue. Immediately
   before claiming, recheck its assignee, comments, labels, and active linked PRs.
+- Assignment records ownership of approved work, not interest or priority.
 - Claim in this order: comment intent, remove `status:agent-ready`, add
   `status:in-progress`, then create the branch.
+- Contributors without upstream label or assignment permission must comment to
+  request a claim, then wait. Do not create the branch or begin implementation
+  until the Issue has `status:in-progress` and identifies the contributor as
+  owner through assignment or a maintainer confirmation comment.
 - Skip work assigned to or claimed by another contributor, including work with a
   linked PR or `status:in-progress`. Resume only the current contributor's
   matching claimed Issue and branch. Do not open competing implementation PRs
