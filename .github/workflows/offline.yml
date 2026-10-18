@@ -1,0 +1,51 @@
+name: Offline checks
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  scripts:
+    name: Scripts and profile contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Run scripts, generator, launcher, and profile contract tests
+        run: python3 -m unittest discover -s scripts/tests -v
+
+  explorer:
+    name: Explorer Python
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Create Explorer environment
+        run: python3 -m venv tools/explorer/.venv
+      - name: Install Explorer dependencies
+        run: tools/explorer/.venv/bin/python -m pip install -r tools/explorer/requirements.txt
+      - name: Run Explorer Python tests
+        run: tools/explorer/.venv/bin/python -m unittest discover -s tools/explorer/tests -v
