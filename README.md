@@ -123,3 +123,7 @@ Coding agents start with [AGENTS.md](AGENTS.md) and the
 is approved, discovered, validated, and handed off across tools and machines.
 Use the [contribution workflow cheat sheet](WORKFLOW.md) for the short intent
 phrases that move work from an idea through review and merge.
+
+## License
+
+This repository is licensed under the [Apache License 2.0](LICENSE).
