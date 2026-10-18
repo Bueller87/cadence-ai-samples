@@ -81,6 +81,11 @@ class RuntimeLauncherTests(unittest.TestCase):
     def fake_python(self, name: str, version: tuple[int, int, int]):
         content = f"""#!{sys.executable}
 import json, os, pathlib, shutil, sys
+if sys.argv[1:2] == ["-"]:
+    try:
+        import packaging.specifiers
+    except ImportError:
+        import pip._vendor.packaging.specifiers
 sys.version_info = {version!r}
 if pathlib.Path(__file__).parent.name == "bin":
     sys.prefix = str(pathlib.Path(__file__).parent.parent)
@@ -210,7 +215,8 @@ raise SystemExit(int(os.environ.get("FAKE_APP_EXIT", "0")))
             '[project]\nrequires-python = ">=3.12,<3.14"\n'
         )
         (implementation / "main.py").write_text("")
-        self.fake_python("python3", (3, 14, 1))
+        for name in ("python3.13", "python3.12", "python3"):
+            self.fake_python(name, (3, 14, 1))
         result = self.invoke(implementation, "setup")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("requires-python", result.stderr)
