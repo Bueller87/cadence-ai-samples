@@ -83,16 +83,44 @@ or a maintainer comment confirming the claim.
    `cadence-workflow/cadence-ai-samples:main`.
 4. Link the Issue and include actual test commands/results, untested behavior,
    and known limitations.
-5. Wait for repository-owner approval. Never self-approve. A coding agent may
-   execute a merge only after explicit repository-owner direction and after
-   verifying required approval and checks; without authorization, it reports the
-   remaining gate and stops.
+5. Follow the applicable human review path below, then wait for explicit
+   repository-owner merge authorization. A coding agent cannot approve a PR or
+   supply merge authority.
 
 Keep claimed work `status:in-progress` until merge closes the Issue. If
 abandoning it, comment the reason and current state, replace
 `status:in-progress` with `status:agent-ready`, and ask before deleting the
 branch. Branch names identify the Issue, not the coding tool, because work may
 move between agents.
+
+## Review and merge policy
+
+A non-owner PR requires one approval from a human member of the existing
+`cadence-dev` team. A new commit dismisses prior approvals, so a fresh
+`cadence-dev` approval must cover the current head. Approval to run a first-time
+contributor's workflow is a separate safety gate and does not count as PR
+approval.
+
+The repository owner, `Bueller87`, cannot approve an owner-authored PR through
+GitHub self-review. Until another eligible approver is available, the owner may
+use the pull-request-only review bypass on an owner-authored PR and must record
+that use in the PR. GitHub technically makes the bypass available on non-owner
+PRs too, but repository policy forbids using it there.
+
+The owner exception applies only to the human review gate. Every PR still needs
+passing `DCO`, `Scripts and profile contracts`, and `Explorer Python` checks on
+a head that is current with `main`, and all review threads must be resolved.
+Those gates are enforced in a separate ruleset with no bypass actors. Routine
+direct pushes to `main` and required-check bypasses are prohibited.
+
+Human review approval and repository-owner merge authorization are separate.
+Only the repository owner may authorize a merge. An agent may execute an
+authorized merge only after verifying the applicable review path, all required
+checks, branch currency, and resolved threads.
+
+For a real incident, the repository owner may change a ruleset only after
+recording the reason and current state in an Issue. Record the before/after
+configuration and restoration in that Issue. Do not weaken rules routinely.
 
 ## Offline pull-request checks
 
