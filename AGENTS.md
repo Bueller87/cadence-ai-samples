@@ -111,6 +111,17 @@ agent creates the commit. Chat and terminal output do not satisfy it.
 - PRs use the contributor fork as head and
   `cadence-workflow/cadence-ai-samples:main` as base.
 - Sign every commit with DCO using lowercase `-s`.
+- A non-owner PR requires one approval from a human member of the `cadence-dev`
+  team. New commits dismiss prior approvals, so approval must cover the current
+  head. Workflow-run approval for a first-time contributor is separate and does
+  not count as PR approval.
+- The repository owner, `Bueller87`, may use the pull-request-only review bypass
+  on an owner-authored PR without self-review. GitHub technically makes this
+  bypass available on other PRs, but repository policy forbids that use. Record
+  every permitted use in the PR.
+- The owner review bypass does not bypass DCO, required CI, the requirement that
+  the branch be current with `main`, or unresolved review threads. Those gates
+  are enforced in a separate ruleset with no bypass actors.
 - Follow the contributor's declared commit policy. Do not create a commit unless
   authorized. When the contributor owns commits, provide the conventional commit
   message, remind them to create the commit with lowercase `-s`, and stop.
@@ -118,11 +129,19 @@ agent creates the commit. Chat and terminal output do not satisfy it.
 - `The branch is committed and pushed. Prepare the PR` requires verification of
   the committed and pushed state before creating or updating a draft PR.
 - Never force-push or mark a PR ready unless the repository owner explicitly
-  directs it. Agents never self-approve. An agent may execute a merge only after
-  explicit repository-owner direction and verification of required approval and
-  checks; without merge authorization, report the remaining gate and stop.
+  directs it. A human review approval and repository-owner merge authorization
+  are separate decisions. Agents never approve PRs or supply merge authority. An
+  agent may execute a merge only after explicit repository-owner direction and
+  verification of the applicable review path, required checks, branch currency,
+  and resolved threads; without merge authorization, report the remaining gate
+  and stop.
 - Link the Issue and include summary, spec/ADR impact, exact validation evidence,
   untested behavior, and known limitations.
+
+Routine direct pushes to `main` and required-check bypasses are prohibited. For
+a real incident, the repository owner may change a ruleset only after recording
+the reason and current state in an Issue, and must record the before/after
+configuration and restoration there.
 
 ## Documentation update triggers
 

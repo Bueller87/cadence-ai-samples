@@ -30,8 +30,8 @@ If prior chat context is unavailable, see
 | `Prepare this for commit.` | Verify the worktree and durable evidence, then follow the contributor's commit policy. If the contributor owns commits, provide the conventional commit message, remind them to create the commit with lowercase `-s`, and stop. |
 | `Write the PR description.` | Return a ready-to-paste PR title and body only. Make no GitHub write. |
 | `The branch is committed and pushed. Prepare the PR.` | Verify the signed commit and pushed branch, then create or update a **draft** PR from the contributor fork to upstream `main`. Finalize its body from committed Git and Issue evidence, link the Issue, and report each PR checklist item and current check result. |
-| `Review PR #N and recommend approve or request changes.` | Read the current GitHub diff, discussion, checks, and requirements. Return or post evidence-based findings as requested. Only the repository owner supplies official approval. |
-| `PR #N is approved. Merge it.` | Verify explicit merge authorization, repository-owner approval, and required checks, then merge only if repository policy permits it. Otherwise report the remaining gate. |
+| `Review PR #N and recommend approve or request changes.` | Read the current GitHub diff, discussion, checks, and requirements. Return or post evidence-based findings as requested. Agents cannot submit an approval. A non-owner PR needs one current human `cadence-dev` approval; an owner-authored PR may use the recorded owner review bypass. |
+| `PR #N is approved. Merge it.` | Treat review and merge authority separately. Verify explicit repository-owner merge authorization, the applicable human review path, all required checks on a branch current with `main`, and resolved threads, then merge only if repository policy permits it. Otherwise report the remaining gate. |
 
 ### First-time fork workflow approval
 
@@ -46,6 +46,24 @@ after its first contribution merges. See
 [Offline pull-request checks](CONTRIBUTING.md#offline-pull-request-checks) for
 the local equivalents and scope. Required-check and branch-rule configuration
 remains in [Issue #78](https://github.com/cadence-workflow/cadence-ai-samples/issues/78).
+
+## Review and merge gates
+
+A non-owner PR needs one approval from a human `cadence-dev` team member. New
+commits dismiss prior approvals. First-time workflow approval starts a workflow
+run but is not PR review approval.
+
+For an owner-authored PR, `Bueller87` may use the pull-request-only review bypass
+without self-review and must record its use in the PR. GitHub technically permits
+that bypass on other PRs, but repository policy does not. The bypass affects only
+the review requirement: DCO, `Scripts and profile contracts`, `Explorer Python`,
+current-with-`main`, and resolved-thread gates still apply through a separate
+ruleset with no bypass actors.
+
+Only the repository owner authorizes a merge. Agents cannot approve PRs or
+supply merge authority. Routine direct pushes and check bypasses are prohibited.
+For a real incident, the owner records the reason, before/after rules, and
+restoration in an Issue.
 
 ## Local implementation completion
 
@@ -106,9 +124,11 @@ data, or machine-specific configuration.
 
 ## Human authority
 
-Only a human may approve architecture or priority, add `status:agent-ready`,
-approve a PR, or authorize a merge. Agents never self-approve. An agent may
-execute a merge only after explicit repository-owner direction and verification
-of required approval and checks; without authorization, report the remaining
-gate and stop. Keep the Issue `status:in-progress` through local completion and
-draft-PR handoff; merge closes it.
+Only a human may approve architecture or priority, add `status:agent-ready`, or
+approve a PR. Only the repository owner may authorize a merge. Agents never
+approve PRs or supply merge authority. An agent may execute a merge only after
+explicit repository-owner direction and verification of the applicable review
+path, required checks, branch currency, and resolved threads; without
+authorization, report the remaining gate and stop. Keep the Issue
+`status:in-progress` through local completion and draft-PR handoff; merge closes
+it.

@@ -39,4 +39,13 @@ Link follow-up Issues instead of creating a second backlog here.
 - [ ] Commits include DCO sign-off (`git commit -s`).
 - [ ] The head branch is in a contributor fork and the base is upstream `main`.
 - [ ] This PR body was finalized after the signed commit and branch push.
-- [ ] I will not approve or merge my own PR; repository-owner approval is required.
+- [ ] This PR will be current with `main`, with `DCO`, `Scripts and profile contracts`,
+      and `Explorer Python` passing on the current head before merge.
+- [ ] All review threads will be resolved before merge.
+- [ ] Review path: a non-owner PR has one current human `cadence-dev` approval, or
+      this is an owner-authored PR using the recorded owner review bypass.
+- [ ] Any owner review bypass use is recorded in this PR and is not being used on
+      a non-owner PR or to bypass required checks or unresolved review threads.
+- [ ] Human review does not itself authorize merge; I will wait for explicit
+      repository-owner merge authorization.
+- [ ] No coding agent approved this PR or supplied merge authority.
