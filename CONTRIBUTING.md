@@ -94,6 +94,13 @@ abandoning it, comment the reason and current state, replace
 branch. Branch names identify the Issue, not the coding tool, because work may
 move between agents.
 
+## DCO and licensing
+
+The required lowercase `git commit -s` sign-off certifies that the contributor
+has the right to submit the contribution under the Developer Certificate of
+Origin (DCO). The repository's [Apache License 2.0](LICENSE) governs use,
+modification, and distribution of the repository.
+
 ## Coding-agent contributions
 
 Agent-assisted changes follow the same Issue, branch, PR, review, and validation
