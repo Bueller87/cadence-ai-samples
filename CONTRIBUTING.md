@@ -94,6 +94,43 @@ abandoning it, comment the reason and current state, replace
 branch. Branch names identify the Issue, not the coding tool, because work may
 move between agents.
 
+## Offline pull-request checks
+
+The baseline GitHub Actions workflow uses Ubuntu and Python 3.12. It runs the
+scripts, generator, launcher, and profile contract suite and the Explorer Python
+suite on pull requests to `main` and pushes to `main`.
+
+To run the matching checks from the repository root, use Python 3.12 and prepare
+the Explorer environment before running its suite:
+
+```bash
+python3 -m unittest discover -s scripts/tests -v
+python3 -m venv tools/explorer/.venv
+tools/explorer/.venv/bin/python -m pip install -r tools/explorer/requirements.txt
+tools/explorer/.venv/bin/python -m unittest discover -s tools/explorer/tests -v
+```
+
+A workflow run from a first-time outside contributor's fork may pause for
+maintainer approval. If GitHub shows that the run is awaiting approval, wait for
+a maintainer. Do not rerun it, change workflow files to try to start it, or
+assume that the checks have begun. A maintainer reviews the fork diff before
+clicking **Approve workflows to run**.
+
+In the observed first-time fork test, the initial run paused, and a corrected
+push to the same unmerged pull request paused again. This describes only that
+account before any of its contributions had merged. It does not predict what
+GitHub will do after a contributor's first merged contribution.
+
+These checks do not:
+
+- install per-recipe dependencies or run each recipe's test matrix;
+- test Go, Java, Python 3.13, or the Explorer jsdom workflow;
+- start Cadence, Cadence-Web, Laya, Ollama, a live model Worker, or paid
+  inference;
+- use repository or provider secrets; or
+- make themselves required checks or change branch rules. That policy work is
+  tracked in [Issue #78](https://github.com/cadence-workflow/cadence-ai-samples/issues/78).
+
 ## DCO and licensing
 
 The required lowercase `git commit -s` sign-off certifies that the contributor

@@ -33,6 +33,20 @@ If prior chat context is unavailable, see
 | `Review PR #N and recommend approve or request changes.` | Read the current GitHub diff, discussion, checks, and requirements. Return or post evidence-based findings as requested. Only the repository owner supplies official approval. |
 | `PR #N is approved. Merge it.` | Verify explicit merge authorization, repository-owner approval, and required checks, then merge only if repository policy permits it. Otherwise report the remaining gate. |
 
+### First-time fork workflow approval
+
+A workflow run from a first-time outside contributor's fork may pause for
+maintainer approval. The contributor waits rather than rerunning it, changing
+workflow files to try to start it, or assuming that checks have begun. A
+maintainer reviews the fork diff before clicking **Approve workflows to run**.
+
+In the observed test, a corrected push to the same unmerged first-time pull
+request paused again. Do not generalize that result to the account's behavior
+after its first contribution merges. See
+[Offline pull-request checks](CONTRIBUTING.md#offline-pull-request-checks) for
+the local equivalents and scope. Required-check and branch-rule configuration
+remains in [Issue #78](https://github.com/cadence-workflow/cadence-ai-samples/issues/78).
+
 ## Local implementation completion
 
 Before saying implementation is `done`, `ready for review`, or `ready to
