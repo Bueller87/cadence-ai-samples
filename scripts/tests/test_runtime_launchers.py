@@ -81,6 +81,11 @@ class RuntimeLauncherTests(unittest.TestCase):
     def fake_python(self, name: str, version: tuple[int, int, int]):
         content = f"""#!{sys.executable}
 import json, os, pathlib, shutil, sys
+if sys.argv[1:2] == ["-"]:
+    try:
+        import packaging.specifiers
+    except ImportError:
+        import pip._vendor.packaging.specifiers
 sys.version_info = {version!r}
 if pathlib.Path(__file__).parent.name == "bin":
     sys.prefix = str(pathlib.Path(__file__).parent.parent)
