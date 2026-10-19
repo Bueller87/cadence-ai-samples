@@ -58,8 +58,8 @@ example `./run.sh --task-list another-list worker`.
 
 ## Live run
 
-Supported selections are the current model entries below. Live startup validates
-the ID, provider, and endpoint without calling a provider.
+The live Worker supports these model entries and validates the selected model's
+ID, provider, and endpoint without making a provider call.
 
 | Model ID | Provider | Credential |
 | --- | --- | --- |

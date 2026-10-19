@@ -1,4 +1,4 @@
-#Worker Startup
+# Worker startup
 
 **Cmd Line Args** (run from `python/google-adk/`)
 --model-id gemini-flash-lite
