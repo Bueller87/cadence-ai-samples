@@ -1,54 +1,83 @@
 # Cadence AI Samples
 
-`cadence-ai-samples` is a collection of AI workflow examples built with [Cadence](https://cadenceworkflow.io/) durable workflow orchestration. The examples address specific problems instead of demonstrating individual library features.
+`cadence-ai-samples` is a collection of independently runnable AI workflow examples built with [Cadence](https://cadenceworkflow.io/) durable workflow orchestration.
 
-Cadence preserves workflow state and provides durable retries, timers, and failure recovery for long-running AI workflows. External AI calls must run in Cadence Activities, never directly in Workflow code. Workflow logic produces the same decisions during replay, even after a process restart or dependency failure.
+## Explore the samples
 
-## Choosing the right tool
+```bash
+./scripts/explore.sh
+```
 
-Recipes should use the simplest approach that fits the problem:
+The Local Samples Explorer opens the current checkout on a loopback address. It
+needs Python 3.10+ with venv support. On first launch, it creates
+`tools/explorer/.venv` and downloads the pinned PyYAML dependency; later launches
+reuse that environment. The first launch therefore needs package-download
+access.
 
-- **Deterministic code** for rules and transformations that can be expressed reliably in ordinary code.
-- **Specialized decision models** for focused classification, scoring, ranking, or prediction tasks.
-- **Generative models** when the application needs to create, extract, transform, or summarize flexible content.
-- **AI agents** when a task needs several planning steps or tool calls.
+Browsing does not require Cadence, Cadence Web, a recipe language runtime,
+recipe dependencies, provider credentials, Laya, or Ollama. The launcher and
+generated commands use Bash. macOS supports the optional Terminal handoff;
+native Windows command tabs and Terminal handoff remain deferred.
 
+Use this short path in the Explorer:
 
+1. Select a recipe and implementation.
+2. Select mock mode when available.
+3. Use **Refresh and check services** for advisory checks.
+4. After installing the selected language runtime, use
+   **Prepare recipe dependencies**.
+5. Copy the Worker and Workflow commands, or use **Open in Terminal** on macOS.
 
-## Recipe philosophy
+Preparation invokes only the selected implementation's checked-in
+`run.sh setup`. The Explorer does not install language runtimes or start
+Cadence, Cadence Web, AI services, Workers, or Workflows. See
+[Explorer usage and validation](tools/explorer/README.md) for the complete
+selection, preparation, warm-up, and run-link behavior.
 
-Every recipe runs on its own and is easy to copy into an existing application. Recipes do not depend on one another or on a shared integration framework. Prefer a simple layout when it keeps the example clear. This often means one file for the workflow, Activities, and business logic, plus one worker entry point.
+## Run a recipe
 
-Recipes may use Go, Python, or an occasional minimal combination of both. AI providers and agent frameworks should be replaceable when practical, without adding abstraction layers that obscure the solution. This approach follows the simplicity of Cadence's redesigned [Go samples](https://github.com/cadence-workflow/cadence-samples/tree/master/new_samples).
+The flagship [Ticket Routing](recipes/ticket-routing/README.md) recipe provides
+a visual mock path with synthetic tickets and no provider key. Its runbook
+contains the commands for starting Cadence, preparing the implementation, and
+running the Worker and Workflow.
 
-## Finding recipes
+Browse the current recipe runbooks directly:
 
-All samples use the Cadence domain `cadence-ai-samples`.
+- [Ticket Routing](recipes/ticket-routing/README.md), the flagship mock path
+- [Human in the Loop](recipes/human-in-the-loop/README.md)
+- [Recurring AI Watch](recipes/recurring-ai-watch/README.md)
+- [Agent Handoffs](recipes/agent-handoffs/README.md)
+- [Auto Research](recipes/auto-research/README.md)
 
-Browse recipe directories by problem or use case. The flagship
-[StreamWave ticket routing](recipes/ticket-routing/) recipe demonstrates typed
-AI-assisted classification with durable Child Workflows, assignment Signals,
-and SLA timers through the standard `worker|start` contract. Its README contains
-the copy/paste commands and acknowledgment walkthrough.
+Running a selected recipe has additional requirements:
 
-### Local Samples Explorer
+- Go implementations currently declare Go 1.23.
+- Supported Python recipe profiles use Python 3.12 or 3.13, not Python 3.14.
+  The selected implementation's `pyproject.toml` is authoritative.
+- Java profiles use a Java 17 toolchain and their checked-in Gradle wrapper.
+- The baseline pull-request workflow uses Python 3.12.
 
-Run `./scripts/explore.sh` to open a localhost explorer of this checkout. Choose a
-sample, follow its setup and service checks, warm local inference when applicable,
-prepare the selected recipe's declared dependencies explicitly, and copy matching
-Worker and Workflow commands. Refresh reads the current recipe files and catalogs,
-including local edits.
+Recipes use the `cadence-ai-samples` domain and need a reachable local Cadence
+server. Cadence endpoint protocols and ports differ by SDK, so follow the
+selected recipe README instead of assuming one frontend port. Cadence Web is
+optional for browsing, but required for walkthroughs that use Queries, Signals,
+exact-run links, or Custom Workflow Controls.
 
-The launcher needs Python 3.10+ with venv support and installs its one small
-dependency on first use. Those are explorer prerequisites only. Each recipe lists
-its own Go, Java, or Python runtime and service requirements. Recipe commands use
-an implementation-local `run.sh`; Explorer may invoke only its fixed `setup`
-action, while Worker and Workflow commands remain for your terminal.
-See [explorer usage and validation](tools/explorer/README.md).
+<a id="local-ai-services"></a>
 
-## Local AI services
+## Optional local AI services
 
-Some recipes can run without API keys by using [Laya](https://github.com/NandhaKishorM/laya) for local classification and [Ollama](https://ollama.com/) for local models. The [Recurring AI Watch](recipes/recurring-ai-watch/) recipe selects them with `--classifier-id laya-local` and `--model-id llama3.2-local`.
+A recipe may need neither, one, or both local AI services:
+
+- [Laya](https://github.com/NandhaKishorM/laya) provides local classification
+  when an implementation selects
+  [`laya-local`](classifiers.yaml).
+- [Ollama](https://ollama.com/) provides local generative inference when an
+  implementation selects an Ollama entry such as
+  [`llama3.2-local`](models.yaml).
+
+The selected recipe README and Explorer checks are authoritative. Provider keys
+are needed only for an explicitly selected remote live path.
 
 ### Install Laya
 
@@ -61,7 +90,9 @@ LAYA_PORT=8008 docker compose -f compose.yaml -f compose.http.yaml up -d --build
 curl -s http://localhost:8008/health
 ```
 
-Port 8008 matches `laya-local` in `[classifiers.yaml](classifiers.yaml)`. Laya defaults to port 8000, which the local Cadence server already publishes. Laya downloads its model weights on the first classification request and stores them in a named Docker volume for reuse. The first download can take several minutes. You can set `HF_TOKEN` to get higher Hugging Face download rate limits.
+Port 8008 matches `laya-local` in [classifiers.yaml](classifiers.yaml). Laya
+downloads its model weights on the first classification request and stores them
+for reuse.
 
 ### Install Ollama and llama3.2
 
@@ -74,55 +105,45 @@ ollama pull llama3.2
 ollama run llama3.2 "Say ok."
 ```
 
-Ollama listens on `localhost:11434`, which matches `llama3.2-local` in `[models.yaml](models.yaml)`. Run `ollama ps` to see whether the model is loaded.
+Ollama listens on `localhost:11434`, which matches `llama3.2-local` in
+[models.yaml](models.yaml). After installation, the Explorer can explicitly
+warm selected local services without starting or downloading them.
 
-### Warm up the local services
+## Why Cadence for AI workflows
 
-AI Activities in Recurring AI Watch have a 30-second execution budget. A cold Laya or Ollama request can take longer, so warm up both services before starting a Workflow.
+Cadence preserves workflow state and provides durable retries, timers, and
+failure recovery for long-running AI workflows. External AI calls run in
+Cadence Activities, never directly in Workflow code. Workflow logic produces
+the same decisions during replay, even after a process restart or dependency
+failure.
 
-1. Check that Laya is ready:
-  ```bash
-   curl -s http://localhost:8008/health
-  ```
-2. Send a Laya classification request. The 10-minute client timeout allows an initial model download to finish:
-  ```bash
-   curl -sS --max-time 600 -X POST http://localhost:8008/v1/systemone \
-     -H 'Content-Type: application/json' \
-     -d '{"state":"Version: 0.0.1\nRelease notes: warmup","model":"convaiinnovations/laya","questions":{"relevant":{"type":"choice","instructions":"Is this a warmup request?","criteria":{"yes":"It is a warmup.","no":"It is not a warmup."}}}}'
-  ```
-   The response should contain `"answers"`. A second request should return quickly.
-3. Load llama3.2 into Ollama and keep it loaded for 30 minutes:
-  ```bash
-   curl -sS --max-time 300 http://localhost:11434/api/generate \
-     -d '{"model":"llama3.2:latest","prompt":"Say ok.","stream":false,"keep_alive":"30m"}'
-  ```
+## Choosing the right tool
 
+Recipes use the simplest approach that fits the problem:
 
+- **Deterministic code** for reliable rules and transformations.
+- **Specialized decision models** for focused classification, scoring, ranking,
+  or prediction.
+- **Generative models** for creating, extracting, transforming, or summarizing
+  flexible content.
+- **AI agents** for tasks that need several planning steps or tool calls.
+
+## Recipe philosophy
+
+Every recipe runs on its own and is easy to copy into an existing application.
+Recipes do not depend on one another or on a shared integration framework.
+Providers and agent frameworks should be replaceable when practical without
+adding abstraction layers that obscure the solution. This follows the
+simplicity of Cadence's redesigned
+[Go samples](https://github.com/cadence-workflow/cadence-samples/tree/master/new_samples).
 
 ## Contributing
 
-Contributions are welcome. First-time contributors should start with the
-[contributor and Issue claim path](CONTRIBUTING.md#first-time-contributor-path),
-then [plan before building](WORKFLOW.md#plan-before-building). Start with a
-concrete real-world problem, write an implementation specification, and keep the
-resulting recipe focused and portable. See the implementation profiles in
-[templates/profiles](templates/profiles/).
-
-Create a recipe from an implementation profile. All three choices are required:
-
-```bash
-./scripts/new-recipe.sh your-recipe-name --language python --classifier none --agent none
-```
-
-Run `./scripts/new-recipe.sh --help` to list valid combinations and the profiles
-implemented in this checkout. To add another profile directory to an existing
-recipe, run `./scripts/add-recipe-implementation.sh --help`.
-
-Coding agents start with [AGENTS.md](AGENTS.md) and the
-[repository context map](agent-context/README.md). These files describe how work
-is approved, discovered, validated, and handed off across tools and machines.
-Use the [contribution workflow cheat sheet](WORKFLOW.md) for the short intent
-phrases that move work from an idea through review and merge.
+Contributions start with a concrete problem or use case. Follow the
+[first-time contributor path](CONTRIBUTING.md#first-time-contributor-path),
+[plan before building](WORKFLOW.md#plan-before-building), and run the
+[offline pull-request checks](CONTRIBUTING.md#offline-pull-request-checks).
+Coding agents start with the [coding-agent contract](AGENTS.md).
 
 ## License
 
