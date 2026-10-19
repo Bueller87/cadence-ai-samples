@@ -62,6 +62,7 @@ centralize documentation.
 - [Project README](../README.md)
 - [Contributing](../CONTRIBUTING.md)
 - [Contribution workflow cheat sheet](../WORKFLOW.md)
+- [KubeCon NA 2026 ContribFest participant guide](../CONTRIBFEST.md)
 - [Agent Handoffs README](../recipes/agent-handoffs/README.md)
 - [Auto Research README](../recipes/auto-research/README.md)
 - [Ticket routing README](../recipes/ticket-routing/README.md)

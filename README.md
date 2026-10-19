@@ -139,6 +139,9 @@ simplicity of Cadence's redesigned
 
 ## Contributing
 
+Attending KubeCon + CloudNativeCon North America 2026? Start with the
+[Cadence Workflow ContribFest guide](CONTRIBFEST.md).
+
 Contributions start with a concrete problem or use case. Follow the
 [first-time contributor path](CONTRIBUTING.md#first-time-contributor-path),
 [plan before building](WORKFLOW.md#plan-before-building), and run the
