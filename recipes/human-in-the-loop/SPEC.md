@@ -1,4 +1,4 @@
-# Human In The Loop implementation specification
+# Human-in-the-loop implementation specification
 
 ## Problem statement
 

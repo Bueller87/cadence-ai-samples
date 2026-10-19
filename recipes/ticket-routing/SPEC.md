@@ -67,7 +67,7 @@ as explicit input.
   choose or mutate input.
 - Activity retries and replay retain the ticket recorded in Workflow history.
 
-## Classification Activity
+## Classification activity
 
 One `ClassifyTicket` Activity request contains three independent `choice`
 questions:
