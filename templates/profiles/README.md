@@ -117,7 +117,9 @@ another profile directory under `recipes/<slug>/`.
 From the repository root:
 
 ```bash
-python3 -m unittest discover -s scripts/tests -v
+python3 -m venv scripts/.venv
+scripts/.venv/bin/python -m pip install -r scripts/requirements-test.txt
+scripts/.venv/bin/python -m unittest discover -s scripts/tests -v
 tools/explorer/.venv/bin/python -m unittest discover -s tools/explorer/tests -v
 ```
 

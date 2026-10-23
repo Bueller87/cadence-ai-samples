@@ -1,5 +1,5 @@
-name: Work proposal
-description: Propose tooling, templates, catalogs, documentation, or other work
+name: General work proposal
+description: Share an idea for maintainer triage before implementation-task authoring
 title: ""
 labels:
   - status:needs-triage
@@ -7,7 +7,10 @@ body:
   - type: markdown
     attributes:
       value: |
-        Proposals are not approved work until a maintainer adds `status:agent-ready`.
+        Use this format for a general idea that is not yet an implementation-ready task.
+        Maintainer triage may later choose a human-first or agent-first task format.
+        Proposals are not approved work until a human maintainer adds `status:ready`.
+        Missing format, type, area, or source labels never authorize implementation.
         Do not include credentials, proprietary data, or private company context.
   - type: dropdown
     id: area
@@ -23,58 +26,37 @@ body:
     validations:
       required: true
   - type: textarea
-    id: problem
+    id: idea
     attributes:
-      label: Problem
-      description: What concrete problem or limitation needs attention?
+      label: Idea or problem
+      description: What idea, opportunity, or concrete problem should maintainers consider?
     validations:
       required: true
   - type: textarea
     id: context
     attributes:
-      label: Context and source
-      description: Link relevant code, specs, public references, Issues, or PRs.
+      label: Context
+      description: Link relevant public references, repository paths, Issues, or PRs.
     validations:
       required: true
   - type: textarea
-    id: scope
+    id: value
     attributes:
-      label: Scope and non-goals
-      description: State the intended boundary and explicit exclusions.
-    validations:
-      required: true
-  - type: input
-    id: spec
-    attributes:
-      label: Canonical specification
-      description: Repository path to the controlling spec, or explain why none applies.
+      label: Desired value
+      description: Who would benefit, and what useful outcome would this make possible?
     validations:
       required: true
   - type: textarea
-    id: acceptance
+    id: constraints
     attributes:
-      label: Acceptance criteria
-      placeholder: |
-        - [ ] ...
-        - [ ] ...
+      label: Known constraints or open questions
+      description: Record important boundaries, dependencies, or decisions that still need triage.
     validations:
       required: true
-  - type: textarea
-    id: validation
-    attributes:
-      label: Validation approach
-      description: Include an offline or mock path when practical.
-    validations:
-      required: true
-  - type: textarea
-    id: blockers
-    attributes:
-      label: Decisions or blockers
-      description: Identify choices that require maintainer authority.
   - type: checkboxes
     id: approval
     attributes:
       label: Approval gate
       options:
-        - label: I understand this proposal must be labeled `status:agent-ready` by a maintainer before implementation.
+        - label: I understand that only a human maintainer may label this proposal `status:ready` before implementation.
           required: true

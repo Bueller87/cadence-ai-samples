@@ -1,0 +1,106 @@
+name: Agent-first work proposal
+description: Propose work with durable context for autonomous execution and recovery
+title: ""
+labels:
+  - status:needs-triage
+  - format:agent-first
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this format when the Issue must remain a detailed, durable implementation contract.
+        Proposals are not approved work until a human maintainer adds `status:ready`.
+        Missing format, type, area, or source labels never authorize implementation.
+        Do not include credentials, proprietary data, or private company context.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Explorer
+        - Recipes
+        - Templates
+        - Catalogs
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What concrete problem or limitation needs attention?
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context and source
+      description: Link relevant code, specs, public references, Issues, PRs, and prior evidence.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and non-goals
+      description: State the intended boundary and explicit exclusions.
+    validations:
+      required: true
+  - type: textarea
+    id: authority
+    attributes:
+      label: Decisions requiring human authority
+      description: Identify architecture, priority, policy, or scope choices a human must approve.
+    validations:
+      required: true
+  - type: textarea
+    id: specifications
+    attributes:
+      label: Specifications and decisions
+      description: Link controlling specs and ADRs, or give intended future paths and explain why they do not exist yet.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Exact validation
+      description: List commands, expected results, and an offline or mock path when practical.
+    validations:
+      required: true
+  - type: textarea
+    id: limitations
+    attributes:
+      label: Known limitations and untested behavior
+      description: State what this work will not prove or exercise.
+    validations:
+      required: true
+  - type: textarea
+    id: blockers
+    attributes:
+      label: Dependencies and blockers
+      description: Identify sequencing, access, environment, or decision blockers.
+    validations:
+      required: true
+  - type: textarea
+    id: handoff
+    attributes:
+      label: Durable handoff requirements
+      description: Define the branch, changed paths, evidence, state, and exact next-step details an unfinished handoff must preserve.
+    validations:
+      required: true
+  - type: checkboxes
+    id: approval
+    attributes:
+      label: Approval gate
+      options:
+        - label: I understand that only a human maintainer may label this proposal `status:ready` before implementation.
+          required: true

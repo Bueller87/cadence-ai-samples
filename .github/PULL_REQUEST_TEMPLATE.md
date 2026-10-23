@@ -2,35 +2,25 @@
 
 Closes #
 
-## Summary
+## What changed
 
 - 
 
-## Specification and decisions
-
-- Canonical spec:
-- Requirement or acceptance change: yes / no
-- ADR added or superseded: yes / no / not applicable
-
 ## Validation
 
-List every command actually run and its result.
+List the commands actually run and their results.
 
 ```text
 command
 result
 ```
 
-## Not tested
+## Unfinished or not tested
 
-List live providers, operating systems, visual flows, or other relevant checks not
-performed.
+List remaining work, relevant checks not performed, and known limitations.
 
-## Known limitations and follow-up
-
-Link follow-up Issues instead of creating a second backlog here.
-
-## Contributor checklist
+<!-- shared-governance-gates:start -->
+## Required governance gates
 
 - [ ] The PR implements one approved Issue and stays within its scope.
 - [ ] The linked Issue was claimed and remains `status:in-progress`.
@@ -38,9 +28,9 @@ Link follow-up Issues instead of creating a second backlog here.
 - [ ] No credentials, proprietary data, or unrelated changes are included.
 - [ ] Commits include DCO sign-off (`git commit -s`).
 - [ ] The head branch is in a contributor fork and the base is upstream `main`.
-- [ ] This PR body was finalized after the signed commit and branch push.
-- [ ] This PR will be current with `main`, with `DCO`, `Scripts and profile contracts`,
-      and `Explorer Python` passing on the current head before merge.
+- [ ] The branch is current with upstream `main`.
+- [ ] `DCO`, `Scripts and profile contracts`, and `Explorer Python` pass on the
+      current head.
 - [ ] All review threads will be resolved before merge.
 - [ ] Review path: a non-owner PR has one current human `cadence-dev` approval, or
       this is an owner-authored PR using the recorded owner review bypass.
@@ -49,3 +39,4 @@ Link follow-up Issues instead of creating a second backlog here.
 - [ ] Human review does not itself authorize merge; I will wait for explicit
       repository-owner merge authorization.
 - [ ] No coding agent approved this PR or supplied merge authority.
+<!-- shared-governance-gates:end -->

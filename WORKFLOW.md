@@ -23,13 +23,13 @@ If prior chat context is unavailable, see
 
 | Say | Expected behavior |
 | --- | --- |
-| `Capture this idea: ...` | Follow the [permission-aware proposal path](agent-context/README.md#creating-a-proposal) to create or update an upstream `status:needs-triage` Issue, prepare its web-form submission, or request maintainer help. Missing classification labels never authorize implementation. |
-| `Find approved work.` | Inspect upstream open `status:agent-ready` Issues and report claimable work. Do not claim anything. |
+| `Capture this idea: ...` | Ask whether this is general idea intake or a defined implementation task. Keep general intake format-neutral; for a defined task, ask human-first or agent-first. Then follow the [permission-aware proposal path](agent-context/README.md#creating-a-proposal) to choose the matching form, use the authorized agent-first-only CLI path, or request maintainer help. Missing format or classification labels never authorize implementation. |
+| `Find approved work.` | Inspect upstream open `status:ready` Issues and report claimable work. Do not claim anything. |
 | `Proceed with Issue #N.` | Recheck the Issue's assignee, comments, labels, and active linked PRs, then follow the [claim path](CONTRIBUTING.md#claim-approved-work). Create `issue-N-short-slug` only after the Issue is `status:in-progress` and identifies the contributor as owner. |
 | `Prepare a durable handoff.` | Post the local-completion evidence described below, re-read it, and verify its URL and `status:in-progress`. Do not commit, push, or open a PR unless separately authorized. |
 | `Prepare this for commit.` | Verify the worktree and durable evidence, then follow the contributor's commit policy. If the contributor owns commits, provide the conventional commit message, remind them to create the commit with lowercase `-s`, and stop. |
 | `Write the PR description.` | Return a ready-to-paste PR title and body only. Make no GitHub write. |
-| `The branch is committed and pushed. Prepare the PR.` | Verify the signed commit and pushed branch, then create or update a **draft** PR from the contributor fork to upstream `main`. Finalize its body from committed Git and Issue evidence, link the Issue, and report each PR checklist item and current check result. |
+| `The branch is committed and pushed. Prepare the PR.` | Verify the signed commit and pushed branch, then create or update a **draft** PR from the contributor fork to upstream `main`. The root human-first template is the automatic default. Agents explicitly select `.github/PULL_REQUEST_TEMPLATE/agent-first.md` with `gh pr create --template`, or use the compare URL ending in `?expand=1&template=agent-first.md`. Finalize the body from committed Git and Issue evidence, link the Issue, and report each PR checklist item and current check result. |
 | `Review PR #N and recommend approve or request changes.` | Read the current GitHub diff, discussion, checks, and requirements. Return or post evidence-based findings as requested. Agents cannot submit an approval. A non-owner PR needs one current human `cadence-dev` approval; an owner-authored PR may use the recorded owner review bypass. |
 | `PR #N is approved. Merge it.` | Treat review and merge authority separately. Verify explicit repository-owner merge authorization, the applicable human review path, all required checks on a branch current with `main`, and resolved threads, then merge only if repository policy permits it. Otherwise report the remaining gate. |
 
@@ -124,7 +124,7 @@ data, or machine-specific configuration.
 
 ## Human authority
 
-Only a human may approve architecture or priority, add `status:agent-ready`, or
+Only a human may approve architecture or priority, add `status:ready`, or
 approve a PR. Only the repository owner may authorize a merge. Agents never
 approve PRs or supply merge authority. An agent may execute a merge only after
 explicit repository-owner direction and verification of the applicable review

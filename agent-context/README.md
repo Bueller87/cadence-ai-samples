@@ -93,7 +93,7 @@ Approved, available work:
 
 ```bash
 gh issue list --repo cadence-workflow/cadence-ai-samples \
-  --state open --label status:agent-ready
+  --state open --label status:ready
 ```
 
 Unapproved proposals:
@@ -112,7 +112,7 @@ gh issue list --repo cadence-workflow/cadence-ai-samples \
 
 Before taking an Issue, inspect its assignee, comments, labels, and active linked
 PRs. Recheck immediately before claiming. Any contributor may claim an unclaimed
-`status:agent-ready` Issue. Follow the
+`status:ready` Issue. Follow the
 [permission-aware claim path](../CONTRIBUTING.md#claim-approved-work).
 Contributors with upstream label permission claim in this order:
 
@@ -120,7 +120,7 @@ Contributors with upstream label permission claim in this order:
 gh issue comment N --repo cadence-workflow/cadence-ai-samples \
   --body "Claiming this approved Issue. Branch: issue-N-short-slug."
 gh issue edit N --repo cadence-workflow/cadence-ai-samples \
-  --remove-label status:agent-ready --add-label status:in-progress
+  --remove-label status:ready --add-label status:in-progress
 git switch -c issue-N-short-slug
 ```
 
@@ -128,13 +128,13 @@ Without upstream label or assignment permission, request maintainer help and
 wait for both `status:in-progress` and repository-visible ownership before
 creating the branch.
 
-Only a human may mark an Issue agent-ready. Keep it in-progress through the draft
+Only a human may mark an Issue `status:ready`. Keep it in-progress through the draft
 PR handoff. On abandonment, comment the reason and current state, then return it
 to the approved queue:
 
 ```bash
 gh issue edit N --repo cadence-workflow/cadence-ai-samples \
-  --remove-label status:in-progress --add-label status:agent-ready
+  --remove-label status:in-progress --add-label status:ready
 ```
 
 Preserve or delete the abandoned branch only with human direction. Active work is
@@ -143,37 +143,51 @@ draft PR, never an agent-specific branch prefix or chat history.
 
 ## Creating a proposal
 
+For plain `Capture this idea`, first ask whether this is general idea intake or
+a defined implementation task. General intake remains format-neutral. For a
+defined task, ask whether it should be human-first or agent-first before
+drafting it, then follow the matching permission-aware path.
 Outside contributors should use the repository
 [Issue forms](https://github.com/cadence-workflow/cadence-ai-samples/issues/new/choose)
-by default. Forms apply only their configured initial labels. For example, the
-work proposal form adds `status:needs-triage`, while the recipe proposal form
-also adds its configured type and area labels.
+by default. Choose the general work proposal for an idea that still needs
+maintainer triage before implementation-task authoring. Choose the human-first
+form for a defined task with a concise starting state, observable gap or
+failure, exact edit and validation paths, and a useful stopping point. Choose
+the agent-first form for a defined task expressed as a detailed durable
+implementation contract. Specialized recipe intake remains format-neutral until
+maintainer triage. Forms apply only their configured initial labels: every form
+adds `status:needs-triage`, the implementation-task forms add their `format:*`
+label, and the recipe proposal form also adds its configured type and area
+labels.
 
 An agent without upstream label permission prepares the proposal for a human to
 submit through a form or requests maintainer assistance. It must not run a
-labeled Issue command it cannot authorize. Maintainers or contributors with
-upstream label permission may file discovered work directly as
-`status:needs-triage`:
+labeled Issue command it cannot authorize. The labeled CLI proposal path is
+agent-first only. Maintainers or contributors with upstream label permission
+may file agent-first discovered work directly as `status:needs-triage`:
 
 ```bash
 gh issue create --repo cadence-workflow/cadence-ai-samples \
   --title "Short problem-focused title" \
   --body-file /tmp/cadence-ai-samples-issue.md \
   --label status:needs-triage \
+  --label format:agent-first \
   --label type:recipe \
   --label area:recipes \
   --label source:agent
 ```
 
-The body must contain the problem, context/source, scope, non-goals, acceptance
-criteria, validation approach, and canonical spec link or intended future spec
-path. Replace the example `type:*` and `area:*` labels when the proposal is not a
-recipe. The labeled command adds `source:agent` explicitly; human-created web
-forms do not. When a proposer cannot apply `source:agent`, type, area, or another
-classification label, maintainer triage applies it. Missing classification
-labels never authorize implementation. Every proposal must receive or request
-`status:needs-triage`; never add `status:agent-ready`, assign priority, or create
-the Issue in a contributor fork.
+The agent-first body must contain the problem, context/source, scope, non-goals,
+decisions requiring human authority, acceptance criteria, specifications or
+ADRs, exact validation, limitations, dependencies or blockers, and durable
+handoff requirements. Replace the example `type:*` and `area:*` labels when the
+proposal is not a recipe. The labeled command adds `source:agent` explicitly;
+human-created web forms do not. When a proposer cannot apply `source:agent`,
+type, area, or another classification label, maintainer triage applies it.
+Missing classification or format labels never authorize implementation. Every
+proposal must receive or request `status:needs-triage`; only a human maintainer
+may later add `status:ready`. Never assign priority or create the Issue in a
+contributor fork.
 
 ## Local completion and handoff
 
@@ -191,15 +205,22 @@ After local completion:
 1. Follow the contributor's policy for creating the DCO-signed commit.
 2. Push only when authorized, using the contributor's verified `origin`.
 3. Verify the committed branch is pushed, then open or update one draft
-   cross-fork PR with upstream `main` as base.
+   cross-fork PR with upstream `main` as base. The root template is the automatic
+   human-first default. Agents explicitly select the detailed template with
+   `gh pr create --template .github/PULL_REQUEST_TEMPLATE/agent-first.md ...`,
+   or use a compare URL ending in `?expand=1&template=agent-first.md`.
 4. Link the Issue and finalize the PR body from committed Git and Issue evidence,
    including spec/ADR impact, exact tests/results, untested behavior, and
    limitations.
 5. Update the Issue with the PR link and blockers.
-6. The repository owner reviews and approves every PR and is the only merge
-   authority. Agents never self-approve. An agent may execute a merge only after
-   explicit repository-owner direction and verification of required approval and
-   checks; without authorization, it reports the remaining gate and stops.
+6. A non-owner PR requires one approval from a human member of the `cadence-dev`
+   team. New commits dismiss prior approvals, so approval must cover the current
+   head. The repository owner, `Bueller87`, may use the pull-request-only review
+   bypass on an owner-authored PR without self-review and must record its use in
+   the PR. Repository policy forbids using that bypass on a non-owner PR. Human
+   review approval and repository-owner merge authorization are separate. Only
+   the repository owner may authorize a merge. Agents never approve PRs or
+   supply merge authority.
 7. The next agent resumes from the branch, Issue, PR, linked spec, and this map,
    without chat or terminal history.
 
