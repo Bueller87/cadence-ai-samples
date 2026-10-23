@@ -1,0 +1,44 @@
+version: 1
+signals:
+  - id: add-guidance
+    name: guidance
+    label: Add guidance
+    description: Point the running synthetic investigation toward relevant evidence.
+    intent: confirm
+    arguments:
+      - name: text
+        label: Guidance
+        type: string
+        required: true
+        constraints:
+          min_length: 1
+          max_length: 255
+        help: Enter a short operator observation for the scripted planner.
+  - id: revise-brief
+    name: revise
+    label: Revise brief
+    description: Change the requested format while the investigation is running.
+    intent: confirm
+    arguments:
+      - name: request
+        label: Revision
+        type: string
+        required: true
+        constraints:
+          min_length: 1
+          max_length: 255
+        help: Enter the revision to apply to the current and corrected drafts.
+  - id: approval-decision
+    name: approval
+    label: Send approval decision
+    description: Approve or reject the corrected synthetic conclusion.
+    intent: confirm
+    arguments:
+      - name: decision
+        label: Decision
+        type: string
+        required: true
+        constraints:
+          min_length: 6
+          max_length: 7
+        help: Enter approve or reject.

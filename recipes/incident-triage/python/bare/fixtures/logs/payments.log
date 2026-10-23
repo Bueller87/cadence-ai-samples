@@ -1,0 +1,2 @@
+at=10:05:00.402 level=ERROR trace_id=4bf92f3577b34da6 msg="ledger connection pool exhausted" version=v2.14 in_use=50 max=50 downstream=ledger
+at=10:05:02.398 level=ERROR trace_id=4bf92f3577b34da6 msg="ledger call timed out" version=v2.14 downstream=ledger wait_ms=2000

@@ -44,7 +44,7 @@ class RuntimeLauncherTests(unittest.TestCase):
         recipes = sorted((ROOT / "recipes").glob("*/python/*/run.sh"))
         recipes += sorted((ROOT / "recipes").glob("*/go/*/run.sh"))
         self.assertEqual(len(profiles), 10)
-        self.assertEqual(len(recipes), 8)
+        self.assertEqual(len(recipes), 9)
         canonical = {"python": PYTHON_RUN, "go": GO_RUN, "java": JAVA_RUN}
         for launcher in profiles + recipes:
             language = next(part for part in launcher.parts if part in canonical)

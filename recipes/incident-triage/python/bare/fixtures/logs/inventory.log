@@ -1,0 +1,1 @@
+at=10:05:01.118 level=WARN trace_id=4bf92f3577b34da6 msg="stock-check p99 above 300ms" p99_ms=320

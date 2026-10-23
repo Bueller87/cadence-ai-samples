@@ -1,0 +1,1 @@
+at=10:05:00.401 level=ERROR trace_id=4bf92f3577b34da6 msg="max connections reached for client payments" client=payments max_connections=50

@@ -1,0 +1,14 @@
+{
+  "endpoint": "checkout.post-v1-checkout",
+  "service": "api-gateway",
+  "max_depth": 4,
+  "tree": {
+    "checkout": {
+      "payments": {"ledger": {}},
+      "inventory": {},
+      "pricing": {}
+    },
+    "metrics-proxy": {}
+  },
+  "ignore": ["metrics-proxy"]
+}

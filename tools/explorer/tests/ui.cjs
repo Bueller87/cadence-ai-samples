@@ -141,7 +141,7 @@ signals:
   const input=(id,value)=>{$(id).value=value;$(id).dispatchEvent(new dom.window.Event('input',{bubbles:true}));};
   const ready=()=>waitFor(()=>!$('worker-block').hidden,'resolved commands');
   const failed=()=>waitFor(()=>$('selection-status').className.includes('error')&&$('worker-block').hidden,'selection rejection');
-  await waitFor(()=>$('sample').options.length===8,'sample discovery');
+  await waitFor(()=>$('sample').options.length===9,'sample discovery');
   const themeToggle=$('theme-toggle');
   assert.equal(dom.window.document.documentElement.dataset.theme,'dark');
   assert.equal(themeToggle.tagName,'BUTTON');assert.equal(themeToggle.type,'button');

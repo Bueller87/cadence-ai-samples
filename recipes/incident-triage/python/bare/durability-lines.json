@@ -1,0 +1,309 @@
+{
+  "version": 1,
+  "rules": {
+    "retry": "Lines that configure, decide, delay, limit, or execute a reattempt after failure.",
+    "state": "Lines that declare, read, write, or mutate progress needed by a later step, restart, or replay.",
+    "deduplication": "Lines that create or check idempotency state, record completion, or suppress repeated calls or writes.",
+    "overlap_priority": [
+      "deduplication",
+      "retry",
+      "state"
+    ]
+  },
+  "entries": [
+    {
+      "file": "raw_agent.py",
+      "start": 19,
+      "end": 27,
+      "category": "state",
+      "rationale": "Declare the in-memory progress that disappears with the process."
+    },
+    {
+      "file": "raw_agent.py",
+      "start": 36,
+      "end": 37,
+      "category": "state",
+      "rationale": "Create the current volatile agent state and pass identifier."
+    },
+    {
+      "file": "raw_agent.py",
+      "start": 56,
+      "end": 58,
+      "category": "retry",
+      "rationale": "Initialize and enter the handwritten retry loop."
+    },
+    {
+      "file": "raw_agent.py",
+      "start": 75,
+      "end": 79,
+      "category": "retry",
+      "rationale": "Bound, delay, and advance retry attempts after a retryable error."
+    },
+    {
+      "file": "raw_agent.py",
+      "start": 84,
+      "end": 86,
+      "category": "state",
+      "rationale": "Reset in-memory progress for a new pass and retain its guidance."
+    },
+    {
+      "file": "raw_agent.py",
+      "start": 88,
+      "end": 88,
+      "category": "state",
+      "rationale": "Store parsed incident input in volatile state."
+    },
+    {
+      "file": "raw_agent.py",
+      "start": 91,
+      "end": 91,
+      "category": "state",
+      "rationale": "Remember the synthetic trace write only in memory."
+    },
+    {
+      "file": "raw_agent.py",
+      "start": 131,
+      "end": 137,
+      "category": "state",
+      "rationale": "Append planned calls and their results to volatile progress."
+    },
+    {
+      "file": "raw_agent.py",
+      "start": 139,
+      "end": 139,
+      "category": "state",
+      "rationale": "Queue the changed brief in process memory."
+    },
+    {
+      "file": "raw_agent.py",
+      "start": 151,
+      "end": 153,
+      "category": "state",
+      "rationale": "Ensure a pending revision exists and retain the current draft."
+    },
+    {
+      "file": "raw_agent.py",
+      "start": 155,
+      "end": 160,
+      "category": "state",
+      "rationale": "Apply the pending revision and retain the revised draft and counter."
+    },
+    {
+      "file": "raw_agent.py",
+      "start": 174,
+      "end": 176,
+      "category": "state",
+      "rationale": "Keep the live process waiting on volatile approval state."
+    },
+    {
+      "file": "raw_agent.py",
+      "start": 180,
+      "end": 190,
+      "category": "deduplication",
+      "rationale": "Check and populate the process-local final-write receipt map."
+    },
+    {
+      "file": "workflow.py",
+      "start": 32,
+      "end": 40,
+      "category": "retry",
+      "rationale": "Declare the bounded Cadence Activity retry policy."
+    },
+    {
+      "file": "workflow.py",
+      "start": 67,
+      "end": 85,
+      "category": "state",
+      "rationale": "Declare Workflow progress that Cadence records in history."
+    },
+    {
+      "file": "workflow.py",
+      "start": 89,
+      "end": 89,
+      "category": "state",
+      "rationale": "Record durable operator guidance."
+    },
+    {
+      "file": "workflow.py",
+      "start": 93,
+      "end": 94,
+      "category": "state",
+      "rationale": "Record the changed brief and pending revision."
+    },
+    {
+      "file": "workflow.py",
+      "start": 98,
+      "end": 98,
+      "category": "state",
+      "rationale": "Record the durable approval decision."
+    },
+    {
+      "file": "workflow.py",
+      "start": 123,
+      "end": 123,
+      "category": "state",
+      "rationale": "Mark a durable lookup as running."
+    },
+    {
+      "file": "workflow.py",
+      "start": 127,
+      "end": 132,
+      "category": "state",
+      "rationale": "Record failed or completed lookup progress."
+    },
+    {
+      "file": "workflow.py",
+      "start": 136,
+      "end": 137,
+      "category": "state",
+      "rationale": "Record terminal Workflow phase and outcome."
+    },
+    {
+      "file": "workflow.py",
+      "start": 152,
+      "end": 152,
+      "category": "deduplication",
+      "rationale": "Create the repeated-call guard ledger for one planning pass."
+    },
+    {
+      "file": "workflow.py",
+      "start": 155,
+      "end": 155,
+      "category": "state",
+      "rationale": "Record the current planning phase."
+    },
+    {
+      "file": "workflow.py",
+      "start": 168,
+      "end": 170,
+      "category": "state",
+      "rationale": "Record the current hypothesis and completed draft."
+    },
+    {
+      "file": "workflow.py",
+      "start": 173,
+      "end": 176,
+      "category": "deduplication",
+      "rationale": "Count, block, and skip a repeated planned call."
+    },
+    {
+      "file": "workflow.py",
+      "start": 177,
+      "end": 189,
+      "category": "state",
+      "rationale": "Record a planned call and its Activity result."
+    },
+    {
+      "file": "workflow.py",
+      "start": 202,
+      "end": 202,
+      "category": "state",
+      "rationale": "Record the configured durable approval window."
+    },
+    {
+      "file": "workflow.py",
+      "start": 207,
+      "end": 210,
+      "category": "state",
+      "rationale": "Record input-reading phase and parsed incident parameters."
+    },
+    {
+      "file": "workflow.py",
+      "start": 218,
+      "end": 218,
+      "category": "state",
+      "rationale": "Record the stored trace path."
+    },
+    {
+      "file": "workflow.py",
+      "start": 220,
+      "end": 220,
+      "category": "state",
+      "rationale": "Record the parallel lookup phase."
+    },
+    {
+      "file": "workflow.py",
+      "start": 270,
+      "end": 294,
+      "category": "state",
+      "rationale": "Wait for guidance, apply the changed brief to the first draft, and retain its revision."
+    },
+    {
+      "file": "workflow.py",
+      "start": 296,
+      "end": 299,
+      "category": "state",
+      "rationale": "Reset only the replanned hop state while retaining setup."
+    },
+    {
+      "file": "workflow.py",
+      "start": 309,
+      "end": 321,
+      "category": "state",
+      "rationale": "Replay the retained brief revision onto the corrected draft."
+    },
+    {
+      "file": "workflow.py",
+      "start": 323,
+      "end": 323,
+      "category": "state",
+      "rationale": "Declare durable approval-expiration state."
+    },
+    {
+      "file": "workflow.py",
+      "start": 325,
+      "end": 332,
+      "category": "state",
+      "rationale": "Wait on the durable approval timer unless approval cancels it, and record that it fired."
+    },
+    {
+      "file": "workflow.py",
+      "start": 334,
+      "end": 354,
+      "category": "state",
+      "rationale": "Wait on and update durable approval or revision state."
+    },
+    {
+      "file": "workflow.py",
+      "start": 356,
+      "end": 361,
+      "category": "state",
+      "rationale": "Let an expired approval deadline win, cancel the timer when approval wins, and record the final-write phase."
+    },
+    {
+      "file": "workflow.py",
+      "start": 362,
+      "end": 362,
+      "category": "deduplication",
+      "rationale": "Create the Run-scoped idempotency key for the final write."
+    },
+    {
+      "file": "workflow.py",
+      "start": 363,
+      "end": 372,
+      "category": "state",
+      "rationale": "Record the keyed final-write Activity result."
+    },
+    {
+      "file": "raw_agent.py",
+      "start": 107,
+      "end": 107,
+      "category": "deduplication",
+      "rationale": "Create the repeated-call guard ledger for one planning pass."
+    },
+    {
+      "file": "raw_agent.py",
+      "start": 127,
+      "end": 130,
+      "category": "deduplication",
+      "rationale": "Count, block, and skip a repeated planned call."
+    },
+    {
+      "file": "workflow.py",
+      "start": 211,
+      "end": 211,
+      "category": "deduplication",
+      "rationale": "Create the Run-scoped idempotency key for the stored input."
+    }
+  ]
+}

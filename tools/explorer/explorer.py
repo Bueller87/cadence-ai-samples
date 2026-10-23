@@ -32,7 +32,10 @@ from signal_metadata import (SignalMetadataError, load_metadata,
                              validate_arguments)
 
 
-SKIP = {'tests', 'testdata', 'perf', '.venv', 'venv', '__pycache__', 'node_modules'}
+SKIP = {
+    'tests', 'testdata', 'perf', 'evidence',
+    '.venv', 'venv', '__pycache__', 'node_modules',
+}
 CADENCE_WEB_URL = 'http://localhost:8088'
 CADENCE_CLUSTER = 'cluster0'
 SCENARIOS = {

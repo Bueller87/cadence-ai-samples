@@ -1,0 +1,2 @@
+at=10:05:01.120 level=WARN trace_id=4bf92f3577b34da6 msg="inventory stock check slow" downstream=inventory latency_ms=320
+at=10:05:02.402 level=ERROR trace_id=4bf92f3577b34da6 msg="payments authorize failed" downstream=payments status=503 wait_ms=2000

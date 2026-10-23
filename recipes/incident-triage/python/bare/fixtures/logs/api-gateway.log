@@ -1,0 +1,1 @@
+at=10:05:02.411 level=ERROR trace_id=4bf92f3577b34da6 msg="upstream returned 503" endpoint_group=checkout endpoint_id=post-v1-checkout status=500 upstream=checkout

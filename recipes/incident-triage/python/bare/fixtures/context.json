@@ -1,0 +1,12 @@
+{
+  "note": "Synthetic dashboard context. The agent never reads this file.",
+  "deploys": [
+    {"service": "search", "version": "v8.1", "at": "09:14"},
+    {"service": "inventory", "version": "v5.3", "at": "09:41"},
+    {"service": "payments", "version": "v2.14", "at": "10:02"}
+  ],
+  "payments_ledger_pool": [
+    {"at": "10:04:10", "in_use": 46, "max": 50},
+    {"at": "10:05:00", "in_use": 50, "max": 50}
+  ]
+}

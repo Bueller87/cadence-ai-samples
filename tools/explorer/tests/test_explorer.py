@@ -199,8 +199,8 @@ echo "Dependencies prepared."
         state=self.explorer.snapshot()
         self.assertEqual([r['id'] for r in state['recipes']],
                          ['agent-handoffs','auto-research','human-in-the-loop',
-                          'recurring-ai-watch','ticket-routing'])
-        handoffs,auto,hitl,watch,ticket=state['recipes']
+                          'incident-triage','recurring-ai-watch','ticket-routing'])
+        handoffs,auto,hitl,triage,watch,ticket=state['recipes']
         self.assertEqual([v['framework'] for v in handoffs['variants']],
                          ['google-adk','openai-agents'])
         self.assertTrue(all(v['modes']==['mock','live']
@@ -211,6 +211,17 @@ echo "Dependencies prepared."
         self.assertEqual([v['framework'] for v in watch['variants']],['google-adk','openai-agents'])
         self.assertTrue(all(v['supported'] for v in
                             hitl['variants']+watch['variants']+ticket['variants']))
+        self.assertEqual([v['id'] for v in triage['variants']],
+                         ['recipes/incident-triage/python/bare'])
+        self.assertTrue(triage['variants'][0]['supported'])
+        self.assertEqual(triage['variants'][0]['modes'],['mock','live'])
+        triage_result=self.explorer.resolve(dict(
+            sample='incident-triage',
+            implementation='recipes/incident-triage/python/bare',
+            mode='mock'))
+        self.assertEqual(
+            [signal['id'] for signal in triage_result['signals']],
+            ['add-guidance','revise-brief','approval-decision'])
         self.assertEqual(hitl['variants'][0]['modes'],['mock','live'])
         self.assertEqual(watch['variants'][0]['modes'],['mock','live'])
         ticket_variant=next(v for v in ticket['variants']

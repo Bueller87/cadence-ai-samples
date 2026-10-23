@@ -1,0 +1,118 @@
+{
+  "recorded_at": "2026-10-23",
+  "baseline": "summarized",
+  "command": ".venv/bin/python run_compare.py (three fresh runs), then .venv/bin/python verify_comparisons.py --count 3",
+  "omits": "per-run ledgers and process output",
+  "environment": {
+    "scope": "local Cadence, synthetic fixtures, deterministic scripted model",
+    "provider_called": false,
+    "tokenizer_run": false,
+    "python": "3.12.14",
+    "cadence_python_client": "0.4.1",
+    "pydantic": "2.12.5",
+    "target": "localhost:7833",
+    "domain": "cadence-ai-samples",
+    "shared_limits": {
+      "max_steps": 6,
+      "repeat_limit": 2
+    },
+    "human_wait": {
+      "real_seconds_represented": 259200,
+      "compressed_seconds": 0.75,
+      "compression_factor": 345600.0
+    }
+  },
+  "runs": [
+    {
+      "run": 1,
+      "raw_wall_seconds": 0.9800217080046423,
+      "cadence_wall_seconds": 5.19679866702063,
+      "raw_process_wait_seconds": 0.6620663330249954,
+      "cadence_zero_worker_wait_seconds": 0.7599279880523682
+    },
+    {
+      "run": 2,
+      "raw_wall_seconds": 0.9890453749976587,
+      "cadence_wall_seconds": 5.204809666000074,
+      "raw_process_wait_seconds": 0.6657160420145374,
+      "cadence_zero_worker_wait_seconds": 0.7590558528900146
+    },
+    {
+      "run": 3,
+      "raw_wall_seconds": 1.0110522089817096,
+      "cadence_wall_seconds": 5.170045207982184,
+      "raw_process_wait_seconds": 0.660104374983348,
+      "cadence_zero_worker_wait_seconds": 0.7578239440917969
+    }
+  ],
+  "deterministic_counters_equal": true,
+  "deterministic": {
+    "raw": {
+      "observed_model_calls": 16,
+      "repeated_tool_calls": 14,
+      "completed_setup_steps_redone": 8,
+      "upload_attempts": 1,
+      "duplicate_uploads": 0,
+      "final_writes": 1,
+      "final_correct": true,
+      "ledger": {
+        "fetch_dependency_graph": 3,
+        "get_logs_by_trace_id(api-gateway)": 4,
+        "get_logs_by_trace_id(checkout)": 3,
+        "get_logs_by_trace_id(inventory)": 2,
+        "get_logs_by_trace_id(ledger)": 2,
+        "get_logs_by_trace_id(payments)": 2,
+        "identify_input_params": 3,
+        "plan_next": 13,
+        "revise_draft": 3,
+        "store_trace": 3,
+        "upload_conclusion": 1
+      }
+    },
+    "cadence": {
+      "observed_model_calls": 11,
+      "repeated_tool_calls": 3,
+      "completed_setup_steps_redone": 0,
+      "upload_attempts": 1,
+      "duplicate_uploads": 0,
+      "final_writes": 1,
+      "final_correct": true,
+      "history_events_at_zero_workers": 139,
+      "ledger": {
+        "fetch_dependency_graph": 1,
+        "get_logs_by_trace_id(api-gateway)": 2,
+        "get_logs_by_trace_id(checkout)": 2,
+        "get_logs_by_trace_id(inventory)": 2,
+        "get_logs_by_trace_id(ledger)": 1,
+        "get_logs_by_trace_id(payments)": 1,
+        "identify_input_params": 1,
+        "plan_next": 9,
+        "revise_draft": 2,
+        "store_trace": 1,
+        "upload_conclusion": 1
+      }
+    },
+    "durability_lines": {
+      "raw": {
+        "retry": 8,
+        "state": 36,
+        "deduplication": 16
+      },
+      "cadence": {
+        "retry": 9,
+        "state": 144,
+        "deduplication": 7
+      }
+    }
+  },
+  "interpretation": [
+    "Local Cadence was slower in every retained run because orchestration overhead dominates this short synthetic workload.",
+    "The supported result is preserved state and less repeated work under this fault schedule.",
+    "Model-call counts are observed plan_next and revise_draft ledger entries.",
+    "Both paths use the same step limit and repeated-call guard. Raw still restarts from the beginning after the process is killed.",
+    "Final writes count committed results. Upload attempts are reported separately.",
+    "The zero-worker interval starts after every worker has exited.",
+    "No value in this file is a token count, provider usage measurement, cost, or universal savings claim.",
+    "One observed keyed final write is not an exactly-once Activity execution claim."
+  ]
+}
