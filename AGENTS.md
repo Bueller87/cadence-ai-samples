@@ -27,12 +27,12 @@ this file remains authoritative. Human contributors start with the
    the current contributor's fork; never assume a particular fork owner.
 3. Read only the assigned Issue/PR, linked specification, relevant README, code,
    and tests. Do not read the whole repository by default.
-4. Claim new work only from an open Issue labeled `status:agent-ready`. Begin or
+4. Claim new work only from an open Issue labeled `status:ready`. Begin or
    resume implementation only after the Issue is `status:in-progress`, its claim
    record or assignee identifies the contributor whose fork and checkout are in
    use, and a matching local or remote `issue-N-short-slug` branch exists. If
    authorization begins in conversation, record it in an upstream Issue and wait
-   for `status:agent-ready` so the next agent can reconstruct the decision
+   for `status:ready` so the next agent can reconstruct the decision
    without chat.
 5. Before editing, restate the problem, acceptance criteria, scope, non-goals,
    and decisions that require human authority.
@@ -45,18 +45,24 @@ this file remains authoritative. Human contributors start with the
 - An agent without upstream label permission prepares the proposal for human
   Issue-form submission or requests maintainer assistance. It must not run a
   labeled Issue command it cannot authorize.
+- General idea intake is format-neutral. Defined implementation tasks may use
+  human-first or agent-first forms. The labeled CLI proposal path is
+  agent-first only.
 - `status:needs-triage` is proposed work, not approved work. Never self-assign,
   claim, or implement it. Missing type, area, source, or other classification
   labels never authorize implementation; maintainer triage applies labels the
   proposer cannot.
+- `format:human-first` and `format:agent-first` describe how an Issue is written,
+  not who may claim it. Either format may be claimed by a human or implemented
+  with an agent. A missing format label never authorizes implementation.
 - Every Issue and label command must explicitly target
   `cadence-workflow/cadence-ai-samples`; never infer the target from `origin`.
-- Only a human may promote an Issue to `status:agent-ready`, approve architecture
+- Only a human may promote an Issue to `status:ready`, approve architecture
   or priority, approve a PR, or authorize a merge.
-- Any contributor may claim an unassigned `status:agent-ready` Issue. Immediately
+- Any contributor may claim an unassigned `status:ready` Issue. Immediately
   before claiming, recheck its assignee, comments, labels, and active linked PRs.
 - Assignment records ownership of approved work, not interest or priority.
-- Claim in this order: comment intent, remove `status:agent-ready`, add
+- Claim in this order: comment intent, remove `status:ready`, add
   `status:in-progress`, then create the branch.
 - Contributors without upstream label or assignment permission must comment to
   request a claim, then wait. Do not create the branch or begin implementation
@@ -67,7 +73,7 @@ this file remains authoritative. Human contributors start with the
   matching claimed Issue and branch. Do not open competing implementation PRs
   without agreement.
 - If abandoning work, comment the reason and current state, remove
-  `status:in-progress`, and restore `status:agent-ready`. Preserve or delete the
+  `status:in-progress`, and restore `status:ready`. Preserve or delete the
   branch only with human direction.
 - Keep `status:in-progress` through implementation and draft-PR handoff. Merge
   closes the Issue.
@@ -110,6 +116,11 @@ agent creates the commit. Chat and terminal output do not satisfy it.
   names such as `codex`, `cursor`, or `claude`; work may move between agents.
 - PRs use the contributor fork as head and
   `cadence-workflow/cadence-ai-samples:main` as base.
+- The root PR template is the automatic human-first default. Agents and other
+  contributors choosing the detailed agent-first format explicitly pass
+  `--template .github/PULL_REQUEST_TEMPLATE/agent-first.md` to `gh pr create`,
+  or open
+  `https://github.com/cadence-workflow/cadence-ai-samples/compare/main...<owner>:<branch>?expand=1&template=agent-first.md`.
 - Sign every commit with DCO using lowercase `-s`.
 - A non-owner PR requires one approval from a human member of the `cadence-dev`
   team. New commits dismiss prior approvals, so approval must cover the current

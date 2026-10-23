@@ -9,7 +9,9 @@ body:
   - type: markdown
     attributes:
       value: |
-        Proposals are not approved work until a maintainer adds `status:agent-ready`.
+        Recipe proposals use specialized intake and remain format-neutral until maintainer triage.
+        Proposals are not approved work until a human maintainer adds `status:ready`.
+        Missing format, type, area, or source labels never authorize implementation.
         Do not include credentials, proprietary data, or private company context.
   - type: dropdown
     id: contribution_kind
@@ -107,5 +109,5 @@ body:
     attributes:
       label: Approval gate
       options:
-        - label: I understand this proposal must be labeled `status:agent-ready` by a maintainer before implementation.
+        - label: I understand that only a human maintainer may label this proposal `status:ready` before implementation.
           required: true

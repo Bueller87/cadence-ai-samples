@@ -22,17 +22,22 @@ An open Issue's lifecycle label tells you what you may do:
 
 - `status:needs-triage` means proposed work. It is not claimable, so do not
   self-assign or implement it.
-- `status:agent-ready` means a maintainer approved the work. It is claimable only
+- `status:ready` means a maintainer approved the work. It is claimable only
   when it has no assignee, claim comment, or active linked implementation PR.
 - `status:in-progress` means the work is already claimed. Do not start a
   competing implementation.
 
 Assignment records ownership of approved work, not interest or priority. Only a
-human maintainer may promote a proposal to `status:agent-ready`.
+human maintainer may promote a proposal to `status:ready`.
+
+`format:human-first` and `format:agent-first` describe presentation, not
+eligibility or ownership. Either format may be claimed by a human or implemented
+with a coding agent. Missing format or classification labels never make work
+claimable.
 
 ### Find and plan work
 
-1. Find an open upstream `status:agent-ready` Issue.
+1. Find an open upstream `status:ready` Issue.
 2. Check its assignee, comments, and linked PRs. Do not take work owned by
    someone else.
 3. Follow [Plan before building](WORKFLOW.md#plan-before-building). Review the
@@ -41,24 +46,42 @@ human maintainer may promote a proposal to `status:agent-ready`.
 4. Recheck the Issue immediately before claiming it.
 
 If no claimable Issue exists, do not self-assign a `status:needs-triage` Issue.
+For plain `Capture this idea`, first decide whether this is general idea intake
+or an implementation task. General ideas remain format-neutral. For a defined
+implementation task, choose human-first or agent-first before drafting, then
+follow the matching permission-aware path.
 Outside contributors should use the repository
 [Issue forms](https://github.com/cadence-workflow/cadence-ai-samples/issues/new/choose)
-to submit the problem, scope, non-goals, acceptance criteria, validation
-approach, and spec path. The form applies only its configured initial labels,
-including `status:needs-triage`. Maintainer triage applies any missing
-`source:agent`, type, area, or other classification labels. Missing
-classification labels never make a proposal claimable.
+and choose:
+
+- **General work proposal** for format-neutral idea intake that still needs
+  maintainer triage before implementation-task authoring.
+- **Human-first work proposal** for a defined implementation task with an
+  approachable starting state, observable gap or failure, exact edit and
+  validation paths, and a useful 45-minute stopping point.
+- **Agent-first work proposal** for a defined implementation task expressed as
+  a detailed durable contract with context, scope, decisions, acceptance
+  criteria, validation, limitations, and handoff.
+- **Recipe proposal** for specialized new-recipe or port intake. Recipe intake
+  remains format-neutral until maintainer triage.
+
+The forms apply only their configured initial labels, including
+`status:needs-triage`. General and recipe intake add no format label; the two
+implementation-task forms add their matching `format:*` label. Maintainer
+triage applies any missing `source:agent`, format, type, area, or other
+classification labels.
 
 Maintainers and contributors with upstream label permission may instead use the
-[labeled CLI proposal path](agent-context/README.md#creating-a-proposal). An
-agent without that permission prepares the proposal for human form submission
-or requests maintainer assistance; it must not run the labeled command. Then
-wait for a maintainer to add `status:agent-ready`.
+[agent-first-only labeled CLI proposal
+path](agent-context/README.md#creating-a-proposal). An agent without that
+permission prepares the proposal for human form submission or requests
+maintainer assistance; it must not run the labeled command. Then wait for a
+human maintainer to add `status:ready`.
 
 ### Claim approved work
 
 If you can update the upstream Issue, comment your intent with your GitHub
-username and proposed branch, replace `status:agent-ready` with
+username and proposed branch, replace `status:ready` with
 `status:in-progress`, and then create an `issue-N-short-slug` branch on your
 fork. The claim comment and `status:in-progress` together record your ownership.
 
@@ -66,7 +89,7 @@ If you cannot change upstream labels or assignment, post this comment:
 
 > I would like to claim this approved Issue. Proposed branch:
 > `issue-N-short-slug`. I cannot change upstream labels or assignment.
-> Maintainer, please record me as the owner and change `status:agent-ready` to
+> Maintainer, please record me as the owner and change `status:ready` to
 > `status:in-progress`.
 
 Do not create the branch or begin implementation until the upstream Issue has
@@ -81,15 +104,21 @@ or a maintainer comment confirming the claim.
    with lowercase `git commit -s`, regardless of who creates it.
 3. After the signed commit is pushed, open a draft PR against
    `cadence-workflow/cadence-ai-samples:main`.
-4. Link the Issue and include actual test commands/results, untested behavior,
+4. The root PR template is the automatic human-first default. To use the
+   detailed agent-first format, run
+   `gh pr create --template .github/PULL_REQUEST_TEMPLATE/agent-first.md ...`
+   or open
+   `https://github.com/cadence-workflow/cadence-ai-samples/compare/main...<owner>:<branch>?expand=1&template=agent-first.md`.
+   GitHub does not automatically display a template chooser.
+5. Link the Issue and include actual test commands/results, untested behavior,
    and known limitations.
-5. Follow the applicable human review path below, then wait for explicit
+6. Follow the applicable human review path below, then wait for explicit
    repository-owner merge authorization. A coding agent cannot approve a PR or
    supply merge authority.
 
 Keep claimed work `status:in-progress` until merge closes the Issue. If
 abandoning it, comment the reason and current state, replace
-`status:in-progress` with `status:agent-ready`, and ask before deleting the
+`status:in-progress` with `status:ready`, and ask before deleting the
 branch. Branch names identify the Issue, not the coding tool, because work may
 move between agents.
 
@@ -129,10 +158,12 @@ scripts, generator, launcher, and profile contract suite and the Explorer Python
 suite on pull requests to `main` and pushes to `main`.
 
 To run the matching checks from the repository root, use Python 3.12 and prepare
-the Explorer environment before running its suite:
+the scripts and Explorer environments before running their suites:
 
 ```bash
-python3 -m unittest discover -s scripts/tests -v
+python3 -m venv scripts/.venv
+scripts/.venv/bin/python -m pip install -r scripts/requirements-test.txt
+scripts/.venv/bin/python -m unittest discover -s scripts/tests -v
 python3 -m venv tools/explorer/.venv
 tools/explorer/.venv/bin/python -m pip install -r tools/explorer/requirements.txt
 tools/explorer/.venv/bin/python -m unittest discover -s tools/explorer/tests -v

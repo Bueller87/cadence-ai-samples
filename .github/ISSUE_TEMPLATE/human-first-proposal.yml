@@ -1,0 +1,113 @@
+name: Human-first work proposal
+description: Propose approachable work with a clear starting point and stopping point
+title: ""
+labels:
+  - status:needs-triage
+  - format:human-first
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this format when a contributor should be able to find the first useful action quickly.
+        Proposals are not approved work until a human maintainer adds `status:ready`.
+        Missing format, type, area, or source labels never authorize implementation.
+        Do not include credentials, proprietary data, or private company context.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Explorer
+        - Recipes
+        - Templates
+        - Catalogs
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: learning_value
+    attributes:
+      label: Learning and contribution value
+      description: What will the contributor learn, and what useful value will the contribution add?
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: State the problem in two sentences.
+    validations:
+      required: true
+  - type: textarea
+    id: paths
+    attributes:
+      label: Start here
+      description: Add clickable repository links to the relevant code, specification, and tests.
+    validations:
+      required: true
+  - type: textarea
+    id: starting_commands
+    attributes:
+      label: Starting commands
+      description: Give the exact setup or reproduction commands that establish the starting state.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: observable_gap
+    attributes:
+      label: Observable gap or failure
+      description: Describe what the contributor should observe, including a failure or missing capability.
+    validations:
+      required: true
+  - type: textarea
+    id: edit_locations
+    attributes:
+      label: Where to make the change
+      description: Name the exact files, functions, or symbols to change.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and non-goals
+      description: State the intended boundary and what should not change.
+    validations:
+      required: true
+  - type: textarea
+    id: validation_commands
+    attributes:
+      label: Validation commands
+      description: List the exact commands that validate the completed change.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected_success
+    attributes:
+      label: Expected success
+      description: Describe the observable successful result from those validation commands.
+    validations:
+      required: true
+  - type: textarea
+    id: stopping_point
+    attributes:
+      label: Useful 45-minute stopping point
+      description: What concrete progress can be preserved if the work is unfinished after 45 minutes?
+    validations:
+      required: true
+  - type: textarea
+    id: handoff_requirements
+    attributes:
+      label: Future unfinished-work handoff
+      description: What must a future unfinished handoff contain so another contributor can continue safely?
+    validations:
+      required: true
+  - type: checkboxes
+    id: approval
+    attributes:
+      label: Approval gate
+      options:
+        - label: I understand that only a human maintainer may label this proposal `status:ready` before implementation.
+          required: true
