@@ -286,7 +286,7 @@ class IncidentTriageWorkflow:
                         "request": self.pending_revisions.pop(0),
                         "hops": [gateway, *self.hops],
                     },
-                    **QUICK_ACTIVITY,
+                    **MODEL_ACTIVITY,
                 )
                 self.revision += 1
                 self.phase = "AWAITING_GUIDANCE"
