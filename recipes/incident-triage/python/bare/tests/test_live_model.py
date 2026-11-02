@@ -208,6 +208,25 @@ class LiveModelTests(unittest.TestCase):
         for request in requests:
             self.assertEqual(request["max_tokens"], live_model.MAX_OUTPUT_TOKENS)
 
+    def test_plan_lists_checked_services_and_unchecked_error_leads(self) -> None:
+        requests: list[dict] = []
+
+        def transport(url, payload, headers):
+            requests.append(json.loads(payload["messages"][1]["content"]))
+            return ollama_response(DRAFT, 3, 1)
+
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            os.environ, {"INCIDENT_TRIAGE_STATE": directory}
+        ):
+            checkout = story.logs_for("checkout", "4bf92f3577b34da6")
+            payments = story.logs_for("payments", "4bf92f3577b34da6")
+            live_model.plan(
+                {"start": "checkout", "hops": [checkout, payments]}, transport
+            )
+
+        self.assertEqual(requests[0]["looked_up"], ["checkout", "payments"])
+        self.assertEqual(requests[0]["unchecked_error_leads"], ["ledger"])
+
     def test_remote_providers_are_not_sent_a_schema(self) -> None:
         requests: list[dict] = []
 

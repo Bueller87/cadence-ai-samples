@@ -27,6 +27,10 @@ ALLOWED_SERVICES = (
 )
 DEFAULT_MODEL_ID = "llama3.2-local"
 MAX_OUTPUT_TOKENS = 800
+# A CPU-only local model can take most of a minute per decision, and retrying
+# a slow decode does not make it faster. One attempt may use most of the model
+# Activity's 180-second budget.
+REQUEST_TIMEOUT_SECONDS = 150
 _LOCK = threading.Lock()
 Transport = Callable[[str, dict[str, Any], dict[str, str]], dict[str, Any]]
 
@@ -91,8 +95,13 @@ def plan(context: dict[str, Any], transport: Transport | None = None) -> dict[st
         "empty, request logs for the start service before drafting. Each hop "
         "is a lookup that already completed: do not request a service already "
         "in hops. Follow the downstream service named in ERROR lines, then "
-        "draft when the chain ends. If force_draft is true, tool must be draft."
+        "draft when the chain ends. looked_up lists services already checked. "
+        "unchecked_error_leads lists services named in ERROR lines that nobody "
+        "has checked yet: check one of them next. If force_draft is true, tool "
+        "must be draft."
     )
+    hops = context.get("hops") or []
+    looked_up = [hop.get("service") for hop in hops if isinstance(hop, dict)]
     content, usage = _complete(
         selection,
         system,
@@ -100,10 +109,12 @@ def plan(context: dict[str, Any], transport: Transport | None = None) -> dict[st
             "start": context.get("start"),
             "guidance": context.get("guidance") or [],
             "force_draft": force_draft,
-            "hops": _compact_hops(context.get("hops") or []),
+            "hops": _compact_hops(hops),
+            "looked_up": looked_up,
+            "unchecked_error_leads": sorted(_open_error_leads(hops, set(looked_up))),
         },
         transport,
-        _plan_schema(force_draft, context.get("start"), context.get("hops") or []),
+        _plan_schema(force_draft, context.get("start"), hops),
     )
     note_spend("plan_next", usage)
     return _validate_plan(
@@ -261,7 +272,7 @@ def _post_json(
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=60) as response:
+        with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
             raw = response.read()
     except urllib.error.HTTPError as error:
         status = int(error.code)
