@@ -577,7 +577,7 @@ class Explorer:
                         title = heading[1]
                 state['recipes'].append(dict(id=recipe.name, title=title,
                     description=SCENARIOS.get(recipe.name, 'Explore this recipe from its local README and implementation.'),
-                    readme=source_link(readme.relative_to(self.root)) if readme.is_file() and self.inside(readme) else None,
+                    readme="/doc?path=" + quote(str(readme.relative_to(self.root)), safe="") if readme.is_file() and self.inside(readme) else None,
                     variants=self.implementations(recipe)))
         return state
 

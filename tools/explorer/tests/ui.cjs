@@ -3,12 +3,13 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
+const http = require('node:http');
 const path = require('node:path');
 const {spawn, execSync} = require('node:child_process');
 const {JSDOM, VirtualConsole} = require('jsdom');
 const root=path.resolve(__dirname,'../../..');
 const fixture=fs.mkdtempSync(path.join(os.tmpdir(),'cadence-explorer-ui-'));
-let server,dom;
+let server,dom,ollama;
 const errors=[];
 const themeKey='cadence-explorer-theme';
 async function waitFor(predicate,message){
@@ -81,8 +82,16 @@ signals:
             help: Enter revision detail.
 `);
   for(const file of ['README.md','models.yaml','classifiers.yaml'])fs.copyFileSync(path.join(root,file),path.join(fixture,file));
+  ollama=http.createServer((request,response)=>{
+    response.writeHead(request.url==='/api/tags'?200:404,{'Content-Type':'application/json'});
+    response.end(JSON.stringify(request.url==='/api/tags'?{models:[{name:'llama3.2:latest'}]}:{error:'Not found'}));
+  });
+  await new Promise((resolve,reject)=>{ollama.once('error',reject);ollama.listen(0,'127.0.0.1',resolve);});
+  const fixtureModels=path.join(fixture,'models.yaml');
+  fs.writeFileSync(fixtureModels,fs.readFileSync(fixtureModels,'utf8').replaceAll(
+    'http://localhost:11434','http://127.0.0.1:'+ollama.address().port));
   const tools=path.join(fixture,'tools/explorer');fs.mkdirSync(tools,{recursive:true});
-  for(const file of ['source.py','signal_metadata.py','explorer.py','server.py','terminal.py'])fs.copyFileSync(path.join(root,'tools/explorer',file),path.join(tools,file));
+  for(const file of ['source.py','signal_metadata.py','explorer.py','server.py','terminal.py','reader.py'])fs.copyFileSync(path.join(root,'tools/explorer',file),path.join(tools,file));
   fs.cpSync(path.join(root,'tools/explorer/static'),path.join(tools,'static'),{recursive:true});
   const python=process.env.EXPLORER_PYTHON||path.join(root,'tools/explorer/.venv/bin/python');
   server=spawn(python,[path.join(tools,'server.py'),'--no-browser','--port','0']);
@@ -330,7 +339,8 @@ signals:
   assert.equal($('classifier-field').hidden,true);assert.ok($('client-command').textContent.includes('-mode mock'));
   change('mode','live');await failed();assert.ok($('selection-status').textContent.includes('classifiers.yaml'));
   const incomplete=path.join(fixture,'recipes/new-recipe/java');fs.mkdirSync(incomplete,{recursive:true});fs.writeFileSync(path.join(incomplete,'../README.md'),'# New incomplete recipe\n');
-  $('refresh').click();await waitFor(()=>$('sample').options.length===9,'new recipe discovery');change('sample','new-recipe');
+  $('refresh').click();await waitFor(()=>$('sample').options.length===9,'new recipe discovery');
+  await waitFor(()=>!$('refresh').disabled,'new recipe refresh completed');change('sample','new-recipe');
   assert.equal($('language').value,'java');assert.equal($('language-field').hidden,false);assert.equal($('readme').hidden,false);await failed();assert.ok($('selection-status').textContent.includes('adapter'));
   assert.deepEqual(errors,[]);
   console.log('PASS: pre-paint dark/light theme persistence and failure handling, state-preserving accessible toggle, real HTTP + six-step DOM flow, generic/Human in the Loop latest-run links, generated Go SystemOne mock/live classifier visibility, Ticket Routing generic commands and Cadence Web Queries link, manual Run ID deep links, metadata-driven Watch, scalar Human in the Loop Signals, structured object Signals, invalid metadata feedback, confirmations, stale/Continue-As-New feedback, visible single-choice selectors, explicit modes, manual checks, local warm-up availability, Mac terminal handoff/fallback, individual controls, catalog refresh, clipboard fallback, and incomplete recipes.');
@@ -338,5 +348,6 @@ signals:
 main().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{
   if(dom)dom.window.close();
   if(server){server.kill('SIGINT');await new Promise(resolve=>{if(server.exitCode!==null)return resolve();const timer=setTimeout(()=>{server.kill('SIGTERM');resolve();},2000);server.once('exit',()=>{clearTimeout(timer);resolve();});});}
+  if(ollama)await new Promise(resolve=>ollama.close(resolve));
   fs.rmSync(fixture,{recursive:true,force:true});
 });

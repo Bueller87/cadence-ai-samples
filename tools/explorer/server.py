@@ -13,6 +13,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from explorer import Explorer
+from reader import IMAGE_TYPES, reader_page, reader_path
 from source import InvalidSelection, Unsupported
 from terminal import MacTerminalLauncher
 
@@ -32,7 +33,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Content-Length', str(len(payload)))
         self.send_header('Cache-Control', 'no-store')
         self.send_header('X-Content-Type-Options', 'nosniff')
-        self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'")
+        self.send_header('Content-Security-Policy', ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'" + ("; sandbox" if content_type == "image/svg+xml" else "")))
         self.end_headers()
         self.wfile.write(payload)
 
@@ -52,6 +53,13 @@ class Handler(BaseHTTPRequestHandler):
                 result = self.explorer.check(query)
             elif url.path == '/api/workflow-run':
                 result = self.explorer.workflow_run(query)
+            elif url.path == '/doc':
+                self.send(200, reader_page(self.explorer, query.get('path', '')), 'text/html; charset=utf-8')
+                return
+            elif url.path == '/image':
+                path = reader_path(self.explorer, query.get('path', ''), image=True)
+                self.send(200, path.read_bytes(), IMAGE_TYPES[path.suffix.lower()])
+                return
             elif url.path == '/source':
                 path = self.explorer.source_path(query.get('path',''))
                 self.send(200, path.read_bytes(), 'text/plain; charset=utf-8')

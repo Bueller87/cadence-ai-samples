@@ -213,6 +213,9 @@ echo "Dependencies prepared."
                             hitl['variants']+watch['variants']+ticket['variants']))
         self.assertEqual([v['id'] for v in triage['variants']],
                          ['recipes/incident-triage/python/bare'])
+        self.assertTrue(all(
+            recipe['readme'] == '/doc?path=recipes%2F' + recipe['id'] + '%2FREADME.md'
+            for recipe in state['recipes']))
         self.assertTrue(triage['variants'][0]['supported'])
         self.assertEqual(triage['variants'][0]['modes'],['mock','live'])
         triage_result=self.explorer.resolve(dict(

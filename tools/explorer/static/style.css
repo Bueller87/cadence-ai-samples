@@ -395,3 +395,13 @@ footer { margin-top: 18px; }
   .header-inner { flex-direction: column; }
   .header-actions { max-width: none; width: 100%; justify-content: space-between; }
 }
+
+.reader { max-width: 960px; margin: 2rem auto; padding: 1.5rem; background: var(--surface); }
+.reader article { line-height: 1.65; overflow-wrap: anywhere; }
+.reader article img { display: block; max-width: 100%; height: auto; margin: 1rem 0; }
+.reader article pre { overflow-x: auto; padding: 1rem; background: var(--surface-subtle); }
+.reader article code { font-family: var(--mono); }
+.reader-table { overflow-x: auto; }
+.reader th, .reader td { padding: .5rem; border: 1px solid var(--line); text-align: left; }
+.reader table { border-collapse: collapse; }
+.reader blockquote { border-left: 3px solid var(--accent); margin-left: 0; padding-left: 1rem; }
