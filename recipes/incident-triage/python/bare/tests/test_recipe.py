@@ -49,6 +49,28 @@ def fake_client(**start_workflow: object) -> SimpleNamespace:
     )
 
 
+class HttpFailureTests(unittest.TestCase):
+    def test_access_denial_does_not_retry_until_credentials_change(self) -> None:
+        for status in (401, 403):
+            with self.subTest(status=status):
+                error = activities.http_error(status)
+                self.assertIsInstance(error, activities.NonRetryableHttpError)
+                self.assertIn(
+                    type(error).__name__,
+                    QUICK_ACTIVITY["retry_policy"]["non_retryable_error_reasons"],
+                )
+
+    def test_transient_tool_failures_can_retry(self) -> None:
+        for status in (429, 503):
+            with self.subTest(status=status):
+                error = activities.http_error(status)
+                self.assertIsInstance(error, activities.RateLimited)
+                self.assertNotIn(
+                    type(error).__name__,
+                    QUICK_ACTIVITY["retry_policy"]["non_retryable_error_reasons"],
+                )
+
+
 class StoryTests(unittest.TestCase):
     def test_scripted_planner_takes_wrong_then_correct_paths(self) -> None:
         checkout = story.logs_for("checkout", "4bf92f3577b34da6")

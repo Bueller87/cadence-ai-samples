@@ -24,7 +24,7 @@ PLAN_ACTIVITY = "incident-triage.plan-next"
 REVISE_ACTIVITY = "incident-triage.revise-draft"
 UPLOAD_ACTIVITY = "incident-triage.upload-conclusion"
 
-NEVER_RETRY = (400, 401, 404)
+NEVER_RETRY = (400, 401, 403, 404)
 
 
 class RateLimited(RuntimeError):

@@ -201,3 +201,7 @@ URLs, people, customers, or deployed-system claims.
 - [x] Fresh comparison, Explorer discovery, clean-copy, runtime-launcher, and
   recipe-isolation checks pass; the reproduced base-branch DOM limitation is
   documented above.
+
+## Tool error classification
+
+The recipe treats HTTP 400, 401, 403 and 404 as nonretryable tool errors. HTTP 429 and temporary service failures remain eligible for its bounded retry policy. Access failures require changed credentials or permissions; waiting alone does not resolve them. This classification is application code. Cadence applies the retry policy to the raised error reason.
