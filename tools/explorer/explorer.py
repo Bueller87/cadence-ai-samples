@@ -33,13 +33,16 @@ from signal_metadata import (SignalMetadataError, load_metadata,
 
 
 SKIP = {
-    'tests', 'testdata', 'perf', 'evidence',
+    'tests', 'testdata', 'perf', 'evidence', 'docs',
     '.venv', 'venv', '__pycache__', 'node_modules',
 }
 CADENCE_WEB_URL = 'http://localhost:8088'
 CADENCE_CLUSTER = 'cluster0'
 SCENARIOS = {
-    'auto-research': 'Build, review, revise, and publish a durable briefing from simulated source material.',
+    'agent-handoffs': 'Plan a trip with specialist agents that hand off to each other and book through durable Activities.',
+    'human-in-the-loop': 'Prepare a ride booking, then wait durably for a person to approve or reject it.',
+    'incident-triage': 'Investigate a fictional checkout outage, take operator guidance, and wait for approval before writing one conclusion.',
+    'auto-research':'Build, review, revise, and publish a durable briefing from simulated source material.',
     'ticket-routing': 'Classify StreamWave support tickets and route them through durable assignment Workflows.',
     'recurring-ai-watch': 'Classify release notes, then use an agent and LLM to produce a recurring impact report.',
 }

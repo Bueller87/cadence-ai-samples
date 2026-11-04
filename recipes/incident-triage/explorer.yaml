@@ -30,7 +30,7 @@ signals:
         help: Enter the revision to apply to the current and corrected drafts.
   - id: approval-decision
     name: approval
-    label: Send approval decision
+    label: Approval decision
     description: Approve or reject the corrected synthetic conclusion.
     intent: confirm
     arguments:

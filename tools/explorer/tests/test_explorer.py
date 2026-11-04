@@ -234,6 +234,19 @@ echo "Dependencies prepared."
             ['jev-default', 'laya-local'],
         )
 
+    def test_docs_directories_are_not_implementations(self):
+        (self.root/'recipes/incident-triage/python/docs').mkdir()
+        images=self.root/'recipes/new-simple/docs/images'
+        images.mkdir(parents=True)
+        (images/'shot.png').write_bytes(b'png')
+        recipes=self.explorer.snapshot()['recipes']
+        triage=next(r for r in recipes if r['id']=='incident-triage')
+        self.assertEqual([v['id'] for v in triage['variants']],
+                         ['recipes/incident-triage/python/bare'])
+        self.assertTrue(all('docs' not in Path(v['id']).parts
+                            for r in recipes for v in r['variants']))
+        self.assertIn('new-simple',[r['id'] for r in recipes])
+
     def test_agent_handoffs_resolves_both_framework_commands_without_imports(self):
         for framework in ('google-adk','openai-agents'):
             implementation=f'recipes/agent-handoffs/python/{framework}'
