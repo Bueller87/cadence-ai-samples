@@ -12,6 +12,30 @@ Agent Examples** during KubeCon + CloudNativeCon North America 2026.
 - **Event work:** [ContribFest
   milestone](https://github.com/cadence-workflow/cadence-ai-samples/milestone/2)
 
+## Samples Explorer
+
+Choose an agent recipe, get matching commands and see its execution in
+Cadence Web. The Explorer reads your local checkout, including your edits.
+
+![Samples Explorer with Incident Triage selected and local service checks](contribfest/kubecon-na-2026/images/explorer-start.png)
+
+| Start here when you want to | Use the Explorer to |
+| --- | --- |
+| Find an example to build on | Choose a recipe, language, framework and mock or live mode. |
+| Get past local setup | Prepare dependencies and check which services respond. |
+| Understand an agent Run | Open history and Queries, then send supported review Signals. |
+
+From the repository root, launch the local browser tool:
+
+```bash
+./scripts/explore.sh
+```
+
+Browsing needs Python 3.10+ with venv support; the first launch downloads a
+Python dependency. Each recipe has its own runtime and service requirements.
+See [the Explorer walkthrough](contribfest/kubecon-na-2026/setup.md#explore-the-samples-in-your-browser)
+for selection, setup, Run links and review Signals.
+
 ## Build durable AI examples
 
 Start with Incident Triage to get familiar with the agent and Cadence. Inspect
@@ -46,7 +70,7 @@ Choose a difficulty that matches your time and energy:
 | --- | --- |
 | **Low-stakes** | Get a first win: one prepared failure, a small file set, exact commands |
 | **Mid-level** | Harden a real durability gap with a bit more surface area |
-| **High-level / stretch** | Take on deeper multi-step durability work; still scaffolded, with a clear 45-minute stopping point if you cannot finish |
+| **High-level / stretch** | Investigate recovery or replay across several steps |
 
 Pick the task that fits you. Excited contributors should feel empowered to claim
 a stretch Issue; maintainers are in the room to help. Claim through the
@@ -78,7 +102,7 @@ Prepare only the local services named by your Issue:
 | --- | --- | --- |
 | Cadence | Run and inspect the workflow | [Ticket Routing requirements](recipes/ticket-routing/README.md#requirements) |
 | Laya | Local classification | [Install Laya](README.md#install-laya) |
-| Ollama with `qwen2.5:7b` | Incident Triage exercise (everyone) | [Exercise setup](recipes/incident-triage/python/bare/exercises/retry_policy_live/README.md#prepare-before-the-session) |
+| Ollama with `qwen2.5:7b` | Incident Triage live exercise | [Exercise setup](recipes/incident-triage/python/bare/exercises/retry_policy_live/README.md#prepare-before-the-session) |
 | Ollama with `llama3.2` | Local model inference | [Install Ollama and llama3.2](README.md#install-ollama-and-llama32) |
 | Full local example | Exercise Laya and `llama3.2` together | [Recurring AI Watch setup](recipes/recurring-ai-watch/README.md#setup) |
 

@@ -1,6 +1,6 @@
 # Contributing
 
-Start a contribution with a specific problem or use case, not a library feature.
+Build something useful. Start with a problem you want to solve.
 
 ## Explore the recipes in your browser
 
@@ -20,7 +20,7 @@ which service needs attention; mock mode needs no inference service.*
 | Get it running locally | Prepare dependencies, check services and copy matching Worker and Workflow commands. |
 | Understand a Run | Open Cadence Web history and Queries; send supported review Signals with confirmation. |
 
-From the repository root:
+From your [cloned checkout](#first-time-contributor-path):
 
 ```bash
 ./scripts/explore.sh
@@ -78,6 +78,17 @@ The Explorer helps you locate the problem; the
 [recipe runbook](README.md#run-a-recipe) supplies the service setup and commands.
 
 ## First-time contributor path
+
+Fork [cadence-ai-samples](https://github.com/cadence-workflow/cadence-ai-samples)
+on GitHub, then clone your fork. Replace `YOUR-USERNAME` with your GitHub username:
+
+```bash
+git clone https://github.com/YOUR-USERNAME/cadence-ai-samples.git
+cd cadence-ai-samples
+```
+
+You can browse and run samples before claiming work. To contribute a change,
+choose an approved Issue using the steps below.
 
 Your fork and the canonical repository have different roles:
 

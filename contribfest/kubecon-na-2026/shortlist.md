@@ -1,10 +1,11 @@
 # Find something to work on
 
 Start with the [retry-policy exercise](../../recipes/incident-triage/python/bare/exercises/retry_policy_live/README.md).
-Then [bring your own workflow](#bring-your-own-workflow), or take a ContribFest
-Issue below if you didn't bring one.
+For your contribution, [bring your own workflow](#bring-your-own-workflow), or
+take a ContribFest Issue below if you didn't bring one.
 
-Notes: Please **first comment** on the issue and then assign yourself to the issue you want to take on.
+Comment on the Issue you want to take. A helper will record your claim and
+update its label and assignment. You do not need label or assignment permissions.
 
 ## ContribFest Issues
 
@@ -20,8 +21,8 @@ Find all issues using [this filter](https://github.com/cadence-workflow/cadence-
 | [#109](https://github.com/cadence-workflow/cadence-ai-samples/issues/109) | Help a small local model name the root cause | Human review of agent output | mid | Cadence, Ollama, `llama3.2` and `qwen2.5:7b` |
 
 Each Issue explains the problem, shows the command that reproduces it, names the
-file to change and says how to check the fix. Issues #109, #111 and #120 need the
-exercise merged first; the Issue says so at the top.
+file to change and says how to check the fix. Check the Issue's current status
+and claim instructions before starting.
 
 To claim one:
 
@@ -36,11 +37,13 @@ has the current list.
 
 ## Extend the exercise
 
-Every scenario in
+Each scenario in the Incident Triage recipe's
 [`run_exercise.py`](../../recipes/incident-triage/python/bare/exercises/retry_policy_live/run_exercise.py)
-is a prepared failure plus the checks that prove Cadence handled it. To add one,
-for example an approval that never arrives (a durable timer) or a write whose
-reply is lost (an idempotency key), copy the `rate-limit` scenario, change the
+pairs a prepared failure with checks of the Workflow's behavior. To add one,
+for example an approval that never arrives
+([durable timers](https://cadenceworkflow.io/docs/concepts/timers/)) or a write
+whose reply is lost
+([Activity execution](https://cadenceworkflow.io/docs/concepts/activities/)), copy the `rate-limit` scenario, change the
 failure, and write its checks. Open an Issue describing it before the pull
 request.
 
@@ -58,8 +61,11 @@ model or tool call. Work through as many depths as you have time for:
 2. **Break it.** Pick the call most likely to fail (a rate-limited API, a slow
    model, a flaky tool). Make it fail on purpose and watch what happens.
 3. **Make it durable.** Move that call into its own Activity with a retry
-   policy and a timeout. Mark errors a retry can't fix as non-retryable.
-4. **Steer (stretch).** Add a Signal so a person approves before the agent
+   policy and a timeout. Read the retry guides for
+   [Python](https://cadenceworkflow.io/docs/python-client/retries/) or
+   [Go](https://cadenceworkflow.io/docs/go-client/retries/), then mark permanent
+   errors as non-retryable.
+4. **Steer (stretch).** Add a [Signal](https://cadenceworkflow.io/docs/python-client/signals/) so a person approves before the agent
    acts.
 
 The [Incident Triage recipe](../../recipes/incident-triage/python/bare/workflow.py)
@@ -74,6 +80,21 @@ and open an Issue so someone can continue.
 [#119](https://github.com/cadence-workflow/cadence-ai-samples/issues/119): run Incident Triage in mock mode, stop the worker mid-run,
 send Signals, run two at once. Open a `<Finding>` Issue for anything that
 surprised you. No model needed.
+
+**If you'd rather click than type (optional):** from the repository root, run
+`./scripts/explore.sh`. Choose Incident Triage, python, and mock mode (this
+recipe has no framework selector).
+
+1. **Refresh and check services**, then copy the Worker and start commands into
+   separate terminals and run them.
+2. **Resolve latest run** to find your Run.
+3. Follow the [recipe walkthrough](../../recipes/incident-triage/README.md) to
+   send guidance, a revision and approval: enter the field, select **Send …**,
+   then **Confirm …**.
+4. **Open history** to see the recorded Activities and Signals in Cadence Web.
+
+The Explorer is a helper for navigation and controls; the terminal path above
+works on its own. More details are in [setup](setup.md#optional-explore-the-samples-in-your-browser).
 
 ## Leave a useful result
 

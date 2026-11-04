@@ -904,8 +904,8 @@ echo "Dependencies prepared."
         launcher=self.root/implementation/'run.sh'
         package_bin=self.root/'package-bin';package_bin.mkdir()
         package_tool=package_bin/'pip'
-        package_tool.write_text(
-            f"#!{sys.executable}\n"
+        package_script=package_bin/'pip.py'
+        package_script.write_text(
             "import os\n"
             "for key, value in os.environ.items(): print(f'{key}={value}')\n"
             "print('Authorization: Bearer printed-authorization')\n"
@@ -916,6 +916,9 @@ echo "Dependencies prepared."
             "print('final package failure')\n"
             "print('retry with the documented setup command')\n"
             "raise SystemExit(17)\n")
+        package_tool.write_text(
+            '#!/bin/sh\nexec ' + shlex.quote(sys.executable) + ' ' +
+            shlex.quote(str(package_script)) + ' "$@"\n')
         package_tool.chmod(0o755)
         launcher.write_text('#!/bin/sh\nexec pip install\n')
         launcher.chmod(0o755)
