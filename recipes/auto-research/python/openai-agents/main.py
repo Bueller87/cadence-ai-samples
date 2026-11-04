@@ -16,6 +16,7 @@ from cadence.contrib.pydantic import PydanticDataConverter
 from cadence.error import WorkflowExecutionAlreadyStartedError
 from cadence.worker import Worker
 
+from activities import search_invalid_sources
 from config import load_model
 from workflow import (
     APPROVE_SIGNAL,
@@ -49,6 +50,7 @@ def parser() -> argparse.ArgumentParser:
     worker = commands.add_parser("worker")
     worker.add_argument("--mode", choices=("mock", "live"), required=True)
     worker.add_argument("--confirm-live", action="store_true")
+    worker.add_argument("--fault", choices=("invalid-source",), help="mock-only fault fixture")
     worker.add_argument("--catalog-dir", type=Path, default=Path(__file__).parents[4])
     worker.add_argument("--model-id", default="llama3.2-local")
     start = commands.add_parser("start")
@@ -75,7 +77,9 @@ def client(args: argparse.Namespace) -> cadence.Client:
 
 
 async def run_worker(args: argparse.Namespace) -> None:
-    registry = build_registry()
+    if args.fault and args.mode != "mock":
+        raise ValueError("--fault invalid-source requires --mode mock")
+    registry = build_registry(search_activity=search_invalid_sources) if args.fault else build_registry()
     model_label = "offline-mock"
     if args.mode == "live":
         if not args.confirm_live:
@@ -91,6 +95,7 @@ async def run_worker(args: argparse.Namespace) -> None:
         print(
             f"{args.mode} worker polling domain={args.domain} "
             f"task-list={args.task_list} model={model_label}"
+            + (f" fault={args.fault}" if args.fault else "")
         )
         await asyncio.Event().wait()
 

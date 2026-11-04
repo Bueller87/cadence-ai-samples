@@ -101,6 +101,17 @@ def search_research_sources(question: str) -> SourceResults:
     )
 
 
+@activity.defn(name=SEARCH_ACTIVITY)
+def search_invalid_sources(question: str) -> SourceResults:
+    """Mock fault fixture: return URLs rejected by the synthetic source reader."""
+    question = _clean(question, name="question", maximum=MAX_TOPIC_LENGTH)
+    encoded = quote(question, safe="")
+    return SourceResults(tuple(
+        f"https://example.com/{angle}?topic={encoded}"
+        for angle in ("overview", "challenges", "outlook")
+    ))
+
+
 @activity.defn(name=READ_ACTIVITY)
 def read_research_source(url: str) -> str:
     """Return a synthetic source brief for one recipe-generated URL."""

@@ -88,6 +88,17 @@ conflicting, empty, and over-limit actions have no side effects. At most three
 revise or expand actions are accepted; approval remains available after that
 limit.
 
+### Optional: inject an invalid source (OpenAI Agents mock Worker)
+
+From `python/openai-agents`, start `./run.sh worker --mode mock --fault invalid-source`
+in place of the normal mock Worker, then start a mock Run as above. This fixture
+returns source URLs on the wrong host; it performs no network requests. In
+Cadence Web, open the History for `auto-research.read-source`: it shows `2 Retries`
+and the Run ends `Failed`. The flag is rejected in live mode. Stop this Worker
+and restart without the flag to return to normal. This exposes the failure for
+[#135](https://github.com/cadence-workflow/cadence-ai-samples/issues/135); it leaves
+the source reader and retry policy unchanged.
+
 ## Local Samples Explorer
 
 Start the Explorer from the repository root:

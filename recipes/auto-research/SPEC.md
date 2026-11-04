@@ -39,6 +39,12 @@ classifier:
 
 The recipe imports neither template code nor another recipe.
 
+The OpenAI Agents mock Worker optionally accepts `--fault invalid-source`.
+It registers a synthetic search fixture returning HTTPS URLs on the wrong host,
+so the unchanged source reader fails with `ValueError` under the existing retry
+policy. The flag is rejected before client/provider setup in live mode; normal
+Workers retain their existing registry. Google ADK does not offer this flag.
+
 ## Workflow state machine
 
 Both modes execute:

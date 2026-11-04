@@ -491,7 +491,9 @@ def _render_report(
     )
 
 
-def build_registry(model_activities: object | None = None) -> Registry:
+def build_registry(
+    model_activities: object | None = None, *, search_activity=search_research_sources
+) -> Registry:
     registry = Registry()
     registry.workflow(AutoResearchWorkflow)
     for fn in (
@@ -499,7 +501,7 @@ def build_registry(model_activities: object | None = None) -> Registry:
         mock_specialist,
         mock_synthesis,
         mock_edit,
-        search_research_sources,
+        search_activity,
         read_research_source,
         log_progress,
         publish_report,
