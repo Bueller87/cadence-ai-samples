@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import shutil
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -63,6 +65,47 @@ class ContributionTemplateTests(unittest.TestCase):
                 human.replace(old_gate, new_gate, 1),
                 agent.replace(old_gate, new_gate, 1),
             )
+
+    def test_pr_gate_requires_in_progress_as_the_only_lifecycle_label(self):
+        human = (ROOT / ".github/PULL_REQUEST_TEMPLATE.md").read_text(encoding="utf-8")
+        agent = (
+            ROOT / ".github/PULL_REQUEST_TEMPLATE/agent-first.md"
+        ).read_text(encoding="utf-8")
+        new_gate = (
+            "- [ ] The linked Issue was claimed and `status:in-progress` is its only "
+            "lifecycle label."
+        )
+        old_gate = "- [ ] The linked Issue was claimed and remains `status:in-progress`."
+        self.assertIn(new_gate, human)
+
+        with self.assertRaisesRegex(contracts.ValidationError, "mandatory contract"):
+            contracts.validate_governance_texts(
+                human.replace(new_gate, old_gate, 1),
+                agent.replace(new_gate, old_gate, 1),
+            )
+
+    def test_additive_lifecycle_wording_fails(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for relative in contracts.LIFECYCLE_DOCS + contracts.LIFECYCLE_TEMPLATES:
+                destination = root / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(ROOT / relative, destination)
+            contracts.validate_lifecycle_terminology(root)
+
+            form = root / ".github/ISSUE_TEMPLATE/work-proposal.yml"
+            form.write_text(
+                form.read_text(encoding="utf-8").replace(
+                    "transitions them to `status:ready`", "adds `status:ready`"
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(contracts.ValidationError, "transition or replace"):
+                contracts.validate_lifecycle_terminology(root)
+
+    def test_explicit_html_anchors_resolve(self):
+        anchors = contracts._heading_anchors('<a id="local-ai-services"></a>\n\n## Other\n')
+        self.assertEqual({"local-ai-services", "other"}, anchors)
 
     def test_human_first_form_accepts_a_gap_without_manufacturing_failure(self):
         form_path = ROOT / ".github/ISSUE_TEMPLATE/human-first-proposal.yml"

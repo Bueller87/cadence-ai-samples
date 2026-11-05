@@ -23,7 +23,7 @@ List remaining work, relevant checks not performed, and known limitations.
 ## Required governance gates
 
 - [ ] The PR implements one approved Issue and stays within its scope.
-- [ ] The linked Issue was claimed and remains `status:in-progress`.
+- [ ] The linked Issue was claimed and `status:in-progress` is its only lifecycle label.
 - [ ] Tests and documentation match the changed behavior.
 - [ ] No credentials, proprietary data, or unrelated changes are included.
 - [ ] Commits include DCO sign-off (`git commit -s`).

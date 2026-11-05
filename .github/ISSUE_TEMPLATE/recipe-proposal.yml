@@ -10,7 +10,7 @@ body:
     attributes:
       value: |
         Recipe proposals use specialized intake and remain format-neutral until maintainer triage.
-        Proposals are not approved work until a human maintainer adds `status:ready`.
+        Proposals are not approved work until a human maintainer transitions them to `status:ready`.
         Missing format, type, area, or source labels never authorize implementation.
         Do not include credentials, proprietary data, or private company context.
   - type: dropdown
@@ -109,5 +109,5 @@ body:
     attributes:
       label: Approval gate
       options:
-        - label: I understand that only a human maintainer may label this proposal `status:ready` before implementation.
+        - label: I understand that only a human maintainer may transition this proposal to `status:ready` before implementation.
           required: true

@@ -151,8 +151,8 @@ coordinator applies that workflow:
    `issue-N-short-slug` branch.
 3. The coordinator rechecks assignees, comments, labels, and active linked pull
    requests.
-4. The coordinator records ownership and changes `status:ready` to
-   `status:in-progress`.
+4. The coordinator records ownership and replaces `status:ready` with
+   `status:in-progress`, the Issue's only lifecycle label.
 5. Only then do you create the branch on your fork and begin work.
 
 There is no informal event claim. If two people want the same Issue, wait for

@@ -104,7 +104,8 @@ it with:
 git remote add upstream https://github.com/cadence-workflow/cadence-ai-samples.git
 ```
 
-An open Issue's lifecycle label tells you what you may do:
+Every open Issue has exactly one lifecycle label, and it tells you what you may
+do:
 
 - `status:needs-triage` means proposed work. It is not claimable, so do not
   self-assign or implement it.
@@ -114,7 +115,10 @@ An open Issue's lifecycle label tells you what you may do:
   competing implementation.
 
 Assignment records ownership of approved work, not interest or priority. Only a
-human maintainer may promote a proposal to `status:ready`.
+human maintainer may transition a proposal to `status:ready`. Moving between
+states replaces one lifecycle label with another. A repository guard returns an
+open Issue with no lifecycle label, several lifecycle labels, or a
+`status:ready` label set by anyone else to `status:needs-triage`.
 
 `format:human-first` and `format:agent-first` describe presentation, not
 eligibility or ownership. Either format may be claimed by a human or implemented
@@ -162,7 +166,7 @@ Maintainers and contributors with upstream label permission may instead use the
 path](agent-context/README.md#creating-a-proposal). An agent without that
 permission prepares the proposal for human form submission or requests
 maintainer assistance; it must not run the labeled command. Then wait for a
-human maintainer to add `status:ready`.
+human maintainer to transition the proposal to `status:ready`.
 
 ### Claim approved work
 
@@ -203,7 +207,7 @@ or a maintainer comment confirming the claim.
    supply merge authority.
 
 Keep claimed work `status:in-progress` until merge closes the Issue. If
-abandoning it, comment the reason and current state, replace
+abandoning it, comment the reason and current state, ask a maintainer to replace
 `status:in-progress` with `status:ready`, and ask before deleting the
 branch. Branch names identify the Issue, not the coding tool, because work may
 move between agents.

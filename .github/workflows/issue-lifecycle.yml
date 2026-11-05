@@ -1,0 +1,48 @@
+name: Issue lifecycle guard
+
+# Keeps exactly one lifecycle label on each open Issue. Runs from the default
+# branch for Issue events only and never checks out contributor branches.
+# No concurrency group: GitHub may replace a pending run in a group, which
+# would drop a readiness delivery that needs authorization.
+
+on:
+  issues:
+    types:
+      - opened
+      - reopened
+      - labeled
+      - unlabeled
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  guard:
+    name: Lifecycle label guard
+    if: ${{ !github.event.issue.pull_request }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Enforce one lifecycle label
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          EVENT_ACTION: ${{ github.event.action }}
+          EVENT_LABEL: ${{ github.event.label.name }}
+          EVENT_SENDER: ${{ github.event.sender.login }}
+          EVENT_SENDER_TYPE: ${{ github.event.sender.type }}
+        run: >-
+          python3 scripts/issue_lifecycle.py guard
+          --repo "$GITHUB_REPOSITORY"
+          --issue "$ISSUE_NUMBER"
+          --grace-seconds 30

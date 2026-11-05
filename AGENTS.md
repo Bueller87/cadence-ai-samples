@@ -57,12 +57,17 @@ this file remains authoritative. Human contributors start with the
   with an agent. A missing format label never authorizes implementation.
 - Every Issue and label command must explicitly target
   `cadence-workflow/cadence-ai-samples`; never infer the target from `origin`.
-- Only a human may promote an Issue to `status:ready`, approve architecture
-  or priority, approve a PR, or authorize a merge.
+- Each open Issue has exactly one lifecycle label: `status:needs-triage`,
+  `status:ready`, or `status:in-progress`. Transition by replacing one with
+  another, never by adding a second. The
+  [lifecycle guard](agent-context/README.md#lifecycle-label-guard) returns
+  unlabeled, contradictory, or unauthorized states to `status:needs-triage`.
+- Only a human maintainer may transition an Issue to `status:ready`, approve
+  architecture or priority, approve a PR, or authorize a merge.
 - Any contributor may claim an unassigned `status:ready` Issue. Immediately
   before claiming, recheck its assignee, comments, labels, and active linked PRs.
 - Assignment records ownership of approved work, not interest or priority.
-- Claim in this order: comment intent, remove `status:ready`, add
+- Claim in this order: comment intent, replace `status:ready` with
   `status:in-progress`, then create the branch.
 - Contributors without upstream label or assignment permission must comment to
   request a claim, then wait. Do not create the branch or begin implementation
@@ -72,9 +77,10 @@ this file remains authoritative. Human contributors start with the
   linked PR or `status:in-progress`. Resume only the current contributor's
   matching claimed Issue and branch. Do not open competing implementation PRs
   without agreement.
-- If abandoning work, comment the reason and current state, remove
-  `status:in-progress`, and restore `status:ready`. Preserve or delete the
-  branch only with human direction.
+- If abandoning work, comment the reason and current state. A maintainer then
+  replaces `status:in-progress` with `status:ready`; other contributors request
+  that transition in the comment. Preserve or delete the branch only with human
+  direction.
 - Keep `status:in-progress` through implementation and draft-PR handoff. Merge
   closes the Issue.
 

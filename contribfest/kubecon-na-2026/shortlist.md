@@ -23,7 +23,7 @@ Choose a useful result and one failure it should recover from.
 1. Open your selected issue in the live pool. Check that it is open,
    `status:ready`, unassigned and has no earlier claim or active implementation PR.
 2. Comment: **“I'd like to take this. GitHub: @yourname. Branch: `issue-N-short-slug`.”**
-3. Wait for a facilitator to record ownership and `status:in-progress`.
+3. Wait for a facilitator to record ownership and replace `status:ready` with `status:in-progress`.
    Then create the branch in your fork and follow the issue's instructions.
 
 You do not need label permissions. If a task is taken, choose another or propose

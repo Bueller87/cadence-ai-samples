@@ -124,8 +124,9 @@ data, or machine-specific configuration.
 
 ## Human authority
 
-Only a human may approve architecture or priority, add `status:ready`, or
-approve a PR. Only the repository owner may authorize a merge. Agents never
+Only a human may approve architecture or priority or approve a PR, and only a
+human maintainer may transition an Issue to `status:ready`. Each open Issue
+keeps exactly one lifecycle label. Only the repository owner may authorize a merge. Agents never
 approve PRs or supply merge authority. An agent may execute a merge only after
 explicit repository-owner direction and verification of the applicable review
 path, required checks, branch currency, and resolved threads; without

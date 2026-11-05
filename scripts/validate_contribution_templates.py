@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import re
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +17,7 @@ START_MARKER = "<!-- shared-governance-gates:start -->"
 END_MARKER = "<!-- shared-governance-gates:end -->"
 OLD_READY_LABEL = "status:" + "agent-ready"
 APPROVAL_CONTRACT = (
-    "I understand that only a human maintainer may label this proposal "
+    "I understand that only a human maintainer may transition this proposal to "
     "`status:ready` before implementation."
 )
 
@@ -23,7 +25,7 @@ EXPECTED_GOVERNANCE_BLOCK = """<!-- shared-governance-gates:start -->
 ## Required governance gates
 
 - [ ] The PR implements one approved Issue and stays within its scope.
-- [ ] The linked Issue was claimed and remains `status:in-progress`.
+- [ ] The linked Issue was claimed and `status:in-progress` is its only lifecycle label.
 - [ ] Tests and documentation match the changed behavior.
 - [ ] No credentials, proprietary data, or unrelated changes are included.
 - [ ] Commits include DCO sign-off (`git commit -s`).
@@ -44,7 +46,7 @@ EXPECTED_GOVERNANCE_BLOCK = """<!-- shared-governance-gates:start -->
 MANDATORY_GOVERNANCE_GATES = {
     "approved-linked-issue": (
         "The PR implements one approved Issue and stays within its scope.",
-        "The linked Issue was claimed and remains `status:in-progress`.",
+        "The linked Issue was claimed and `status:in-progress` is its only lifecycle label.",
     ),
     "dco-signoff": ("Commits include DCO sign-off (`git commit -s`).",),
     "required-ci": (
@@ -111,6 +113,26 @@ DOCS = (
     "WORKFLOW.md",
     "CONTRIBUTING.md",
     "agent-context/README.md",
+)
+
+LIFECYCLE_DOCS = DOCS + (
+    "CONTRIBFEST.md",
+    "contribfest/kubecon-na-2026/shortlist.md",
+)
+
+LIFECYCLE_TEMPLATES = (
+    ".github/PULL_REQUEST_TEMPLATE.md",
+    ".github/PULL_REQUEST_TEMPLATE/agent-first.md",
+    ".github/ISSUE_TEMPLATE/work-proposal.yml",
+    ".github/ISSUE_TEMPLATE/human-first-proposal.yml",
+    ".github/ISSUE_TEMPLATE/agent-first-proposal.yml",
+    ".github/ISSUE_TEMPLATE/recipe-proposal.yml",
+)
+
+ADDITIVE_LIFECYCLE_PATTERNS = (
+    re.compile(r"\badds? `status:ready`"),
+    re.compile(r"\blabel this proposal `status:ready`"),
+    re.compile(r"remove `status:ready`, add"),
 )
 
 
@@ -303,12 +325,14 @@ def _heading_anchors(text: str) -> set[str]:
         heading = re.sub(r"\s+", "-", heading.strip())
         heading = re.sub(r"-+", "-", heading)
         anchors.add(heading)
+    anchors.update(re.findall(r"<a\s+(?:id|name)=\"([^\"]+)\"", text))
     return anchors
 
 
-def validate_markdown_links(root: Path = ROOT) -> None:
+def markdown_link_findings(root: Path, paths: tuple[str, ...]) -> list[str]:
     link_pattern = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
-    for relative in DOCS:
+    findings: list[str] = []
+    for relative in paths:
         source = root / relative
         text = _read(source)
         for target in link_pattern.findall(text):
@@ -317,18 +341,37 @@ def validate_markdown_links(root: Path = ROOT) -> None:
             path_part, separator, anchor = target.partition("#")
             destination = source if not path_part else (source.parent / path_part).resolve()
             if not destination.exists():
-                raise ValidationError(f"{relative} links to missing path {path_part!r}")
-            if separator and destination.is_file():
+                findings.append(f"{relative} links to missing path {path_part!r}")
+            elif separator and destination.is_file():
                 if anchor not in _heading_anchors(_read(destination)):
-                    raise ValidationError(
+                    findings.append(
                         f"{relative} links to missing anchor {anchor!r} in {path_part or relative}"
                     )
+    return findings
+
+
+def validate_markdown_links(root: Path = ROOT, paths: tuple[str, ...] = DOCS) -> None:
+    findings = markdown_link_findings(root, paths)
+    if findings:
+        raise ValidationError(findings[0])
+
+
+def validate_lifecycle_terminology(root: Path = ROOT) -> None:
+    for relative in LIFECYCLE_DOCS + LIFECYCLE_TEMPLATES:
+        text = _read(root / relative)
+        for pattern in ADDITIVE_LIFECYCLE_PATTERNS:
+            if pattern.search(text):
+                raise ValidationError(
+                    f"{relative} describes a lifecycle change as adding a label; "
+                    "say transition or replace"
+                )
 
 
 def validate_documentation(root: Path = ROOT) -> None:
     for relative in DOCS:
         if OLD_READY_LABEL in _read(root / relative):
             raise ValidationError(f"{relative} still contains active old lifecycle terminology")
+    validate_lifecycle_terminology(root)
 
     combined = "\n".join(_read(root / relative) for relative in DOCS)
     required_fragments = (
@@ -342,7 +385,7 @@ def validate_documentation(root: Path = ROOT) -> None:
     for fragment in required_fragments:
         if fragment not in combined:
             raise ValidationError(f"documentation is missing {fragment!r}")
-    validate_markdown_links(root)
+    validate_markdown_links(root, LIFECYCLE_DOCS)
 
 
 def validate_repository(root: Path = ROOT) -> None:
@@ -351,7 +394,30 @@ def validate_repository(root: Path = ROOT) -> None:
     validate_documentation(root)
 
 
-def main() -> int:
+def tracked_markdown(root: Path = ROOT) -> tuple[str, ...]:
+    result = subprocess.run(
+        ["git", "ls-files", "*.md"], cwd=root, capture_output=True, text=True, check=True
+    )
+    return tuple(line for line in result.stdout.splitlines() if line)
+
+
+def report_all_markdown(root: Path = ROOT) -> int:
+    paths = tracked_markdown(root)
+    findings = markdown_link_findings(root, paths)
+    print(f"Checked local links and anchors in {len(paths)} tracked Markdown files.")
+    for finding in findings:
+        print(f"FINDING {finding}")
+    print(f"{len(findings)} finding(s). This report does not fail the build.")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = sys.argv[1:] if argv is None else argv
+    if args == ["--report-all-markdown"]:
+        return report_all_markdown()
+    if args:
+        print("usage: validate_contribution_templates.py [--report-all-markdown]", file=sys.stderr)
+        return 2
     validate_repository()
     print("Contribution templates and guidance are valid.")
     return 0

@@ -41,6 +41,10 @@ No chat transcript, agent memory, `STATUS.md`, or `TODO.md` is authoritative.
 - [tools/explorer/](../tools/explorer/) is a loopback-only companion that reads
   this checkout, checks local dependencies, previews commands, and exposes only
   bounded explicit actions.
+- [scripts/issue_lifecycle.py](../scripts/issue_lifecycle.py) and
+  [.github/workflows/issue-lifecycle.yml](../.github/workflows/issue-lifecycle.yml)
+  audit and enforce one lifecycle label per open Issue. The shared transition
+  helper is the only supported way for automation to change lifecycle labels.
 - All samples use the Cadence domain `cadence-ai-samples`.
 - External and nondeterministic calls belong in Activities, never Workflow code.
 
@@ -129,9 +133,10 @@ Without upstream label or assignment permission, request maintainer help and
 wait for both `status:in-progress` and repository-visible ownership before
 creating the branch.
 
-Only a human may mark an Issue `status:ready`. Keep it in-progress through the draft
-PR handoff. On abandonment, comment the reason and current state, then return it
-to the approved queue:
+Only a human maintainer may transition an Issue to `status:ready`. Keep it
+in-progress through the draft PR handoff. On abandonment, comment the reason and
+current state. A maintainer then returns it to the approved queue; other
+contributors request that transition in the comment:
 
 ```bash
 gh issue edit N --repo cadence-workflow/cadence-ai-samples \
@@ -141,6 +146,44 @@ gh issue edit N --repo cadence-workflow/cadence-ai-samples \
 Preserve or delete the abandoned branch only with human direction. Active work is
 reconstructed from the in-progress Issue, `issue-N-short-slug` branch, and linked
 draft PR, never an agent-specific branch prefix or chat history.
+
+### Lifecycle label guard
+
+Each open Issue has exactly one of `status:needs-triage`, `status:ready`, or
+`status:in-progress`. Check the upstream set read-only; the command exits
+non-zero when any open Issue has zero or several lifecycle labels, and reports
+deprecated or unknown `status:*` labels:
+
+```bash
+GH_TOKEN="$(gh auth token)" python3 scripts/issue_lifecycle.py audit \
+  --repo cadence-workflow/cadence-ai-samples
+```
+
+The Issue lifecycle guard workflow runs about 30 seconds after each opened,
+reopened, labeled, or unlabeled Issue event, then re-reads the Issue:
+
+- zero lifecycle labels become `status:needs-triage`;
+- several lifecycle labels keep the label that the newest event added, or fall
+  back to `status:needs-triage` when the intent is ambiguous;
+- `status:ready` set, kept on opening, or kept on reopening by anyone without
+  effective admin or maintain permission, or by a bot, becomes
+  `status:needs-triage`;
+- the guard never promotes an Issue to `status:ready` and posts no comments.
+  Its decision appears in the Issue timeline and the workflow job summary.
+
+Automation that changes lifecycle labels must use `apply_transition` in
+[scripts/issue_lifecycle.py](../scripts/issue_lifecycle.py). A transition to
+`status:ready` requires an authorization from `authorize()`.
+
+To stop the guard during an incident, the repository owner disables it and
+records the reason in an Issue; the manual lifecycle above still applies:
+
+```bash
+gh workflow disable issue-lifecycle.yml --repo cadence-workflow/cadence-ai-samples
+gh workflow enable issue-lifecycle.yml --repo cadence-workflow/cadence-ai-samples
+```
+
+Permanent rollback is a reviewed revert pull request.
 
 ## Creating a proposal
 
@@ -187,7 +230,7 @@ human-created web forms do not. When a proposer cannot apply `source:agent`,
 type, area, or another classification label, maintainer triage applies it.
 Missing classification or format labels never authorize implementation. Every
 proposal must receive or request `status:needs-triage`; only a human maintainer
-may later add `status:ready`. Never assign priority or create the Issue in a
+may later transition it to `status:ready`. Never assign priority or create the Issue in a
 contributor fork.
 
 ## Local completion and handoff
