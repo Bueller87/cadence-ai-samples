@@ -88,7 +88,7 @@ and [Ollama](https://ollama.com/download) with `qwen2.5:7b`. The model is a
 ollama pull qwen2.5:7b
 ```
 
-Tasks marked **Python only** in the [shortlist](shortlist.md) can be worked on
+Python-only tasks in the [issue pool](README.md#issue-pool) can be worked on
 without Ollama. A coding agent is optional and is separate from the model used
 by the running example.
 

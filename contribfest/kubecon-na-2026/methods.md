@@ -14,8 +14,11 @@ Read the relevant code and try the instructions. Include prerequisites, files
 to change, validation commands and the expected result. Say whether the task
 uses a real model or synthetic responses, and keep untested behavior clear.
 
-Check for existing assignees and pull requests. An open PR may need review
-rather than another implementation. Use the repository's Issue status and
+Select only contributor tasks from the reviewed ContribFest pool. Each must
+have `event:contribfest`, the event milestone and `status:ready`, with no
+assignee, claim or active implementation PR. Event labels alone do not make
+an organizer task suitable for attendees. Keep preparation work and PR review
+in the organizer's tracking Issues, outside the shortlist. Use the repository's
 [claim process](../../CONTRIBFEST.md#2-claim-one-issue) for ownership.
 
 ## Keep the list useful

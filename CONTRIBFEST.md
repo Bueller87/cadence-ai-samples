@@ -151,10 +151,10 @@ contract](AGENTS.md).
   Architecture, priority, pull-request approval, and merge authorization stay
   with the designated humans.
 
-Ask the in-room team for help first. The facilitator will publish the event
-Slack channel and escalation format before the session; room staff route
-overflow questions to the remote support pool so participants do not have to
-coordinate that queue.
+Ask the in-room team for help, or join **`#cadence-contributors` on CNCF Slack**
+for setup, task and review questions. [Sign up or sign in](https://slack.cncf.io/),
+then search for `#cadence-contributors` and join the channel. Use the same
+channel to continue the conversation after the session.
 
 ### 4. Finish or hand off
 

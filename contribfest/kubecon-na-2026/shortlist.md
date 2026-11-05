@@ -4,36 +4,36 @@ Start with the [retry-policy exercise](../../recipes/incident-triage/python/bare
 For your contribution, [bring your own workflow](#bring-your-own-workflow), or
 take a ContribFest Issue below if you didn't bring one.
 
-Comment on the Issue you want to take. A helper will record your claim and
-update its label and assignment. You do not need label or assignment permissions.
+<a id="choose-a-contribfest-issue"></a>
 
 ## ContribFest Issues
 
-Find all issues using [this filter](https://github.com/cadence-workflow/cadence-ai-samples/issues?q=is%3Aissue+state%3Aopen+label%3Aevent%3Acontribfest+no%3Aassignee)
+Check the [approved recipe tasks](https://github.com/cadence-workflow/cadence-ai-samples/issues?q=is%3Aissue%20is%3Aopen%20milestone%3A%22KubeCon%20NA%202026%20ContribFest%2C%202026-11-11%22%20label%3Aevent%3Acontribfest%20label%3Astatus%3Aready%20no%3Aassignee%20label%3Aarea%3Arecipes%20label%3Aformat%3Ahuman-first) for work that fits your setup.
+A task is available while it is open, unassigned and labeled `status:ready`,
+with no existing claim or active implementation PR. If the pool is empty,
+ask a facilitator about another approved task or explore a sample while you wait.
 
-| Issue | What you'll do | Cadence idea | Level | Needs |
-| --- | --- | --- | --- | --- |
-| [#110](https://github.com/cadence-workflow/cadence-ai-samples/issues/110) | Prove `revise` reuses evidence and `guidance` investigates again | Signals, Queries, Workflow tests | low | Python only |
-| [#112](https://github.com/cadence-workflow/cadence-ai-samples/issues/112) | Make the Incident Triage clean-copy check pass | Self-contained samples | low | Python only |
-| [#121](https://github.com/cadence-workflow/cadence-ai-samples/issues/121) | Prove a lost reply doesn't save the conclusion twice | Idempotent writes | low | Python only |
-| [#111](https://github.com/cadence-workflow/cadence-ai-samples/issues/111) | Show a model call recovering from a rate limit | Activity retry policy | mid | Cadence, Ollama, `qwen2.5:7b` |
-| [#120](https://github.com/cadence-workflow/cadence-ai-samples/issues/120) | Let an unanswered approval expire | Durable timers | mid | Cadence, Ollama, `qwen2.5:7b` |
-| [#109](https://github.com/cadence-workflow/cadence-ai-samples/issues/109) | Help a small local model name the root cause | Human review of agent output | mid | Cadence, Ollama, `llama3.2` and `qwen2.5:7b` |
+For alternatives such as Java profile CI, browse
+[all approved event tasks](https://github.com/cadence-workflow/cadence-ai-samples/issues?q=is%3Aissue%20is%3Aopen%20milestone%3A%22KubeCon%20NA%202026%20ContribFest%2C%202026-11-11%22%20label%3Aevent%3Acontribfest%20label%3Astatus%3Aready%20no%3Aassignee).
+Each Issue states its language, dependencies and checks. The same claim rules
+apply to every task.
 
-Each Issue explains the problem, shows the command that reproduces it, names the
-file to change and says how to check the fix. Check the Issue's current status
-and claim instructions before starting.
+To request a task, comment on its Issue:
 
-To claim one:
+> I'd like to take this. GitHub: @yourname. Proposed branch:
+> `issue-N-short-slug`.
 
-1. Check it is open, unassigned and labeled `status:ready`, with no linked pull request.
-2. Comment on the Issue with your GitHub username and your branch name, `issue-N-short-slug`.
-3. Wait for the claim coordinator to assign you and change the label to `status:in-progress`.
-4. Create the branch in your fork, commit with `git commit -s`, and open a pull request against `main`.
+A facilitator records your ownership and changes the label to
+`status:in-progress`. You can then create the branch in your fork. You do not
+need label or assignment permissions. Follow the
+[claim guide](../../CONTRIBFEST.md#2-claim-one-issue) for sign-off and review.
 
-The full process is in [CONTRIBFEST.md](../../CONTRIBFEST.md#2-claim-one-issue).
-The [ContribFest milestone](https://github.com/cadence-workflow/cadence-ai-samples/milestone/2)
-has the current list.
+### Recipe tasks
+
+Browse the [full attendee issue pool in Get started](README.md#issue-pool).
+It lists the prepared tasks for every recipe and links to each Issue's
+requirements. Check the approved tasks above for current availability before
+requesting a claim.
 
 ## Extend the exercise
 
