@@ -26,7 +26,7 @@ body:
     id: problem
     attributes:
       label: Problem and business scenario
-      description: Describe the user, durable process, inputs, and useful outcome.
+      description: Who uses this agent, what does it produce, and what should they see when it works? Name the inputs and one failure it should recover from.
     validations:
       required: true
   - type: input
@@ -70,7 +70,7 @@ body:
     id: scope
     attributes:
       label: Scope and non-goals
-      description: State what belongs in the first useful slice and what does not.
+      description: Choose one useful result and one recovery behavior for the first version. State what is outside that scope.
     validations:
       required: true
   - type: textarea
@@ -91,7 +91,7 @@ body:
     id: acceptance
     attributes:
       label: Acceptance criteria
-      description: Provide observable completion and validation criteria.
+      description: Describe the starting behavior, controlled failure and visible recovery. State what Cadence preserves and what your application must handle.
       placeholder: |
         - [ ] ...
         - [ ] ...

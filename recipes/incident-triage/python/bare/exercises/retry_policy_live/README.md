@@ -50,6 +50,10 @@ fallback.
 
 ## 2. Fix the retry policy
 
+**Predict the result:** the dependency graph lookup succeeds, then the gateway
+log lookup fails once. Which call should run again, and which completed result
+should the investigation keep?
+
 ```shell
 .venv/bin/python exercises/retry_policy_live/run_exercise.py --scenario rate-limit
 ```
@@ -81,6 +85,11 @@ the dependency graph ran once, and the model reached review. `missing-resource`
 passes when a 404 stops after `(0, 404)` with no planning. Three 404 attempts
 mean the permanent error is being retried.
 
+**Explain your change:** compare the two outcomes in history. A retry policy
+can recover a temporary failure; it cannot repair an invalid request. Use this
+pattern when your own agent calls a fallible API, without repeating unrelated
+completed work.
+
 ## 3. See the repeated-call guard
 
 ```shell
@@ -111,6 +120,27 @@ The runner sends two Signals and prints what each one changed:
 The Workflow code defines both. In [`workflow.py`](../../workflow.py), the
 `AWAITING_GUIDANCE` loop calls the revise Activity with the existing hops.
 Guidance clears `calls` and `hops` and runs `run_agent` again.
+
+## What to take into your own agent
+
+Choose one model or tool call that can fail. Give it an Activity boundary,
+define which failures deserve another attempt and decide when to stop. Then
+cause that failure and inspect the attempts. If the call writes externally,
+make repeated writes safe in the application too.
+
+For human review, distinguish asking for a better explanation from asking for
+more evidence. In this exercise, `revise` and `guidance` make that distinction
+visible in lookup counts. Cadence delivers the Signals; the Workflow defines
+their meaning.
+
+## Resources
+
+- [Activities](https://cadenceworkflow.io/docs/concepts/activities/): identify
+  the boundary between coordinating work and making an external call.
+- [Python retry policies](https://cadenceworkflow.io/docs/python-client/retries/):
+  compare bounded attempts with errors another attempt cannot fix.
+- [Signals](https://cadenceworkflow.io/docs/python-client/signals/): connect
+  human input to the Workflow's existing review states.
 
 ## Choose a model
 

@@ -13,7 +13,9 @@
    ContribFest Issue. Both are in [Find something to work on](shortlist.md).
    Comment on the Issue you want to take and wait for a facilitator to record
    your ownership before starting. Maintainers move between tables.
-4. **Share and hand off.** Show what you got working. Open a pull request or
-   write down the next step.
+4. **Share and hand off.** Show the before-and-after result: what did the
+   agent do, what did your contribution change and where would you use it?
+   For a test task, show the behavior it now protects. Open a draft pull
+   request or record the next step on the issue.
 
 [Set up your laptop](setup.md) · [Find something to work on](shortlist.md)
