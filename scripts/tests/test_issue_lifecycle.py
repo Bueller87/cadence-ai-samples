@@ -78,6 +78,8 @@ class FakeGitHub:
         self.events: dict[int, list[IssueEvent]] = {}
         self.calls: list[tuple] = []
         self.guard_ops: list[tuple[str, str]] = []
+        self.op_log: list[tuple[str, str, str]] = []
+        self.op_owner = "direct"
         self.events_error = False
         self.after_guard_mutation: Callable[[FakeGitHub, int], None] | None = None
         self._next_id = 100
@@ -95,7 +97,8 @@ class FakeGitHub:
 
     def _event(self, number, kind, label, actor, at=LATER):
         self._next_id += 1
-        self.events[number].append(IssueEvent(self._next_id, kind, label, actor, at))
+        actor_type = "Bot" if actor == GUARD_ACTOR else "User"
+        self.events[number].append(IssueEvent(self._next_id, kind, label, actor, at, actor_type))
 
     def change(self, number, label, add, actor) -> bool:
         labels = self.issues[number]["labels"]
@@ -152,6 +155,7 @@ class FakeGitHub:
         self.calls.append((operation, number, label))
         if self.change(number, label, add, GUARD_ACTOR):
             self.guard_ops.append((label, operation))
+            self.op_log.append((self.op_owner, label, operation))
         if self.after_guard_mutation is not None:
             self.after_guard_mutation(self, number)
 
@@ -262,7 +266,7 @@ class GuardStateTests(unittest.TestCase):
         self.assertEqual("unchanged", second.result.outcome)
         self.assertEqual((IN_PROGRESS,), fake.lifecycle())
 
-    def test_concurrent_human_label_during_repair_defers_to_the_newer_event(self):
+    def test_run_that_mutated_reanchors_to_a_newer_human_event(self):
         fake = issue([READY])
         fake.change(N, READY, False, "maint")
 
@@ -272,32 +276,66 @@ class GuardStateTests(unittest.TestCase):
 
         fake.after_guard_mutation = human_adds
         run = drive(fake, trigger("unlabeled", READY, "maint"))
-        self.assertEqual("superseded", run.result.outcome)
-        drive(fake, trigger("labeled", IN_PROGRESS, "claimant"))
+        self.assertEqual("repaired", run.result.outcome)
+        self.assertEqual(1, run.reanchors)
+        self.assertEqual(Trigger("labeled", IN_PROGRESS, "claimant", "User"), run.trigger)
         self.assertEqual((IN_PROGRESS,), fake.lifecycle())
+        late = drive(fake, trigger("labeled", IN_PROGRESS, "claimant"))
+        self.assertEqual("unchanged", late.result.outcome)
 
-    def test_concurrent_token_label_during_repair_retries_within_the_bound(self):
+    def test_guard_restores_an_automation_transition_it_removed(self):
+        fake = issue([IN_PROGRESS])
+        fake.change(N, READY, True, "claimant")
+        stale = GuardRun(fake, N, trigger("labeled", READY, "claimant"))
+        steps = stale.steps()
+        for step in steps:
+            if step == "add":
+                break
+        lifecycle.apply_transition(
+            fake, N, READY, authorization=lifecycle.authorize(fake, "maint", "User")
+        )
+        for _ in steps:
+            pass
+        self.assertEqual((READY,), fake.lifecycle())
+        self.assertIn((READY, "add"), fake.guard_ops[-3:])
+
+    def test_guard_never_adds_ready_without_an_automation_transition(self):
+        fake = issue([])
+        fake.change(N, READY, True, GUARD_ACTOR)
+        fake.change(N, READY, False, "maint")
+        run = drive(fake, trigger("unlabeled", READY, "maint"))
+        self.assertEqual((NEEDS_TRIAGE,), fake.lifecycle())
+        self.assertNotIn((READY, "add"), fake.guard_ops)
+        self.assertEqual("repaired", run.result.outcome)
+
+    def test_token_transition_during_repair_supersedes_the_stale_decision(self):
         fake = issue([READY])
         fake.change(N, READY, False, "maint")
 
-        def token_adds(github, number):
+        def token_claims(github, number):
             github.after_guard_mutation = None
             github.change(number, IN_PROGRESS, True, GUARD_ACTOR)
 
-        fake.after_guard_mutation = token_adds
+        fake.after_guard_mutation = token_claims
         run = drive(fake, trigger("unlabeled", READY, "maint"))
         self.assertEqual("repaired", run.result.outcome)
         self.assertEqual(2, run.attempts)
-        self.assertEqual((NEEDS_TRIAGE,), fake.lifecycle())
+        self.assertEqual((IN_PROGRESS,), fake.lifecycle())
+
+    def test_guard_repairs_never_count_as_automation_transitions(self):
+        fake = issue([])
+        drive(fake, trigger("opened", None, "author"))
+        guard_events = [e for e in fake.events[N] if e.actor == GUARD_ACTOR]
+        self.assertTrue(guard_events)
+        self.assertFalse(any(lifecycle.is_automation_transition(e) for e in guard_events))
 
     def test_retries_stop_at_the_bound_and_report_failure(self):
         fake = issue([])
 
-        def keeps_adding(github, number):
-            for label in (READY, IN_PROGRESS):
-                github.change(number, label, True, GUARD_ACTOR)
+        def keeps_removing(github, number):
+            github.change(number, NEEDS_TRIAGE, False, GUARD_ACTOR)
 
-        fake.after_guard_mutation = keeps_adding
+        fake.after_guard_mutation = keeps_removing
         run = drive(fake, trigger("opened", None, "author"))
         self.assertEqual("failed", run.result.outcome)
         self.assertEqual(lifecycle.MAX_ATTEMPTS, run.attempts)
@@ -501,6 +539,20 @@ class SharedTransitionTests(unittest.TestCase):
         lifecycle.apply_transition(fake, N, READY, authorization=granted)
         self.assertEqual((READY,), fake.lifecycle())
 
+    def test_transition_always_records_a_labeled_event_for_its_target(self):
+        for labels in ([READY], [READY, IN_PROGRESS], [IN_PROGRESS]):
+            with self.subTest(labels=labels):
+                fake = issue(labels)
+                lifecycle.apply_transition(fake, N, IN_PROGRESS)
+                self.assertEqual((IN_PROGRESS,), fake.lifecycle())
+                self.assertTrue(
+                    any(lifecycle.is_automation_transition(e) for e in fake.events[N])
+                )
+
+    def test_needs_triage_is_not_an_automation_target(self):
+        with self.assertRaises(ValueError):
+            lifecycle.apply_transition(issue([]), N, NEEDS_TRIAGE)
+
     def test_transition_failure_is_bounded(self):
         fake = issue([READY])
         fake.after_guard_mutation = lambda github, number: github.change(
@@ -508,7 +560,7 @@ class SharedTransitionTests(unittest.TestCase):
         )
         with self.assertRaises(lifecycle.TransitionFailed):
             lifecycle.apply_transition(fake, N, IN_PROGRESS)
-        self.assertLessEqual(len(fake.mutation_calls()), 2 * lifecycle.MAX_ATTEMPTS)
+        self.assertLessEqual(len(fake.mutation_calls()), 3 * lifecycle.MAX_ATTEMPTS)
 
 
 class OrderingFailureTests(unittest.TestCase):
@@ -541,10 +593,9 @@ class OrderingFailureTests(unittest.TestCase):
         self.assertEqual("repaired", run.result.outcome)
 
 
-# Deterministic interleaving. One scheduling step is a human action, the #63
-# helper's transition, or one guard step. A guard `transition` step is atomic:
-# the documented assumption is that its re-check and mutation finish well
-# inside another delivery's grace period.
+# Deterministic interleaving. One scheduling step is a human action or exactly
+# one GitHub API call by a guard run or a shared-helper transition, including
+# each individual label add and remove.
 
 
 class ScriptProcess:
@@ -559,12 +610,17 @@ class ScriptProcess:
         self.actions.pop(0)(race)
 
 
-class RunProcess:
-    def __init__(self, run):
-        self.run = run
-        self.steps = run.steps()
+class StepProcess:
+    """Advance a guard run or helper transition by one GitHub API call per step."""
+
+    def __init__(self, steppable):
+        self.steppable = steppable
+        self.steps = steppable.steps()
         self.done = False
-        next(self.steps)
+        try:
+            next(self.steps)
+        except StopIteration:
+            self.done = True
 
     def step(self, race):
         try:
@@ -578,6 +634,7 @@ class Race:
         self.fake = fake
         self.processes = {name: ScriptProcess(actions) for name, actions in scripts.items()}
         self.runs: dict[str, GuardRun] = {}
+        self.transitions: dict[str, lifecycle.TransitionRun] = {}
         self.deliveries: list[Trigger] = []
 
     def deliver(self, trig, copies=1):
@@ -586,13 +643,21 @@ class Race:
             self.deliveries.append(trig)
             run = GuardRun(self.fake, N, trig)
             self.runs[name] = run
-            self.processes[name] = RunProcess(run)
+            self.processes[name] = StepProcess(run)
+
+    def start_transition(self, target, authorization=None):
+        name = f"helper{len(self.transitions)}"
+        transition = lifecycle.TransitionRun(self.fake, N, target, authorization=authorization)
+        self.transitions[name] = transition
+        self.processes[name] = StepProcess(transition)
 
     def ready(self):
         return sorted(name for name, process in self.processes.items() if not process.done)
 
     def step(self, name):
+        self.fake.op_owner = name
         self.processes[name].step(self)
+        self.fake.op_owner = "direct"
 
 
 def add(label, actor, *, sender_type="User", copies=1):
@@ -618,9 +683,12 @@ def redeliver(index):
     return action
 
 
-def token_transition(target):
+def token_transition(target, authorized_by=None):
     def action(race):
-        lifecycle.apply_transition(race.fake, N, target)
+        authorization = None
+        if authorized_by is not None:
+            authorization = lifecycle.authorize(race.fake, authorized_by, "User")
+        race.start_transition(target, authorization)
 
     return action
 
@@ -692,18 +760,33 @@ def oscillates(operations):
     return False
 
 
+def owner_oscillates(op_log):
+    for owner in {owner for owner, _, _ in op_log}:
+        if oscillates([(label, op) for name, label, op in op_log if name == owner]):
+            return True
+    return False
+
+
+def guard_changes(race):
+    return [entry for entry in race.fake.op_log if entry[0].startswith("run")]
+
+
 class InterleavingTests(unittest.TestCase):
     def assert_converged(self, races, expected: Callable[[Race], str], *, max_guard_changes):
         self.assertTrue(races)
         for race in races:
             want = expected(race)
-            self.assertEqual((want,), race.fake.lifecycle())
+            self.assertEqual((want,), race.fake.lifecycle(), race.fake.op_log)
             for run in race.runs.values():
                 self.assertIsNotNone(run.result)
                 self.assertNotEqual("failed", run.result.outcome)
                 self.assertLessEqual(run.attempts, lifecycle.MAX_ATTEMPTS)
-            self.assertLessEqual(len(race.fake.guard_ops), max_guard_changes)
-            self.assertFalse(oscillates(race.fake.guard_ops), race.fake.guard_ops)
+            for transition in race.transitions.values():
+                self.assertFalse(transition.failed)
+                self.assertTrue(transition.recorded)
+                self.assertLessEqual(transition.attempts, lifecycle.MAX_ATTEMPTS)
+            self.assertLessEqual(len(guard_changes(race)), max_guard_changes, race.fake.op_log)
+            self.assertFalse(owner_oscillates(race.fake.op_log), race.fake.op_log)
             changes = len(race.fake.guard_ops)
             for trig in race.deliveries:
                 drive(race.fake, trig)
@@ -793,6 +876,32 @@ class InterleavingTests(unittest.TestCase):
             return race
 
         self.assert_converged(all_schedules(build), lambda race: IN_PROGRESS, max_guard_changes=2)
+
+    def test_token_claim_supersedes_an_in_flight_rejection(self):
+        def build():
+            fake = issue([NEEDS_TRIAGE])
+            return Race(
+                fake, {"human": [add(READY, "triager"), token_transition(IN_PROGRESS)]}
+            )
+
+        self.assert_converged(all_schedules(build), lambda race: IN_PROGRESS, max_guard_changes=6)
+
+    def test_token_claim_supersedes_a_maintainer_ready_run(self):
+        def build():
+            fake = issue([NEEDS_TRIAGE])
+            return Race(fake, {"human": [add(READY, "maint"), token_transition(IN_PROGRESS)]})
+
+        self.assert_converged(all_schedules(build), lambda race: IN_PROGRESS, max_guard_changes=6)
+
+    def test_authorized_release_supersedes_a_stale_rejection(self):
+        def build():
+            fake = issue([IN_PROGRESS])
+            return Race(
+                fake,
+                {"human": [add(READY, "claimant"), token_transition(READY, authorized_by="maint")]},
+            )
+
+        self.assert_converged(all_schedules(build), lambda race: READY, max_guard_changes=6)
 
     def test_ordering_lookup_failure_mid_race_never_keeps_ready(self):
         def build():
@@ -915,6 +1024,16 @@ class AuditAndClientTests(unittest.TestCase):
             self.assertIn(method, {"GET", "POST", "DELETE"})
             if method != "GET":
                 self.assertIn(f"/issues/{N}/labels", url)
+
+    def test_client_reads_the_event_actor_type(self):
+        events = [
+            {"id": 1, "event": "labeled", "label": {"name": READY},
+             "actor": {"login": "maint", "type": "User"}, "created_at": BASE},
+            {"id": 2, "event": "labeled", "label": {"name": IN_PROGRESS},
+             "actor": {"login": GUARD_ACTOR, "type": "Bot"}, "created_at": LATER},
+        ]
+        client = lifecycle.GitHubClient("owner/repo", FakeTransport(events=events))
+        self.assertEqual(["User", "Bot"], [e.actor_type for e in client.list_issue_events(N)])
 
     def test_client_rejects_malformed_payloads_and_repositories(self):
         with self.assertRaises(ValueError):

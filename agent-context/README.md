@@ -168,12 +168,19 @@ reopened, labeled, or unlabeled Issue event, then re-reads the Issue:
 - `status:ready` set, kept on opening, or kept on reopening by anyone without
   effective admin or maintain permission, or by a bot, becomes
   `status:needs-triage`;
-- the guard never promotes an Issue to `status:ready` and posts no comments.
-  Its decision appears in the Issue timeline and the workflow job summary.
+- the guard never promotes an Issue to `status:ready` on its own and posts no
+  comments. Its decision appears in the Issue timeline and the workflow job
+  summary.
 
 Automation that changes lifecycle labels must use `apply_transition` in
-[scripts/issue_lifecycle.py](../scripts/issue_lifecycle.py). A transition to
-`status:ready` requires an authorization from `authorize()`.
+[scripts/issue_lifecycle.py](../scripts/issue_lifecycle.py). It moves an Issue
+only to `status:ready` or `status:in-progress`, and a transition to
+`status:ready` requires an authorization from `authorize()`. Every transition
+records a `github-actions[bot]` labeled event for its target, which supersedes
+any older guard decision: the guard keeps that target, and restores it if a
+stale guard step removed it. A guard run that already changed labels and then
+finds a newer human lifecycle event re-decides for that event instead of
+stopping.
 
 To stop the guard during an incident, the repository owner disables it and
 records the reason in an Issue; the manual lifecycle above still applies:

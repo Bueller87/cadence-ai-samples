@@ -25,10 +25,12 @@ NEEDS_TRIAGE = "status:needs-triage"
 READY = "status:ready"
 IN_PROGRESS = "status:in-progress"
 LIFECYCLE_LABELS = (NEEDS_TRIAGE, READY, IN_PROGRESS)
+AUTOMATION_TARGETS = (READY, IN_PROGRESS)
 DEPRECATED_STATUS_LABELS = frozenset({"status:blocked"})
 
 GUARD_ACTOR = "github-actions[bot]"
 MAX_ATTEMPTS = 3
+MAX_REANCHORS = 10
 DEFAULT_GRACE_SECONDS = 30
 DEFAULT_SETTLE_SECONDS = 5
 CREATION_WINDOW = timedelta(seconds=10)
@@ -70,6 +72,7 @@ class IssueEvent:
     label: str | None
     actor: str | None
     created_at: str
+    actor_type: str = "User"
 
 
 @dataclass(frozen=True)
@@ -101,6 +104,8 @@ class Decision:
 class Ordering:
     ordered: bool
     superseded: bool
+    adopt: str | None = None
+    newest: IssueEvent | None = None
 
 
 _GRANT = object()
@@ -227,13 +232,67 @@ def _require_authorization(target: str, authorization: Authorization | None) -> 
         raise UnauthorizedTransition("a transition to status:ready requires maintainer authorization")
 
 
-def _apply_plan(client: LifecycleClient, number: int, labels: Sequence[str], target: str) -> bool:
-    add, remove = plan_transition(labels, target)
-    for label in add:
-        client.add_label(number, label)
-    for label in remove:
-        client.remove_label(number, label)
-    return bool(add or remove)
+class TransitionRun:
+    """One shared-helper transition, split into steps that yield before each GitHub call.
+
+    The first round always records a `labeled` event for the target, re-adding
+    it when it is already present, so guard runs can see that this transition
+    is newer than their own decision.
+    """
+
+    def __init__(
+        self,
+        client: LifecycleClient,
+        number: int,
+        target: str,
+        *,
+        authorization: Authorization | None = None,
+        max_attempts: int = MAX_ATTEMPTS,
+    ):
+        if target not in AUTOMATION_TARGETS:
+            raise ValueError(f"automation may transition only to {', '.join(AUTOMATION_TARGETS)}")
+        _require_authorization(target, authorization)
+        self.client = client
+        self.number = number
+        self.target = target
+        self.max_attempts = max_attempts
+        self.attempts = 0
+        self.recorded = False
+        self.failed = False
+
+    def _operations(self, labels: Sequence[str]) -> list[tuple[str, str]]:
+        operations: list[tuple[str, str]] = []
+        if not self.recorded:
+            if self.target in labels:
+                operations.append(("remove", self.target))
+            operations.append(("add", self.target))
+        elif self.target not in labels:
+            operations.append(("add", self.target))
+        operations.extend(
+            ("remove", label)
+            for label in LIFECYCLE_LABELS
+            if label != self.target and label in labels
+        )
+        return operations
+
+    def steps(self) -> Iterator[str]:
+        while True:
+            yield "fetch"
+            labels = self.client.get_issue(self.number).labels
+            if self.recorded and classify(labels).lifecycle == (self.target,):
+                return
+            if self.attempts >= self.max_attempts:
+                self.failed = True
+                return
+            self.attempts += 1
+            for operation, label in self._operations(labels):
+                yield operation
+                if operation == "add":
+                    self.client.add_label(self.number, label)
+                    if label == self.target:
+                        self.recorded = True
+                else:
+                    self.client.remove_label(self.number, label)
 
 
 def apply_transition(
@@ -244,21 +303,39 @@ def apply_transition(
     authorization: Authorization | None = None,
     max_attempts: int = MAX_ATTEMPTS,
 ) -> int:
-    """Leave `target` as the only lifecycle label and return the attempts used.
+    """Leave `target` as the only lifecycle label and return the mutation rounds used.
 
-    A transition to status:ready requires an Authorization granted by
-    `authorize()`. Every attempt re-fetches the Issue before mutating it.
+    Automation may target status:in-progress, or status:ready with an
+    Authorization granted by `authorize()`. Every round re-fetches the Issue.
     """
-    _require_authorization(target, authorization)
-    for attempt in range(1, max_attempts + 1):
-        _apply_plan(client, number, client.get_issue(number).labels, target)
-        if classify(client.get_issue(number).labels).lifecycle == (target,):
-            return attempt
-    raise TransitionFailed(f"Issue #{number} did not settle on {target} after {max_attempts} attempts")
+    run = TransitionRun(
+        client, number, target, authorization=authorization, max_attempts=max_attempts
+    )
+    for _ in run.steps():
+        pass
+    if run.failed:
+        raise TransitionFailed(
+            f"Issue #{number} did not settle on {target} after {max_attempts} attempts"
+        )
+    return run.attempts
 
 
 def _parse_time(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def is_automation_transition(event: IssueEvent) -> bool:
+    """Return whether an event is a shared-helper transition rather than a guard repair.
+
+    Apart from status:needs-triage, the guard only re-adds the label of the
+    newest such event, so every github-actions[bot] addition of status:ready or
+    status:in-progress traces back to an `apply_transition` call.
+    """
+    return (
+        event.actor == GUARD_ACTOR
+        and event.event == "labeled"
+        and event.label in AUTOMATION_TARGETS
+    )
 
 
 def is_ordering_event(event: IssueEvent) -> bool:
@@ -306,8 +383,27 @@ def check_ordering(client: LifecycleClient, state: IssueState, trigger: Trigger)
     anchor = find_anchor(state, events, trigger)
     if anchor is None:
         return Ordering(ordered=False, superseded=False)
-    superseded = any(is_ordering_event(event) and event.id > anchor for event in events)
-    return Ordering(ordered=True, superseded=superseded)
+    newer = [
+        event
+        for event in events
+        if event.id > anchor and (is_ordering_event(event) or is_automation_transition(event))
+    ]
+    if not newer:
+        return Ordering(ordered=True, superseded=False)
+    newest = max(newer, key=lambda event: event.id)
+    if is_automation_transition(newest):
+        return Ordering(ordered=True, superseded=False, adopt=newest.label)
+    return Ordering(ordered=True, superseded=True, newest=newest)
+
+
+def trigger_from_event(event: IssueEvent) -> Trigger:
+    """Rebuild the delivery trigger for a newer human lifecycle event."""
+    return Trigger(
+        action=event.event,
+        label=event.label if event.event in {"labeled", "unlabeled"} else None,
+        sender=event.actor or "",
+        sender_type=event.actor_type,
+    )
 
 
 @dataclass
@@ -319,12 +415,10 @@ class GuardResult:
 
 
 class GuardRun:
-    """One guard delivery, split into steps that yield before each GitHub exchange.
+    """One guard delivery, split into steps that yield before each GitHub call.
 
-    `run_guard` drains the steps in order. Tests interleave several runs
-    step by step against one shared Issue to reproduce races exactly.
-    A `transition` step re-fetches, re-checks ordering, re-decides, and
-    mutates as one step.
+    `run_guard` drains the steps in order. Tests interleave several runs and
+    shared-helper transitions call by call against one Issue.
     """
 
     def __init__(
@@ -341,6 +435,7 @@ class GuardRun:
         self.max_attempts = max_attempts
         self.authorization: Authorization | None = None
         self.attempts = 0
+        self.reanchors = 0
         self.mutated = False
         self.result: GuardResult | None = None
 
@@ -349,60 +444,70 @@ class GuardRun:
         return self.result
 
     def _decide(self, state: IssueState, ordering: Ordering) -> Decision:
-        if is_readiness_bearing(self.trigger, state.labels) and self.authorization is None:
-            self.authorization = authorize(self.client, self.trigger.sender, self.trigger.sender_type)
+        if ordering.adopt is not None:
+            lifecycle = classify(state.labels).lifecycle
+            return _toward(lifecycle, ordering.adopt, f"a newer automation transition set {ordering.adopt}")
         return decide_repair(state, self.trigger, self.authorization, ordered=ordering.ordered)
 
-    def _apply(self, labels: Sequence[str], target: str) -> None:
-        if target == READY:
-            _require_authorization(target, self.authorization)
-        add, _ = plan_transition(labels, target)
-        if READY in add:
-            raise UnauthorizedTransition("the guard never adds status:ready")
-        if _apply_plan(self.client, self.number, labels, target):
-            self.mutated = True
+    def _settled(self) -> str:
+        return "repaired" if self.mutated else "unchanged"
 
     def steps(self) -> Iterator[str]:
-        yield "fetch"
-        state = self.client.get_issue(self.number)
-        if not state.open or state.is_pull_request:
-            self._finish("unchanged", "closed Issue or pull request", state)
-            return
-        yield "order"
-        ordering = check_ordering(self.client, state, self.trigger)
-        if ordering.superseded:
-            self._finish("superseded", "a newer lifecycle event owns the decision", state)
-            return
-        if is_readiness_bearing(self.trigger, state.labels):
-            yield "permission"
-        decision = self._decide(state, ordering)
-        if decision.target is None:
-            self._finish("unchanged", decision.reason, state)
-            return
-        while self.attempts < self.max_attempts:
-            yield "transition"
+        while True:
+            yield "settle" if self.attempts else "fetch"
             state = self.client.get_issue(self.number)
+            if not state.open or state.is_pull_request:
+                self._finish(self._settled(), "closed Issue or pull request", state)
+                return
+            yield "events"
             ordering = check_ordering(self.client, state, self.trigger)
             if ordering.superseded:
-                self._finish("superseded", "a newer lifecycle event owns the decision", state)
-                return
+                if not self.mutated or ordering.newest is None:
+                    self._finish(
+                        "superseded", "a newer human lifecycle event owns the decision", state
+                    )
+                    return
+                if self.reanchors >= MAX_REANCHORS:
+                    self._finish("failed", "newer lifecycle events kept superseding this run", state)
+                    return
+                self.reanchors += 1
+                self.trigger = trigger_from_event(ordering.newest)
+                self.authorization = None
+                continue
+            if (
+                ordering.adopt is None
+                and self.authorization is None
+                and is_readiness_bearing(self.trigger, state.labels)
+            ):
+                yield "permission"
+                self.authorization = authorize(
+                    self.client, self.trigger.sender, self.trigger.sender_type
+                )
             decision = self._decide(state, ordering)
             if decision.target is None:
-                self._finish("repaired" if self.mutated else "unchanged", decision.reason, state)
+                self._finish(self._settled(), decision.reason, state)
                 return
+            if self.attempts >= self.max_attempts:
+                self._finish(
+                    "failed", f"state did not settle after {self.max_attempts} attempts", state
+                )
+                return
+            add, remove = plan_transition(state.labels, decision.target)
+            if any(label not in (NEEDS_TRIAGE, ordering.adopt) for label in add):
+                raise UnauthorizedTransition(
+                    "the guard only adds status:needs-triage or restores the newest automation transition"
+                )
+            if decision.target == READY and ordering.adopt != READY:
+                _require_authorization(READY, self.authorization)
             self.attempts += 1
-            self._apply(state.labels, decision.target)
-            yield "settle"
-            state = self.client.get_issue(self.number)
-            ordering = check_ordering(self.client, state, self.trigger)
-            if ordering.superseded:
-                self._finish("superseded", "a newer lifecycle event owns the decision", state)
-                return
-            decision = self._decide(state, ordering)
-            if decision.target is None:
-                self._finish("repaired" if self.mutated else "unchanged", decision.reason, state)
-                return
-        self._finish("failed", f"state did not settle after {self.max_attempts} attempts", state)
+            for label in add:
+                yield "add"
+                self.client.add_label(self.number, label)
+                self.mutated = True
+            for label in remove:
+                yield "remove"
+                self.client.remove_label(self.number, label)
+                self.mutated = True
 
 
 def run_guard(
@@ -503,6 +608,7 @@ def _issue_event(payload: Any) -> IssueEvent:
             label=(payload.get("label") or {}).get("name"),
             actor=(payload.get("actor") or {}).get("login"),
             created_at=str(payload["created_at"]),
+            actor_type=str((payload.get("actor") or {}).get("type") or ""),
         )
     except (KeyError, TypeError, ValueError, AttributeError) as error:
         raise GitHubError(200, f"malformed Issue event payload: {error}") from error
