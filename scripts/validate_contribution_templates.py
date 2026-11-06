@@ -3,11 +3,12 @@
 
 from __future__ import annotations
 
+import argparse
 import re
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
-
-import yaml
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -18,12 +19,18 @@ APPROVAL_CONTRACT = (
     "I understand that only a human maintainer may label this proposal "
     "`status:ready` before implementation."
 )
+LIFECYCLE_INVARIANT = (
+    "Every open Issue has exactly one lifecycle label: "
+    "`status:needs-triage`, `status:ready`, or `status:in-progress`."
+)
 
 EXPECTED_GOVERNANCE_BLOCK = """<!-- shared-governance-gates:start -->
 ## Required governance gates
 
 - [ ] The PR implements one approved Issue and stays within its scope.
 - [ ] The linked Issue was claimed and remains `status:in-progress`.
+- [ ] The linked open Issue has exactly one lifecycle label:
+      `status:needs-triage`, `status:ready`, or `status:in-progress`.
 - [ ] Tests and documentation match the changed behavior.
 - [ ] No credentials, proprietary data, or unrelated changes are included.
 - [ ] Commits include DCO sign-off (`git commit -s`).
@@ -45,6 +52,8 @@ MANDATORY_GOVERNANCE_GATES = {
     "approved-linked-issue": (
         "The PR implements one approved Issue and stays within its scope.",
         "The linked Issue was claimed and remains `status:in-progress`.",
+        "The linked open Issue has exactly one lifecycle label:\n"
+        "      `status:needs-triage`, `status:ready`, or `status:in-progress`.",
     ),
     "dco-signoff": ("Commits include DCO sign-off (`git commit -s`).",),
     "required-ci": (
@@ -112,6 +121,16 @@ DOCS = (
     "CONTRIBUTING.md",
     "agent-context/README.md",
 )
+LIFECYCLE_DOCS = DOCS + (
+    "CONTRIBFEST.md",
+    "contribfest/kubecon-na-2026/shortlist.md",
+)
+LIFECYCLE_FORMS = (
+    ".github/ISSUE_TEMPLATE/work-proposal.yml",
+    ".github/ISSUE_TEMPLATE/human-first-proposal.yml",
+    ".github/ISSUE_TEMPLATE/agent-first-proposal.yml",
+    ".github/ISSUE_TEMPLATE/recipe-proposal.yml",
+)
 
 
 class ValidationError(ValueError):
@@ -119,7 +138,10 @@ class ValidationError(ValueError):
 
 
 def _read(path: Path) -> str:
-    return path.read_text(encoding="utf-8")
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as error:
+        raise ValidationError(f"Cannot read Markdown or template file {path}: {error}") from error
 
 
 def extract_governance_block(text: str) -> str:
@@ -148,6 +170,10 @@ def validate_pr_templates(root: Path = ROOT) -> None:
 
 
 def _load_form(path: Path) -> dict[str, Any]:
+    try:
+        import yaml
+    except ModuleNotFoundError as error:
+        raise ValidationError("PyYAML is required for contribution-template validation") from error
     try:
         loaded = yaml.safe_load(_read(path))
     except yaml.YAMLError as error:
@@ -306,23 +332,67 @@ def _heading_anchors(text: str) -> set[str]:
     return anchors
 
 
-def validate_markdown_links(root: Path = ROOT) -> None:
+def _explicit_html_anchors(text: str) -> set[str]:
+    return set(
+        re.findall(r'^\s*<a id="([A-Za-z][A-Za-z0-9_-]{0,127})"></a>\s*$', text, re.MULTILINE)
+    )
+
+
+def _anchors(text: str) -> set[str]:
+    return _heading_anchors(text) | _explicit_html_anchors(text)
+
+
+def _local_link_findings(source: Path, relative: str) -> list[str]:
+    findings: list[str] = []
     link_pattern = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
+    text = _read(source)
+    for target in link_pattern.findall(text):
+        if target.startswith(("http://", "https://", "mailto:")):
+            continue
+        path_part, separator, anchor = target.partition("#")
+        destination = source if not path_part else (source.parent / path_part).resolve()
+        if not destination.exists():
+            findings.append(f"{relative} links to missing path {path_part!r}")
+        elif separator and destination.is_file() and anchor not in _anchors(_read(destination)):
+            findings.append(
+                f"{relative} links to missing anchor {anchor!r} in {path_part or relative}"
+            )
+    return findings
+
+
+def validate_markdown_links(root: Path = ROOT) -> None:
     for relative in DOCS:
         source = root / relative
-        text = _read(source)
-        for target in link_pattern.findall(text):
-            if target.startswith(("http://", "https://", "mailto:")):
-                continue
-            path_part, separator, anchor = target.partition("#")
-            destination = source if not path_part else (source.parent / path_part).resolve()
-            if not destination.exists():
-                raise ValidationError(f"{relative} links to missing path {path_part!r}")
-            if separator and destination.is_file():
-                if anchor not in _heading_anchors(_read(destination)):
-                    raise ValidationError(
-                        f"{relative} links to missing anchor {anchor!r} in {path_part or relative}"
-                    )
+        findings = _local_link_findings(source, relative)
+        if findings:
+            raise ValidationError(findings[0])
+
+
+def tracked_markdown_paths(root: Path = ROOT) -> list[Path]:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "-z", "--", "*.md"],
+            check=True,
+            capture_output=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise ValidationError(f"Cannot enumerate tracked Markdown files: {error}") from error
+    try:
+        paths = result.stdout.decode("utf-8").split("\0")
+    except UnicodeDecodeError as error:
+        raise ValidationError(f"Cannot decode tracked Markdown paths: {error}") from error
+    return [root / path for path in paths if path]
+
+
+def report_markdown_links(root: Path = ROOT) -> list[str]:
+    findings: list[str] = []
+    for source in tracked_markdown_paths(root):
+        findings.extend(_local_link_findings(source, str(source.relative_to(root))))
+    for finding in findings:
+        print(f"REPORT: {finding}")
+    if not findings:
+        print("Markdown link and anchor report: no findings.")
+    return findings
 
 
 def validate_documentation(root: Path = ROOT) -> None:
@@ -342,6 +412,11 @@ def validate_documentation(root: Path = ROOT) -> None:
     for fragment in required_fragments:
         if fragment not in combined:
             raise ValidationError(f"documentation is missing {fragment!r}")
+    normalized_invariant = " ".join(LIFECYCLE_INVARIANT.split())
+    for relative in LIFECYCLE_DOCS + LIFECYCLE_FORMS:
+        text = " ".join(_read(root / relative).split())
+        if normalized_invariant not in text:
+            raise ValidationError(f"{relative} is missing the lifecycle invariant")
     validate_markdown_links(root)
 
 
@@ -351,9 +426,23 @@ def validate_repository(root: Path = ROOT) -> None:
     validate_documentation(root)
 
 
-def main() -> int:
-    validate_repository()
-    print("Contribution templates and guidance are valid.")
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--report-markdown-links",
+        action="store_true",
+        help="report local link and anchor findings across tracked Markdown without failing on them",
+    )
+    args = parser.parse_args(argv)
+    try:
+        if args.report_markdown_links:
+            report_markdown_links()
+        else:
+            validate_repository()
+            print("Contribution templates and guidance are valid.")
+    except ValidationError as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        return 2
     return 0
 
 

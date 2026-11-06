@@ -104,7 +104,10 @@ it with:
 git remote add upstream https://github.com/cadence-workflow/cadence-ai-samples.git
 ```
 
-An open Issue's lifecycle label tells you what you may do:
+Every open Issue has exactly one lifecycle label:
+`status:needs-triage`, `status:ready`, or `status:in-progress`. A lifecycle
+transition replaces the current label; it does not add another lifecycle state.
+The lifecycle label tells you what you may do:
 
 - `status:needs-triage` means proposed work. It is not claimable, so do not
   self-assign or implement it.
@@ -115,6 +118,17 @@ An open Issue's lifecycle label tells you what you may do:
 
 Assignment records ownership of approved work, not interest or priority. Only a
 human maintainer may promote a proposal to `status:ready`.
+
+Run the read-only audit when checking the upstream lifecycle state:
+
+```bash
+python3 scripts/audit_issue_lifecycle.py audit \
+  --repo cadence-workflow/cadence-ai-samples
+```
+
+It reports drift but never changes GitHub. If you do not have upstream label
+permission and find a lifecycle violation, report it to a maintainer; do not
+try to repair labels yourself.
 
 `format:human-first` and `format:agent-first` describe presentation, not
 eligibility or ownership. Either format may be claimed by a human or implemented
@@ -162,12 +176,12 @@ Maintainers and contributors with upstream label permission may instead use the
 path](agent-context/README.md#creating-a-proposal). An agent without that
 permission prepares the proposal for human form submission or requests
 maintainer assistance; it must not run the labeled command. Then wait for a
-human maintainer to add `status:ready`.
+human maintainer to replace `status:needs-triage` with `status:ready`.
 
 ### Claim approved work
 
 If you can update the upstream Issue, comment your intent with your GitHub
-username and proposed branch, replace `status:ready` with
+username and proposed branch, then replace `status:ready` with
 `status:in-progress`, and then create an `issue-N-short-slug` branch on your
 fork. The claim comment and `status:in-progress` together record your ownership.
 

@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import io
+import subprocess
 import sys
+import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 import yaml
 
@@ -123,6 +128,52 @@ class ContributionTemplateTests(unittest.TestCase):
         )
         self.assertIn("?expand=1&template=agent-first.md", contributing)
         self.assertIn("does not automatically display a template chooser", contributing)
+
+    def test_lifecycle_invariant_is_pinned_in_affected_guidance_and_forms(self):
+        expected = " ".join(contracts.LIFECYCLE_INVARIANT.split())
+        for relative in contracts.LIFECYCLE_DOCS + contracts.LIFECYCLE_FORMS:
+            with self.subTest(path=relative):
+                text = (ROOT / relative).read_text(encoding="utf-8")
+                self.assertIn(expected, " ".join(text.split()))
+
+    def test_explicit_html_anchor_resolves_in_report_only_audit(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "source.md").write_text(
+                "[named anchor](target.md#named-anchor)\n[missing anchor](target.md#missing)\n",
+                encoding="utf-8",
+            )
+            (root / "target.md").write_text(
+                '<a id="named-anchor"></a>\n\n# Target\n', encoding="utf-8"
+            )
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            subprocess.run(["git", "-C", str(root), "add", "*.md"], check=True)
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                findings = contracts.report_markdown_links(root)
+
+        self.assertEqual(1, len(findings))
+        self.assertIn("missing anchor 'missing'", findings[0])
+        self.assertIn("REPORT:", stdout.getvalue())
+
+    def test_report_mode_returns_operational_exit_for_tracked_path_decode_failure(self):
+        completed = subprocess.CompletedProcess(
+            args=["git"], returncode=0, stdout=b"\xff", stderr=b""
+        )
+        stderr = io.StringIO()
+        with patch.object(contracts.subprocess, "run", return_value=completed), redirect_stdout(
+            io.StringIO()
+        ), redirect_stderr(stderr):
+            status = contracts.main(["--report-markdown-links"])
+
+        self.assertEqual(2, status)
+        self.assertIn("ERROR: Cannot decode tracked Markdown paths", stderr.getvalue())
+
+    def test_file_read_failure_becomes_validation_error(self):
+        with patch.object(Path, "read_text", side_effect=OSError("permission denied")):
+            with self.assertRaisesRegex(contracts.ValidationError, "Cannot read Markdown"):
+                contracts._read(ROOT / "unreadable.md")
 
 
 if __name__ == "__main__":

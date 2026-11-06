@@ -39,6 +39,10 @@ this file remains authoritative. Human contributors start with the
 
 ## Issues and ownership
 
+- Every open Issue has exactly one lifecycle label:
+  `status:needs-triage`, `status:ready`, or `status:in-progress`.
+  Lifecycle transitions replace the current label; they never add a second
+  lifecycle state.
 - Agents may create new upstream Issues without separate approval only when the
   resulting Issue is labeled `status:needs-triage`. Follow the
   [permission-aware proposal path](agent-context/README.md#creating-a-proposal).
@@ -62,7 +66,7 @@ this file remains authoritative. Human contributors start with the
 - Any contributor may claim an unassigned `status:ready` Issue. Immediately
   before claiming, recheck its assignee, comments, labels, and active linked PRs.
 - Assignment records ownership of approved work, not interest or priority.
-- Claim in this order: comment intent, remove `status:ready`, add
+- Claim in this order: comment intent, replace `status:ready` with
   `status:in-progress`, then create the branch.
 - Contributors without upstream label or assignment permission must comment to
   request a claim, then wait. Do not create the branch or begin implementation
@@ -72,8 +76,8 @@ this file remains authoritative. Human contributors start with the
   linked PR or `status:in-progress`. Resume only the current contributor's
   matching claimed Issue and branch. Do not open competing implementation PRs
   without agreement.
-- If abandoning work, comment the reason and current state, remove
-  `status:in-progress`, and restore `status:ready`. Preserve or delete the
+- If abandoning work, comment the reason and current state, replace
+  `status:in-progress` with `status:ready`. Preserve or delete the
   branch only with human direction.
 - Keep `status:in-progress` through implementation and draft-PR handoff. Merge
   closes the Issue.

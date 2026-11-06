@@ -1,0 +1,38 @@
+{
+  "pages": [
+    [
+      {
+        "number": 1,
+        "title": "Ready work",
+        "html_url": "https://example.test/issues/1",
+        "labels": [{"name": "status:ready"}]
+      },
+      {
+        "number": 2,
+        "title": "A pull request",
+        "html_url": "https://example.test/pull/2",
+        "pull_request": {},
+        "labels": [{"name": "status:ready"}]
+      }
+    ],
+    [
+      {
+        "number": 3,
+        "title": "No lifecycle state",
+        "html_url": "https://example.test/issues/3",
+        "labels": [{"name": "type:tooling"}, {"name": "status:blocked"}]
+      },
+      {
+        "number": 4,
+        "title": "Contradictory lifecycle states",
+        "html_url": "https://example.test/issues/4",
+        "labels": [
+          {"name": "status:needs-triage"},
+          {"name": "status:ready"},
+          {"name": "status:legacy"}
+        ]
+      }
+    ],
+    []
+  ]
+}
