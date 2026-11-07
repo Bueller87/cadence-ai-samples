@@ -112,7 +112,8 @@ The lifecycle label tells you what you may do:
 - `status:needs-triage` means proposed work. It is not claimable, so do not
   self-assign or implement it.
 - `status:ready` means a maintainer approved the work. It is claimable only
-  when it has no assignee, claim comment, or active linked implementation PR.
+  when it has no assignee, confirmed ownership record, or active linked
+  implementation PR.
 - `status:in-progress` means the work is already claimed. Do not start a
   competing implementation.
 
@@ -180,21 +181,44 @@ human maintainer to replace `status:needs-triage` with `status:ready`.
 
 ### Claim approved work
 
-If you can update the upstream Issue, comment your intent with your GitHub
-username and proposed branch, then replace `status:ready` with
-`status:in-progress`, and then create an `issue-N-short-slug` branch on your
-fork. The claim comment and `status:in-progress` together record your ownership.
+On the open Issue, post a comment whose complete trimmed body is exactly:
 
-If you cannot change upstream labels or assignment, post this comment:
+```text
+/claim
+```
 
-> I would like to claim this approved Issue. Proposed branch:
-> `issue-N-short-slug`. I cannot change upstream labels or assignment.
-> Maintainer, please record me as the owner and change `status:ready` to
-> `status:in-progress`.
+The repository claim workflow considers every eligible `/claim` comment after
+the latest `status:ready` event. It selects the earliest comment by GitHub
+creation time and immutable comment ID, so Actions delivery order does not pick
+the winner. The winning immutable comment plus `status:in-progress` records
+durable ownership; assignment is not required. Workflow confirmation is
+retryable feedback and a missing confirmation does not undo a successful
+transition.
 
-Do not create the branch or begin implementation until the upstream Issue has
-`status:in-progress` and identifies you as the owner through either assignment
-or a maintainer comment confirming the claim.
+Do not create the `issue-N-short-slug` branch or begin implementation until
+that ownership record is visible. The workflow never creates branches,
+assignments, or a cross-Issue participation limit.
+
+If Actions is delayed, disabled, or cannot safely establish eligibility, ask a
+maintainer to recheck assignees, comments, labels, and active linked
+implementation PRs; record the owner; and replace `status:ready` with
+`status:in-progress`. This is the manual fallback. On abandonment, preserve
+the state, explain it in an Issue comment, and have a maintainer replace
+`status:in-progress` with `status:ready`. The new readiness event opens a new
+claim window; there is no `/release` command or automatic abandonment.
+
+With separate human authorization, immediately roll back an incident in this
+workflow by disabling only this workflow and returning to the manual path:
+
+```bash
+gh workflow disable issue-claim.yml --repo cadence-workflow/cadence-ai-samples
+```
+
+After the incident is resolved and the repository owner authorizes restoration:
+
+```bash
+gh workflow enable issue-claim.yml --repo cadence-workflow/cadence-ai-samples
+```
 
 ### Complete and hand off the work
 

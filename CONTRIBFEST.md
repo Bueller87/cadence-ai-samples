@@ -84,7 +84,7 @@ creating a duplicate.
 Session candidates live on this repository under the
 [ContribFest milestone](https://github.com/cadence-workflow/cadence-ai-samples/milestone/2)
 and the `event:contribfest` label. Open, unassigned Issues labeled
-`status:ready` are available to claim through the coordinator path below.
+`status:ready` are available to claim through the `/claim` path below.
 Recheck ownership and linked pull requests before claiming.
 
 Choose a difficulty that matches your experience and what you want to learn.
@@ -99,7 +99,7 @@ and separates the change's complexity from the tools and services it needs:
 
 Pick the task that fits you. Excited contributors should feel empowered to claim
 a stretch Issue; maintainers are in the room to help. Claim through the
-coordinator path below; do not open competing branches for the same Issue.
+`/claim` path below; do not open competing branches for the same Issue.
 
 ## Participant guide
 
@@ -145,20 +145,20 @@ replaces the prior lifecycle label rather than adding another one.
 
 Use the [first-time contributor
 path](CONTRIBUTING.md#first-time-contributor-path) and its [approved-work claim
-instructions](CONTRIBUTING.md#claim-approved-work). During the event, the claim
-coordinator applies that workflow:
+instructions](CONTRIBUTING.md#claim-approved-work). During the event:
 
 1. You choose an open, unassigned `status:ready` candidate.
-2. You post the documented claim request with your GitHub username and proposed
-   `issue-N-short-slug` branch.
-3. The coordinator rechecks assignees, comments, labels, and active linked pull
-   requests.
-4. The coordinator records ownership and replaces `status:ready` with
-   `status:in-progress`.
+2. You post an Issue comment whose trimmed body is exactly `/claim`.
+3. The workflow selects the earliest eligible request in the current readiness
+   window, regardless of Actions delivery order.
+4. The winning immutable comment plus `status:in-progress` records ownership.
 5. Only then do you create the branch on your fork and begin work.
 
-There is no informal event claim. If two people want the same Issue, wait for
-the coordinator's ownership record rather than creating competing branches.
+There is no informal event claim. If Actions is unavailable or fails closed, a
+facilitator follows the manual recheck-and-transition fallback in
+[`CONTRIBUTING.md`](CONTRIBUTING.md#claim-approved-work). There is no `/release`
+command; abandonment remains manual and starts a new claim window only when a
+maintainer returns the Issue to `status:ready`.
 
 ### 3. Plan, work, and validate
 
@@ -209,9 +209,8 @@ the normal abandonment workflow only after preserving the current state.
   staff. Do not paste credentials.
 - **Setup is taking too long:** Ask a helper. You can pair on a working laptop
   or choose work with fewer local requirements.
-- **You cannot claim an Issue:** Post the documented claim request and ask event
-  staff to record ownership and replace the lifecycle label. Do not repair
-  lifecycle labels yourself.
+- **Your `/claim` request is not processed:** Ask event staff to use the manual
+  recheck-and-transition fallback. Do not repair lifecycle labels yourself.
 - **GitHub Actions is waiting for approval:** Stop and ask a maintainer to
   review the fork changes. Workflow-run approval is not pull-request approval.
 - **A validation command fails:** Preserve the command, complete output, current

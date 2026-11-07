@@ -1,0 +1,46 @@
+{
+  "comments": [
+    [
+      {
+        "id": 101,
+        "created_at": "2026-11-07T18:01:00Z",
+        "updated_at": "2026-11-07T18:01:00Z",
+        "body": "/claim",
+        "user": {"login": "first", "type": "User"}
+      }
+    ],
+    [
+      {
+        "id": 102,
+        "created_at": "2026-11-07T18:02:00Z",
+        "updated_at": "2026-11-07T18:02:00Z",
+        "body": " /claim ",
+        "user": {"login": "second", "type": "User"}
+      }
+    ],
+    []
+  ],
+  "timeline": [
+    [
+      {
+        "id": 1,
+        "event": "labeled",
+        "created_at": "2026-11-07T18:00:00Z",
+        "label": {"name": "status:ready"}
+      },
+      {
+        "id": 2,
+        "event": "cross-referenced",
+        "created_at": "2026-11-07T18:03:00Z",
+        "source": {
+          "issue": {
+            "state": "closed",
+            "pull_request": {},
+            "repository": {"full_name": "cadence-workflow/cadence-ai-samples"}
+          }
+        }
+      }
+    ],
+    []
+  ]
+}

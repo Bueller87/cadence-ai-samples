@@ -22,14 +22,16 @@ Choose a useful result and one failure it should recover from.
 
 1. Open your selected issue in the live pool. Check that it is open,
    `status:ready`, unassigned and has no earlier claim or active implementation PR.
-2. Comment: **“I'd like to take this. GitHub: @yourname. Branch: `issue-N-short-slug`.”**
-3. Wait for a facilitator to record ownership and `status:in-progress`.
-   Then create the branch in your fork and follow the issue's instructions.
+2. Comment: **`/claim`**.
+3. Wait for the winning immutable `/claim` comment and `status:in-progress`.
+   Then create the `issue-N-short-slug` branch in your fork and follow the
+   issue's instructions.
 
 Every open Issue has exactly one lifecycle label:
-`status:needs-triage`, `status:ready`, or `status:in-progress`. The facilitator
-replaces `status:ready` with `status:in-progress`; they do not add a second
-lifecycle label.
+`status:needs-triage`, `status:ready`, or `status:in-progress`. The workflow
+replaces `status:ready` with `status:in-progress`; it does not add a second
+lifecycle label. If Actions cannot process the request, use the documented
+manual fallback rather than creating a competing branch.
 
 You do not need label permissions. If a task is taken, choose another or propose
 your own. Trying the shared introductory exercise needs no issue claim.

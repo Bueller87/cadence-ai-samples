@@ -102,10 +102,11 @@ draft PR or a clear next step on the issue so someone can continue.
 - [See the session outline](agenda.md).
 
 Trying the introductory exercise needs no issue claim. For an upstream
-contribution, wait for a facilitator to confirm ownership before creating the
-issue branch in your fork. Use the [participant guide](../../CONTRIBFEST.md)
-for claims, signed commits and review. Coding agents are optional; if you use
-one, start with the repository's [agent instructions](../../AGENTS.md).
+contribution, post exact `/claim` and wait for the winning immutable comment
+plus `status:in-progress` before creating the issue branch in your fork. Use
+the [participant guide](../../CONTRIBFEST.md) for claims, manual fallback,
+signed commits and review. Coding agents are optional; if you use one, start
+with the repository's [agent instructions](../../AGENTS.md).
 
 ### Issue pool
 

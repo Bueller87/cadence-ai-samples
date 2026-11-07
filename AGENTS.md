@@ -63,15 +63,18 @@ this file remains authoritative. Human contributors start with the
   `cadence-workflow/cadence-ai-samples`; never infer the target from `origin`.
 - Only a human may promote an Issue to `status:ready`, approve architecture
   or priority, approve a PR, or authorize a merge.
-- Any contributor may claim an unassigned `status:ready` Issue. Immediately
-  before claiming, recheck its assignee, comments, labels, and active linked PRs.
+- Any contributor may request an unassigned `status:ready` Issue by posting an
+ exact `/claim` Issue comment. The claim workflow deterministically selects the
+ earliest eligible comment in the current readiness window; immediately before
+ a manual fallback claim, recheck assignees, comments, labels, and active linked
+ PRs.
 - Assignment records ownership of approved work, not interest or priority.
-- Claim in this order: comment intent, replace `status:ready` with
-  `status:in-progress`, then create the branch.
-- Contributors without upstream label or assignment permission must comment to
-  request a claim, then wait. Do not create the branch or begin implementation
-  until the Issue has `status:in-progress` and identifies the contributor as
-  owner through assignment or a maintainer confirmation comment.
+- The winning immutable `/claim` comment plus `status:in-progress` is durable
+ ownership; the workflow confirmation is retryable feedback, not a prerequisite
+ for ownership. Create the branch only after that ownership record is visible.
+- If Actions is delayed, unavailable, or fails closed, a maintainer uses the
+ documented manual recheck and transition path. There is no `/release` command;
+ abandonment remains maintainer-authorized and manual.
 - Skip work assigned to or claimed by another contributor, including work with a
   linked PR or `status:in-progress`. Resume only the current contributor's
   matching claimed Issue and branch. Do not open competing implementation PRs

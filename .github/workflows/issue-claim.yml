@@ -1,0 +1,30 @@
+name: Issue claim
+
+on:
+  issue_comment:
+    types:
+      - created
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  claim:
+    if: github.event.issue.pull_request == null
+    concurrency:
+      group: issue-claim-${{ github.event.issue.number }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out default branch
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Process claim request
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/claim_issue.py

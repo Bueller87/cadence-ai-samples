@@ -75,6 +75,7 @@ centralize documentation.
 ## Architecture decisions
 
 - [ADR 0001: Explicit recipe template profiles](decisions/0001-recipe-template-profiles.md)
+- [ADR 0002: Deterministic Issue claims](decisions/0002-deterministic-issue-claims.md)
 
 ## Evidence, not requirements
 
@@ -115,22 +116,17 @@ gh issue list --repo cadence-workflow/cadence-ai-samples \
 ```
 
 Before taking an Issue, inspect its assignee, comments, labels, and active linked
-PRs. Recheck immediately before claiming. Any contributor may claim an unclaimed
-`status:ready` Issue. Follow the
+PRs. Recheck immediately before claiming. Any contributor may request an
+unclaimed `status:ready` Issue with exact `/claim`. Follow the
 [permission-aware claim path](../CONTRIBUTING.md#claim-approved-work).
-Contributors with upstream label permission claim in this order:
 
 ```bash
-gh issue comment N --repo cadence-workflow/cadence-ai-samples \
-  --body "Claiming this approved Issue. Branch: issue-N-short-slug."
-gh issue edit N --repo cadence-workflow/cadence-ai-samples \
-  --remove-label status:ready --add-label status:in-progress
-git switch -c issue-N-short-slug
+gh issue comment N --repo cadence-workflow/cadence-ai-samples --body "/claim"
 ```
 
-Without upstream label or assignment permission, request maintainer help and
-wait for both `status:in-progress` and repository-visible ownership before
-creating the branch.
+The winning immutable comment plus `status:in-progress` is repository-visible
+ownership; wait for it before creating the branch. If the workflow cannot
+process the request, a maintainer manually rechecks and transitions the Issue.
 
 Only a human may mark an Issue `status:ready`. Keep it in-progress through the draft
 PR handoff. On abandonment, comment the reason and current state, then replace
