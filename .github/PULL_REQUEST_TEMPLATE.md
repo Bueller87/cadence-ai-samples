@@ -24,6 +24,8 @@ List remaining work, relevant checks not performed, and known limitations.
 
 - [ ] The PR implements one approved Issue and stays within its scope.
 - [ ] The linked Issue was claimed and remains `status:in-progress`.
+- [ ] The linked open Issue has exactly one lifecycle label:
+      `status:needs-triage`, `status:ready`, or `status:in-progress`.
 - [ ] Tests and documentation match the changed behavior.
 - [ ] No credentials, proprietary data, or unrelated changes are included.
 - [ ] Commits include DCO sign-off (`git commit -s`).

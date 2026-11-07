@@ -4,6 +4,10 @@ Use these phrases as written. [AGENTS.md](AGENTS.md) is the canonical agent
 contract; this page is its short interface. GitHub and Git, not chat or terminal
 history, hold durable project state.
 
+Every open Issue has exactly one lifecycle label:
+`status:needs-triage`, `status:ready`, or `status:in-progress`. A lifecycle
+transition replaces the current label; it does not add another lifecycle state.
+
 ## Plan before building
 
 Plan before claiming or editing. Use a dedicated planning mode when available;
@@ -124,7 +128,8 @@ data, or machine-specific configuration.
 
 ## Human authority
 
-Only a human may approve architecture or priority, add `status:ready`, or
+Only a human may approve architecture or priority, replace `status:needs-triage`
+with `status:ready`, or
 approve a PR. Only the repository owner may authorize a merge. Agents never
 approve PRs or supply merge authority. An agent may execute a merge only after
 explicit repository-owner direction and verification of the applicable review

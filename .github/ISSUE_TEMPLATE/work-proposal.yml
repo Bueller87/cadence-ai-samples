@@ -9,7 +9,9 @@ body:
       value: |
         Use this format for a general idea that is not yet an implementation-ready task.
         Maintainer triage may later choose a human-first or agent-first task format.
-        Proposals are not approved work until a human maintainer adds `status:ready`.
+        Every open Issue has exactly one lifecycle label: `status:needs-triage`,
+        `status:ready`, or `status:in-progress`. A maintainer approves a proposal by
+        replacing `status:needs-triage` with `status:ready`, never adding a second state.
         Missing format, type, area, or source labels never authorize implementation.
         Do not include credentials, proprietary data, or private company context.
   - type: dropdown

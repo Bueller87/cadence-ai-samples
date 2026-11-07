@@ -89,6 +89,9 @@ checkout is currently valid and do not define future work.
 All Issues and labels belong to
 [`cadence-workflow/cadence-ai-samples`](https://github.com/cadence-workflow/cadence-ai-samples).
 `origin` is whichever contributor fork is configured locally.
+Every open Issue has exactly one lifecycle label:
+`status:needs-triage`, `status:ready`, or `status:in-progress`. A transition
+replaces the current lifecycle label; it does not add another lifecycle state.
 
 Approved, available work:
 
@@ -130,8 +133,8 @@ wait for both `status:in-progress` and repository-visible ownership before
 creating the branch.
 
 Only a human may mark an Issue `status:ready`. Keep it in-progress through the draft
-PR handoff. On abandonment, comment the reason and current state, then return it
-to the approved queue:
+PR handoff. On abandonment, comment the reason and current state, then replace
+`status:in-progress` with `status:ready`:
 
 ```bash
 gh issue edit N --repo cadence-workflow/cadence-ai-samples \
@@ -187,7 +190,7 @@ human-created web forms do not. When a proposer cannot apply `source:agent`,
 type, area, or another classification label, maintainer triage applies it.
 Missing classification or format labels never authorize implementation. Every
 proposal must receive or request `status:needs-triage`; only a human maintainer
-may later add `status:ready`. Never assign priority or create the Issue in a
+may later replace it with `status:ready`. Never assign priority or create the Issue in a
 contributor fork.
 
 ## Local completion and handoff

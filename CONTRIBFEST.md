@@ -139,7 +139,9 @@ paid inference or provider credentials.
 Choose an open, unassigned candidate from the organizer-published event pool.
 Candidates use `event:contribfest`, the event milestone, and one setup lane.
 Those markers group event work; the `status:*` label records whether work is
-available or claimed.
+available or claimed. Every open Issue has exactly one lifecycle label:
+`status:needs-triage`, `status:ready`, or `status:in-progress`. A transition
+replaces the prior lifecycle label rather than adding another one.
 
 Use the [first-time contributor
 path](CONTRIBUTING.md#first-time-contributor-path) and its [approved-work claim
@@ -151,7 +153,7 @@ coordinator applies that workflow:
    `issue-N-short-slug` branch.
 3. The coordinator rechecks assignees, comments, labels, and active linked pull
    requests.
-4. The coordinator records ownership and changes `status:ready` to
+4. The coordinator records ownership and replaces `status:ready` with
    `status:in-progress`.
 5. Only then do you create the branch on your fork and begin work.
 
@@ -208,7 +210,8 @@ the normal abandonment workflow only after preserving the current state.
 - **Setup is taking too long:** Ask a helper. You can pair on a working laptop
   or choose work with fewer local requirements.
 - **You cannot claim an Issue:** Post the documented claim request and ask event
-  staff to record ownership and update the lifecycle label.
+  staff to record ownership and replace the lifecycle label. Do not repair
+  lifecycle labels yourself.
 - **GitHub Actions is waiting for approval:** Stop and ask a maintainer to
   review the fork changes. Workflow-run approval is not pull-request approval.
 - **A validation command fails:** Preserve the command, complete output, current
