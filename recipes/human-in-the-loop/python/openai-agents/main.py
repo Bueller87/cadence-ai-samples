@@ -33,32 +33,6 @@ DEFAULT_WORKFLOW_ID = "human-in-the-loop-openai-agents-demo"
 DEFAULT_TEXT = (
     "Book a ride from 123 Market Street to 1 Ferry Building for one passenger."
 )
-WORKFLOW_ID_REUSE_POLICY = (
-    workflow_pb2.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE
-)
-
-
-def parser() -> argparse.ArgumentParser:
-    cli = argparse.ArgumentParser(description=__doc__)
-    cli.add_argument("--target", default="localhost:7833")
-    cli.add_argument("--domain", default="cadence-ai-samples")
-    cli.add_argument("--task-list", default=DEFAULT_TASK_LIST)
-    cli.add_argument("--workflow-id", default=DEFAULT_WORKFLOW_ID)
-    commands = cli.add_subparsers(dest="command", required=True)
-    worker = commands.add_parser("worker")
-    worker.add_argument("--mode", choices=("mock", "live"), required=True)
-    worker.add_argument("--confirm-live", action="store_true")
-    worker.add_argument("--catalog-dir", type=Path, default=Path(__file__).parents[4])
-    worker.add_argument("--model-id", default="gemini-flash-lite")
-    start = commands.add_parser("start")
-    start.add_argument("--mode", choices=("mock", "live"), required=True)
-    start.add_argument("--text", default=DEFAULT_TEXT)
-    commands.add_parser("status")
-    approve = commands.add_parser("approve")
-    approve.add_argument("--call-id", required=True)
-    reject = commands.add_parser("reject")
-    reject.add_argument("--call-id", required=True)
-    return cli
 
 
 def client(args: argparse.Namespace) -> cadence.Client:
@@ -95,13 +69,10 @@ async def start(args: argparse.Namespace) -> None:
     try:
         execution = await cadence_client.start_workflow(
             WORKFLOW,
-            RecipeInput(
-                text=args.text,
-                mode=args.mode,
-            ),
+            RecipeInput(text=args.text, mode=args.mode),
             task_list=args.task_list,
             workflow_id=args.workflow_id,
-            workflow_id_reuse_policy=WORKFLOW_ID_REUSE_POLICY,
+            workflow_id_reuse_policy=workflow_pb2.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE,
             execution_start_to_close_timeout=timedelta(hours=24),
             task_start_to_close_timeout=timedelta(seconds=30),
         )
@@ -145,6 +116,29 @@ async def decide(args: argparse.Namespace) -> None:
     finally:
         await cadence_client.close()
     print(f"sent {args.command} call-id={args.call_id}")
+
+
+def parser() -> argparse.ArgumentParser:
+    cli = argparse.ArgumentParser(description=__doc__)
+    cli.add_argument("--target", default="localhost:7833")
+    cli.add_argument("--domain", default="cadence-ai-samples")
+    cli.add_argument("--task-list", default=DEFAULT_TASK_LIST)
+    cli.add_argument("--workflow-id", default=DEFAULT_WORKFLOW_ID)
+    commands = cli.add_subparsers(dest="command", required=True)
+    worker = commands.add_parser("worker")
+    worker.add_argument("--mode", choices=("mock", "live"), required=True)
+    worker.add_argument("--confirm-live", action="store_true")
+    worker.add_argument("--catalog-dir", type=Path, default=Path(__file__).parents[4])
+    worker.add_argument("--model-id", default="gemini-flash-lite")
+    start = commands.add_parser("start")
+    start.add_argument("--mode", choices=("mock", "live"), required=True)
+    start.add_argument("--text", default=DEFAULT_TEXT)
+    commands.add_parser("status")
+    approve = commands.add_parser("approve")
+    approve.add_argument("--call-id", required=True)
+    reject = commands.add_parser("reject")
+    reject.add_argument("--call-id", required=True)
+    return cli
 
 
 async def main(argv: Sequence[str] | None = None) -> None:
