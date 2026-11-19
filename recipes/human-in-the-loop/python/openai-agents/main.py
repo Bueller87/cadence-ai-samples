@@ -2,11 +2,9 @@
 
 import argparse
 import asyncio
-import json
 import logging
 import os
 from collections.abc import Sequence
-from dataclasses import asdict
 from datetime import timedelta
 from pathlib import Path
 
@@ -17,13 +15,12 @@ from cadence.error import WorkflowExecutionAlreadyStartedError
 from cadence.worker import Worker
 
 from config import load_model
+from mock_model import mock_model_activities
 from workflow import (
     APPROVE_SIGNAL,
     REJECT_SIGNAL,
-    STATUS_QUERY,
     WORKFLOW,
-    RecipeInput,
-    WorkflowStatus,
+    MarkdownQueryResponse,
     build_registry,
 )
 
@@ -44,8 +41,6 @@ def client(args: argparse.Namespace) -> cadence.Client:
 
 
 async def run_worker(args: argparse.Namespace) -> None:
-    registry = build_registry()
-    model_label = "offline-mock"
     if args.mode == "live":
         if not args.confirm_live:
             raise ValueError("live worker requires --confirm-live")
@@ -54,6 +49,9 @@ async def run_worker(args: argparse.Namespace) -> None:
         selection = load_model(args.catalog_dir, args.model_id)
         registry = build_registry(live_model_activities(selection, os.environ))
         model_label = selection.id
+    else:
+        registry = build_registry(mock_model_activities())
+        model_label = "offline-mock"
     worker = Worker(client(args), args.task_list, registry)
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     async with worker:
@@ -69,7 +67,7 @@ async def start(args: argparse.Namespace) -> None:
     try:
         execution = await cadence_client.start_workflow(
             WORKFLOW,
-            RecipeInput(text=args.text, mode=args.mode),
+            args.text,
             task_list=args.task_list,
             workflow_id=args.workflow_id,
             workflow_id_reuse_policy=workflow_pb2.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE,
@@ -95,12 +93,12 @@ async def status(args: argparse.Namespace) -> None:
         result = await cadence_client.query_workflow(
             args.workflow_id,
             "",
-            STATUS_QUERY,
-            result_type=WorkflowStatus,
+            "get_interruptions",
+            result_type=MarkdownQueryResponse,
         )
     finally:
         await cadence_client.close()
-    print(json.dumps(asdict(result), indent=2))
+    print(result.data)
 
 
 async def decide(args: argparse.Namespace) -> None:
@@ -131,7 +129,13 @@ def parser() -> argparse.ArgumentParser:
     worker.add_argument("--catalog-dir", type=Path, default=Path(__file__).parents[4])
     worker.add_argument("--model-id", default="gemini-flash-lite")
     start = commands.add_parser("start")
-    start.add_argument("--mode", choices=("mock", "live"), required=True)
+    start.add_argument(
+        "--mode",
+        choices=("mock", "live"),
+        required=True,
+        help="Mode you expect the running Worker to use. The Worker decides "
+        "mock or live; this is not sent to the Workflow.",
+    )
     start.add_argument("--text", default=DEFAULT_TEXT)
     commands.add_parser("status")
     approve = commands.add_parser("approve")

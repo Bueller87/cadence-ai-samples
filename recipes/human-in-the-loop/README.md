@@ -10,18 +10,21 @@ repeating completed model work or executing the tool after rejection.
 
 The Workflow owns pending call IDs and decisions. It waits durably for
 `approve_tool_call` or `reject_tool_call`, then either runs the synthetic booking
-Activity or completes as rejected. Mock mode follows the same query and signal
-contract without reading catalogs or contacting a provider.
+Activity or resumes the agent with a rejection. Mock and live use the same
+Workflow; only the Worker differs. A mock Worker answers model requests from a
+small fake model (`mock_model.py`) without reading catalogs or contacting a
+provider.
 
 ## Architecture
 
-`request → model/proposal Activity → Workflow wait → human Signal → booking or rejection`
+`request → model Activity → Workflow wait → human Signal → booking or rejection`
 
-In live mode, OpenAI Agents runs its control loop in Workflow code. Cadence's
-OpenAI adapter turns each provider request into `OpenAIActivities.invoke_model`;
+OpenAI Agents runs its control loop in Workflow code. Cadence's OpenAI adapter
+turns each model request into `OpenAIActivities.invoke_model`;
 `human-in-the-loop.book-ride` is a separate Activity. The Worker resolves the
-Workflow's logical model name to its selected `models.yaml` entry. Provider,
-model, endpoint, and credentials never enter Workflow input or query output.
+Workflow's logical model name: a live Worker to its selected `models.yaml`
+entry, a mock Worker to the fake model. Provider, model, endpoint, and
+credentials never enter Workflow input or query output.
 
 ## Requirements
 
@@ -65,7 +68,8 @@ In another terminal, start an approval run:
 ./run.sh --workflow-id ride-approve status
 ```
 
-Status is JSON. Copy the pending `call_id`, then approve it:
+`status` prints the `get_interruptions` markdown: the pending tool call, its
+arguments, and its call ID. The mock call ID is always `mock-ride-1`. Approve it:
 
 ```bash
 ./run.sh --workflow-id ride-approve approve --call-id mock-ride-1
@@ -79,9 +83,16 @@ Repeat with a different Workflow ID to exercise rejection:
 ./run.sh --workflow-id ride-reject reject --call-id mock-ride-1
 ```
 
-The approve Run finishes `APPROVED_COMPLETED`; the reject Run finishes
-`REJECTED` without scheduling the booking Activity. Mock mode does not read
-`models.yaml`, inspect credentials, or contact an AI provider.
+The approve Run returns "The simulated ride booking completed."; the reject Run
+returns "The simulated ride request was rejected." and never schedules the
+booking Activity. Check the result in Cadence Web or the Workflow history. The
+mock Worker does not read `models.yaml`, inspect credentials, or contact an AI
+provider.
+
+`start --mode` only declares the Worker mode you expect and is not sent to the
+Workflow; the running Worker decides mock or live. Run one Worker per task list
+at a time, and match `--mode` to it. A `start --mode live` against a mock Worker
+runs the mock without warning.
 
 Cadence Web can run the `get_interruptions` query. Its markdown result includes
 buttons for the same approve and reject Signals.
@@ -99,7 +110,7 @@ positional string argument.
 The call ID is submitted in a same-origin POST body. It is not added to Explorer
 URLs, logs, saved browser state, durable validation evidence, or sanitized error
 text. Cadence-Web acceptance still does not prove the Workflow processed the
-decision; confirm the resulting status or history.
+decision; confirm the resulting Run result or history.
 
 ## Local Ollama live walkthrough
 
@@ -145,7 +156,7 @@ intentionally have no model, endpoint, or credential options.
 
 ## Restart and Workflow ID behavior
 
-While status shows `WAITING_FOR_DECISION`, stop the Worker with Ctrl-C. Start a
+While `status` shows the pending call, stop the Worker with Ctrl-C. Start a
 replacement Worker with the same mode, domain, and task list. The status command
 returns the same pending call from history, and the replacement Worker processes
 the eventual decision. Completed Activities are not called again during replay.
@@ -164,8 +175,8 @@ conflicting duplicate Signals. Rejection never executes the booking Activity.
 The synthetic Activity demonstrates orchestration, not exactly-once external
 side effects; a real booking API would need its own idempotency key.
 
-Unsafe endpoints, missing remote credentials, malformed model responses, empty
-input, and unsupported providers fail clearly. Provider errors are sanitized
+Unsafe endpoints, missing remote credentials, invalid booking arguments, and
+unsupported providers fail clearly. Provider errors are sanitized
 before entering Workflow history.
 
 ## Tests

@@ -15,4 +15,4 @@ dependencies = [
 ]
 
 [tool.setuptools]
-py-modules = ["config", "workflow", "live", "inference", "main"]
+py-modules = ["config", "workflow", "live", "inference", "mock_model", "main"]

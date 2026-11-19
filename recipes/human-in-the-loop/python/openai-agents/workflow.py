@@ -1,48 +1,16 @@
 """Durable ride-booking approval orchestration."""
 
-import json
 from dataclasses import dataclass
-from datetime import timedelta
+from typing import Any
 
 from agents import Agent, RunConfig, Runner, ToolApprovalItem, function_tool
 from cadence import activity, workflow
 from cadence.worker import Registry
 
-
 WORKFLOW = "HumanInTheLoopWorkflow"
-MOCK_PROPOSAL_ACTIVITY = "human-in-the-loop.mock-proposal"
 BOOK_RIDE_ACTIVITY = "human-in-the-loop.book-ride"
-STATUS_QUERY = "status"
 APPROVE_SIGNAL = "approve_tool_call"
 REJECT_SIGNAL = "reject_tool_call"
-AI_ACTIVITY_OPTIONS = {
-    "schedule_to_close_timeout": timedelta(seconds=30),
-    "retry_policy": {
-        "initial_interval": timedelta(seconds=1),
-        "backoff_coefficient": 2.0,
-        "maximum_attempts": 3,
-    },
-}
-
-
-@dataclass(frozen=True)
-class RecipeInput:
-    text: str
-    mode: str = "mock"
-
-
-@dataclass(frozen=True)
-class RideDetails:
-    from_address: str
-    to_address: str
-    passengers: int
-
-
-@dataclass(frozen=True)
-class PendingRide:
-    call_id: str
-    tool_name: str
-    trip: RideDetails
 
 
 @dataclass(frozen=True)
@@ -59,43 +27,12 @@ class BookingReceipt:
     driver_car_color: str
 
 
-@dataclass(frozen=True)
-class WorkflowStatus:
-    state: str
-    mode: str
-    pending: tuple[PendingRide, ...]
-    outcome: str | None
-
-
-@dataclass(frozen=True)
-class RecipeResult:
-    outcome: str
-    mode: str
-    trip: RideDetails
-    answer: str
-
-
+# Shape that Cadence Web expects to render a query result as markdown.
 @dataclass(frozen=True)
 class MarkdownQueryResponse:
     cadenceResponseType: str
     format: str
     data: str
-
-
-@activity.defn(name=MOCK_PROPOSAL_ACTIVITY)
-def mock_proposal(text: str) -> PendingRide:
-    """Create a deterministic offline proposal without catalogs or providers."""
-    if not text.strip():
-        raise ValueError("text must not be empty")
-    return PendingRide(
-        call_id="mock-ride-1",
-        tool_name=BOOK_RIDE_ACTIVITY,
-        trip=RideDetails(
-            from_address="123 Market Street",
-            to_address="1 Ferry Building",
-            passengers=1,
-        ),
-    )
 
 
 @activity.defn(name=BOOK_RIDE_ACTIVITY)
@@ -123,53 +60,35 @@ async def book_ride(
 
 class HumanInTheLoopWorkflow:
     def __init__(self) -> None:
-        self._mode = "mock"
-        self._state = "STARTING"
-        self._pending: dict[str, PendingRide] = {}
+        # Tool calls awaiting a decision, keyed by call_id.
+        self._pending: dict[str, ToolApprovalItem] = {}
+        # Decisions delivered via signals: call_id -> True (approve) / False (reject).
         self._decisions: dict[str, bool] = {}
-        self._outcome: str | None = None
+
+    @workflow.query(name="get_interruptions")
+    def get_interruptions(self) -> MarkdownQueryResponse:
+        info = workflow.WorkflowContext.get().info()
+        return MarkdownQueryResponse(
+            cadenceResponseType="formattedData",
+            format="text/markdown",
+            data=_render_interruptions_markdown(info, self._pending),
+        )
+
+    @workflow.signal(name=APPROVE_SIGNAL)
+    def approve_tool_call(self, call_id: str) -> None:
+        self._decide(call_id, True)
+
+    @workflow.signal(name=REJECT_SIGNAL)
+    def reject_tool_call(self, call_id: str) -> None:
+        self._decide(call_id, False)
+
+    def _decide(self, call_id: str, approved: bool) -> None:
+        # Unknown, stale and repeated call IDs are ignored; the first decision wins.
+        if call_id in self._pending and call_id not in self._decisions:
+            self._decisions[call_id] = approved
 
     @workflow.run
-    async def run(self, recipe_input: RecipeInput) -> RecipeResult:
-        if recipe_input.mode not in {"mock", "live"}:
-            raise ValueError("mode must be 'mock' or 'live'")
-        if not recipe_input.text.strip():
-            raise ValueError("text must not be empty")
-
-        self._mode = recipe_input.mode
-        if recipe_input.mode == "mock":
-            return await self._run_mock(recipe_input.text)
-        return await self._run_live(recipe_input.text)
-
-    async def _run_mock(self, text: str) -> RecipeResult:
-        proposal = await workflow.execute_activity(
-            MOCK_PROPOSAL_ACTIVITY,
-            PendingRide,
-            text,
-            **AI_ACTIVITY_OPTIONS,
-        )
-
-        decisions = await self._wait_for_decision({proposal.call_id: proposal})
-        if not decisions[proposal.call_id]:
-            return self._finish(
-                "REJECTED", proposal.trip, "The simulated ride request was rejected."
-            )
-
-        self._state = "BOOKING"
-        await workflow.execute_activity(
-            BOOK_RIDE_ACTIVITY,
-            BookingReceipt,
-            proposal.trip.from_address,
-            proposal.trip.to_address,
-            proposal.trip.passengers,
-            schedule_to_close_timeout=timedelta(seconds=10),
-        )
-
-        return self._finish(
-            "APPROVED_COMPLETED", proposal.trip, "The simulated ride booking completed."
-        )
-
-    async def _run_live(self, text: str) -> RecipeResult:
+    async def run(self, text: str) -> str:
         agent = Agent(
             name="Ride booking assistant",
             instructions=(
@@ -181,166 +100,76 @@ class HumanInTheLoopWorkflow:
             tools=[function_tool(book_ride, needs_approval=True)],
         )
 
-        run_input = text
-        last_trip: RideDetails | None = None
-        approved_any = False
+        run_config = RunConfig(tracing_disabled=True)
+        run_input: Any = text
 
         while True:
-            result = await Runner.run(
-                agent,
-                run_input,
-                run_config=RunConfig(tracing_disabled=True),
-            )
+            result = await Runner.run(agent, run_input, run_config=run_config)
 
             if not result.interruptions:
-                if last_trip is None:
-                    raise ValueError("model completed without proposing a ride")
-                return self._finish(
-                    "APPROVED_COMPLETED" if approved_any else "REJECTED",
-                    last_trip,
-                    str(result.final_output or "").strip(),
-                )
+                return str(result.final_output)
 
-            pending: dict[str, PendingRide] = {}
-            items: dict[str, ToolApprovalItem] = {}
             for item in result.interruptions:
-                ride = _pending_ride(item)
-                pending[ride.call_id] = ride
-                items[ride.call_id] = item
-            last_trip = next(iter(pending.values())).trip
+                if not item.call_id:
+                    raise RuntimeError(f"tool call {item.tool_name} has no call_id")
+                self._pending[item.call_id] = item
 
-            decisions = await self._wait_for_decision(pending)
+            self._decisions = {}
 
+            # Block until every pending tool call has an approve/reject signal.
+            await workflow.wait_condition(
+                lambda: all(call_id in self._decisions for call_id in self._pending)
+            )
+
+            # Resume from the existing run state with each decision applied.
             state = result.to_state()
-            for call_id, item in items.items():
-                if decisions[call_id]:
-                    approved_any = True
+            for call_id, item in self._pending.items():
+                if self._decisions[call_id]:
                     state.approve(item)
                 else:
-                    state.reject(
-                        item,
-                        rejection_message="The user rejected the simulated ride.",
-                    )
+                    state.reject(item, rejection_message="User rejected the tool call.")
 
             run_input = state
-            self._state = "RUNNING_AGENT"
-
-    async def _wait_for_decision(
-        self, pending: dict[str, PendingRide]
-    ) -> dict[str, bool]:
-        self._pending = pending
-        self._decisions = {}
-        self._state = "WAITING_FOR_DECISION"
-
-        await workflow.wait_condition(
-            lambda: all(call_id in self._decisions for call_id in self._pending)
-        )
-
-        decisions, self._decisions = self._decisions, {}
-        self._pending = {}
-        return decisions
-
-    def _finish(self, outcome: str, trip: RideDetails, answer: str) -> RecipeResult:
-        self._state = "COMPLETED"
-        self._outcome = outcome
-        return RecipeResult(outcome=outcome, mode=self._mode, trip=trip, answer=answer)
-
-    @workflow.signal(name=APPROVE_SIGNAL)
-    def approve(self, call_id: str) -> None:
-        self._record_decision(call_id, True)
-
-    @workflow.signal(name=REJECT_SIGNAL)
-    def reject(self, call_id: str) -> None:
-        self._record_decision(call_id, False)
-
-    def _record_decision(self, call_id: str, approved: bool) -> None:
-        if call_id in self._pending and call_id not in self._decisions:
-            self._decisions[call_id] = approved
-
-    @workflow.query(name=STATUS_QUERY)
-    def status(self) -> WorkflowStatus:
-        return WorkflowStatus(
-            state=self._state,
-            mode=self._mode,
-            pending=tuple(self._pending.values()),
-            outcome=self._outcome,
-        )
-
-    @workflow.query(name="get_interruptions")
-    def interruptions(self) -> MarkdownQueryResponse:
-        info = workflow.WorkflowContext.get().info()
-        return MarkdownQueryResponse(
-            cadenceResponseType="formattedData",
-            format="text/markdown",
-            data=_render_interruptions_markdown(info, self._pending),
-        )
-
-
-def _pending_ride(item: ToolApprovalItem) -> PendingRide:
-    if not item.call_id:
-        raise ValueError("model tool call is missing call_id")
-    if item.tool_name not in {BOOK_RIDE_ACTIVITY, "book_ride"}:
-        raise ValueError("model requested an unsupported tool")
-    try:
-        arguments = json.loads(item.arguments or "{}")
-        trip = RideDetails(
-            from_address=str(arguments["from_address"]).strip(),
-            to_address=str(arguments["to_address"]).strip(),
-            passengers=int(arguments["passengers"]),
-        )
-    except (KeyError, TypeError, ValueError) as error:
-        raise ValueError("model returned invalid ride arguments") from error
-    if not trip.from_address or not trip.to_address or trip.passengers < 1:
-        raise ValueError("model returned invalid ride arguments")
-    return PendingRide(item.call_id, item.tool_name, trip)
+            self._pending = {}
+            self._decisions = {}
 
 
 def _render_interruptions_markdown(
-    info: workflow.WorkflowInfo, pending: dict[str, PendingRide]
+    info: workflow.WorkflowInfo, pending: dict[str, ToolApprovalItem]
 ) -> str:
     if not pending:
-        return "## Ride approvals\n\n_No ride is awaiting approval._\n"
+        return "## Tool Approvals\n\n_No tool calls are awaiting approval._\n"
 
     sections = [
-        "## Ride approvals",
+        "## Tool Approvals",
         "",
-        "The Workflow is paused for a human decision.",
+        "The agent is paused. Approve or reject each pending tool call below.",
         "",
     ]
-    for proposal in pending.values():
-        sections.extend(
-            [
-                f"### Call `{proposal.call_id}`",
-                "",
-                f"- From: `{proposal.trip.from_address}`",
-                f"- To: `{proposal.trip.to_address}`",
-                f"- Passengers: `{proposal.trip.passengers}`",
-                "",
-            ]
-        )
+    for item in pending.values():
+        sections += [f"### `{item.tool_name}`", "", f"- **Call ID:** `{item.call_id}`"]
+        if item.arguments:
+            sections += ["- **Arguments:**", "", "```json", item.arguments, "```"]
+        sections.append("")
         for signal, label in ((APPROVE_SIGNAL, "Approve"), (REJECT_SIGNAL, "Reject")):
-            sections.extend(
-                [
-                    "{% signal",
-                    f'    signalName="{signal}"',
-                    f'    label="{label}"',
-                    f'    domain="{info.workflow_domain}"',
-                    '    cluster="cluster0"',
-                    f'    workflowId="{info.workflow_id}"',
-                    f'    runId="{info.workflow_run_id}"',
-                    f'    input="{proposal.call_id}"',
-                    "/%}",
-                ]
-            )
+            sections += [
+                "{% signal",
+                f'    signalName="{signal}"',
+                f'    label="{label}"',
+                f'    domain="{info.workflow_domain}"',
+                '    cluster="cluster0"',
+                f'    workflowId="{info.workflow_id}"',
+                f'    runId="{info.workflow_run_id}"',
+                f'    input="{item.call_id}"',
+                "/%}",
+            ]
         sections.append("")
     return "\n".join(sections)
 
 
-def build_registry(model_activities: object | None = None) -> Registry:
+def build_registry(model_activities: object) -> Registry:
     registry = Registry()
     registry.workflow(HumanInTheLoopWorkflow)
-    registry.register_activity(mock_proposal)
     registry.register_activity(book_ride)
-    if model_activities is not None:
-        registry.register_activities(model_activities)
+    registry.register_activities(model_activities)
     return registry

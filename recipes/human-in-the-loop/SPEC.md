@@ -10,7 +10,7 @@ pending proposal and decision must be recoverable from Cadence history.
 
 ### Goals
 
-- Produce a typed ride proposal from a user request.
+- Let a model propose a ride tool call from a user request.
 - Pause durably until a human approves or rejects each pending call.
 - Execute the simulated booking Activity only after approval.
 - Preserve a representative, provider-free offline path.
@@ -30,8 +30,13 @@ agent proposes `book_ride`. The Workflow exposes the safe arguments and call ID,
 then waits for a matching signal.
 
 - `APPROVED_COMPLETED`: approval caused the simulated booking Activity to finish.
-- `REJECTED`: rejection resumed the agent or deterministic mock path without
-  executing the booking Activity.
+- `REJECTED`: rejection resumed the agent without executing the booking
+  Activity.
+
+The Workflow returns the agent's final output as a string; there is no separate
+outcome field. A mock Worker's final message is "The simulated ride booking
+completed." after approval and "The simulated ride request was rejected." after
+rejection.
 
 An unknown or stale call ID has no effect. The first valid decision for a
 pending call wins; later duplicate or conflicting signals have no effect.
@@ -57,13 +62,19 @@ Generated from the `python/openai-agents` profile defined by the
 
 ## Workflow architecture
 
-Mock mode schedules a deterministic proposal Activity. Live mode runs the
-OpenAI Agents control loop with a logical model name; the Cadence adapter
-schedules model Activities that a live Worker resolves to its selected catalog
-entry. Both paths normalize proposals into `PendingRide`, publish them through
-queries, and wait with `workflow.wait_condition`.
+One Workflow class runs the OpenAI Agents control loop with the logical model
+name `human-in-the-loop-worker-model`; it contains no mock-specific code. The
+Cadence adapter schedules model Activities that the Worker resolves: a live
+Worker to its selected catalog entry, a mock Worker to the fake model in
+`mock_model.py`. The Workflow keeps interruptions as `ToolApprovalItem`s,
+publishes them through the `get_interruptions` markdown query, and waits with
+`workflow.wait_condition`.
 
-The Workflow records pending call IDs, safe trip arguments, and first decisions.
+The mock model first proposes `book_ride` with call ID `mock-ride-1` (123 Market
+Street to 1 Ferry Building, one passenger). After a tool result it returns a
+fixed final message that reflects approval (receipt present) or rejection.
+
+The Workflow records pending call IDs and first decisions.
 On replay, completed Activity results and accepted signals are read from history.
 The Workflow therefore reconstructs the same wait without repeating completed
 model or tool Activities.
@@ -74,9 +85,8 @@ new Run and a new decision.
 
 ## Activity and idempotency boundaries
 
-- `human-in-the-loop.mock-proposal` creates fixed offline trip details.
-- `OpenAIActivities.invoke_model` performs live model requests with Worker-local
-  configuration.
+- `OpenAIActivities.invoke_model` performs model requests with Worker-local
+  configuration: provider requests for live, the fake model for mock.
 - `human-in-the-loop.book-ride` returns a synthetic receipt and performs no
   external booking.
 
@@ -87,15 +97,18 @@ synthetic Activity must not be treated as an exactly-once integration example.
 
 ## Data contract
 
-`RecipeInput` contains only request text and `mock` or `live` mode. Pending
-status contains a call ID, tool name, pickup, destination, and passenger count.
-`RecipeResult` contains an outcome, mode, safe trip details, and final message.
+Workflow input is the request text only. The `get_interruptions` query returns
+a markdown response with the pending tool name, call ID, arguments JSON, and the
+Approve/Reject signal buttons. The Workflow result is the final output string.
 
 Model IDs, provider names, endpoints, credentials, raw provider responses, and
 provider errors are excluded from Workflow input and query output.
 
 ## Configuration
 
+- `start --mode`: declares the Worker mode the user expects. It is not sent to
+  the Workflow and is not checked at runtime; the running Worker decides mock or
+  live. A mismatched `start --mode` is not detected.
 - `--domain`: defaults to `cadence-ai-samples`.
 - `--task-list`: defaults to `human-in-the-loop-openai-agents`.
 - `--workflow-id`: defaults to `human-in-the-loop-openai-agents-demo`.
@@ -111,20 +124,21 @@ HTTPS, and Ollama endpoints must be loopback.
 
 ## Failure behavior
 
-Invalid input and invalid tool arguments fail before booking. Provider failures
+Invalid tool arguments fail in the booking Activity before any booking. Provider failures
 are sanitized at the model Activity boundary. An open Workflow ID produces a
 clear command error. A Worker may stop while approval is pending; a replacement
 Worker on the same task list resumes from history.
 
 ## Acceptance and validation
 
-- Offline tests cover proposal and booking Activities, pending queries, both
-  decisions, unknown/stale/duplicate/conflicting signals, and booking-at-most-once.
+- Offline tests cover the fake model, the booking Activity, the pending
+  `get_interruptions` query, both decisions, unknown/stale/duplicate/conflicting
+  signals, and booking-at-most-once.
 - CLI tests prove mock, start, status, approve, and reject do not read catalogs.
 - Provider tests validate compatible catalog entries without network calls and
   prove the selected model and endpoint stay Worker-local.
-- Local Cadence checks cover both outcomes, restart while pending, and history
-  counts for completed model/tool Activities.
+- Local Cadence checks cover both decisions, restart while pending, and history
+  counts: model, `book_ride`, model after approval; model, model after rejection.
 - Explorer discovers the recipe and resolves generic Worker/start commands
   without importing recipe SDK modules.
 - Live validation on this machine uses only local `llama3.2-local`. Remote model

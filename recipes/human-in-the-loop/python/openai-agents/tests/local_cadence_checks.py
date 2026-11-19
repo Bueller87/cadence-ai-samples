@@ -16,18 +16,17 @@ from cadence.api.v1.service_workflow_pb2 import GetWorkflowExecutionHistoryReque
 from cadence.contrib.pydantic import PydanticDataConverter
 from cadence.worker import Worker
 
+from mock_model import mock_model_activities
 from workflow import (
     APPROVE_SIGNAL,
     BOOK_RIDE_ACTIVITY,
-    MOCK_PROPOSAL_ACTIVITY,
     REJECT_SIGNAL,
-    STATUS_QUERY,
     WORKFLOW,
-    RecipeInput,
-    RecipeResult,
-    WorkflowStatus,
+    MarkdownQueryResponse,
     build_registry,
 )
+
+MODEL_ACTIVITY = "OpenAIActivities.invoke_model"
 
 
 async def history(client: Client, execution: object) -> list[object]:
@@ -50,7 +49,7 @@ async def history(client: Client, execution: object) -> list[object]:
 
 async def completed(
     client: Client, execution: object
-) -> tuple[RecipeResult, list[object]]:
+) -> tuple[str, list[object]]:
     async with asyncio.timeout(60):
         while True:
             events = await history(client, execution)
@@ -62,7 +61,7 @@ async def completed(
                         event.workflow_execution_completed_event_attributes.result
                     )
                     result = client.data_converter.from_data(
-                        payload, [RecipeResult]
+                        payload, [str]
                     )[0]
                     return result, events
             await asyncio.sleep(0.2)
@@ -81,7 +80,7 @@ async def start(
 ) -> object:
     return await client.start_workflow(
         WORKFLOW,
-        RecipeInput("Book a ride from Market Street to the Ferry Building."),
+        "Book a ride from Market Street to the Ferry Building.",
         workflow_id=f"{task_list}-{label}",
         task_list=task_list,
         execution_start_to_close_timeout=timedelta(minutes=3),
@@ -89,20 +88,18 @@ async def start(
     )
 
 
-async def pending_status(
-    client: Client, execution: object
-) -> WorkflowStatus:
+async def pending_markdown(client: Client, execution: object) -> str:
     async with asyncio.timeout(30):
         while True:
             try:
-                status = await client.query_workflow(
+                pending = await client.query_workflow(
                     execution.workflow_id,
                     execution.run_id,
-                    STATUS_QUERY,
-                    result_type=WorkflowStatus,
+                    "get_interruptions",
+                    result_type=MarkdownQueryResponse,
                 )
-                if status.state == "WAITING_FOR_DECISION":
-                    return status
+                if "mock-ride-1" in pending.data:
+                    return pending.data
             except Exception:
                 pass
             await asyncio.sleep(0.2)
@@ -116,14 +113,14 @@ async def main() -> None:
     )
     task_list = "hitl-local-checks-" + uuid.uuid4().hex
 
-    async with Worker(client, task_list, build_registry()):
+    async with Worker(client, task_list, build_registry(mock_model_activities())):
         approved = await start(client, task_list, "approved")
-        before_restart = await pending_status(client, approved)
-        call_id = before_restart.pending[0].call_id
+        before_restart = await pending_markdown(client, approved)
+        call_id = "mock-ride-1"
 
-    async with Worker(client, task_list, build_registry()):
-        after_restart = await pending_status(client, approved)
-        assert after_restart.pending == before_restart.pending
+    async with Worker(client, task_list, build_registry(mock_model_activities())):
+        after_restart = await pending_markdown(client, approved)
+        assert after_restart == before_restart
         await client.signal_workflow(
             approved.workflow_id, approved.run_id, APPROVE_SIGNAL, "unknown-call"
         )
@@ -136,8 +133,8 @@ async def main() -> None:
         approved_result, approved_events = await completed(client, approved)
 
         rejected = await start(client, task_list, "rejected")
-        rejected_status = await pending_status(client, rejected)
-        rejected_call = rejected_status.pending[0].call_id
+        await pending_markdown(client, rejected)
+        rejected_call = "mock-ride-1"
         await client.signal_workflow(
             rejected.workflow_id,
             rejected.run_id,
@@ -158,22 +155,23 @@ async def main() -> None:
         )
         rejected_result, rejected_events = await completed(client, rejected)
 
-    assert approved_result.outcome == "APPROVED_COMPLETED"
+    assert approved_result == "The simulated ride booking completed."
     assert scheduled_activities(approved_events) == [
-        MOCK_PROPOSAL_ACTIVITY,
+        MODEL_ACTIVITY,
         BOOK_RIDE_ACTIVITY,
+        MODEL_ACTIVITY,
     ]
-    assert rejected_result.outcome == "REJECTED"
-    assert scheduled_activities(rejected_events) == [MOCK_PROPOSAL_ACTIVITY]
+    assert rejected_result == "The simulated ride request was rejected."
+    assert scheduled_activities(rejected_events) == [MODEL_ACTIVITY, MODEL_ACTIVITY]
     print(
         "PASS Worker restart: "
         f"workflow-id={approved.workflow_id} run-id={approved.run_id}; "
-        "pending call restored, proposal completed once, booking completed once"
+        "pending call restored, model Activity completed twice, booking completed once"
     )
     print(
         "PASS rejection and invalid decisions: "
         f"workflow-id={rejected.workflow_id} run-id={rejected.run_id}; "
-        "proposal completed once, booking never scheduled"
+        "model Activity completed twice, booking never scheduled"
     )
     await client.close()
 

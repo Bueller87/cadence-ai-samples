@@ -13,7 +13,7 @@ signals:
         constraints:
           min_length: 1
           max_length: 255
-        help: Enter the pending call ID reported by the Workflow status Query.
+        help: Enter the pending call ID shown by the get_interruptions Query.
   - id: reject-tool-call
     name: reject_tool_call
     label: Reject tool call
@@ -27,4 +27,4 @@ signals:
         constraints:
           min_length: 1
           max_length: 255
-        help: Enter the pending call ID reported by the Workflow status Query.
+        help: Enter the pending call ID shown by the get_interruptions Query.

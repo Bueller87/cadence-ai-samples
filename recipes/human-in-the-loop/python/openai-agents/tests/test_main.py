@@ -135,9 +135,10 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
             "builtins.print"
         ):
             await main.start(args)
-        recipe_input = cadence_client.start_workflow.call_args.args[1]
+        # --mode is declarative: only the text reaches the Workflow.
         self.assertEqual(
-            vars(recipe_input), {"text": main.DEFAULT_TEXT, "mode": "live"}
+            cadence_client.start_workflow.call_args.args,
+            (main.WORKFLOW, main.DEFAULT_TEXT),
         )
         options = cadence_client.start_workflow.call_args.kwargs
         self.assertEqual(
@@ -146,14 +147,30 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         )
         cadence_client.close.assert_awaited_once()
 
-    async def test_status_queries_typed_safe_state(self) -> None:
+    async def test_mock_worker_serves_the_fake_model_without_catalog(self) -> None:
+        args = main.parser().parse_args(["worker", "--mode", "mock"])
+        event = MagicMock()
+        event.wait = AsyncMock()
+        with (
+            patch("main.load_model", side_effect=AssertionError("catalog loaded")),
+            patch("main.mock_model_activities", return_value="mock-activities") as mock,
+            patch("main.build_registry", return_value=MagicMock()) as registry,
+            patch("main.client"),
+            patch("main.Worker", return_value=MagicMock()),
+            patch("main.asyncio.Event", return_value=event),
+            patch("builtins.print"),
+        ):
+            await main.run_worker(args)
+        mock.assert_called_once_with()
+        registry.assert_called_once_with("mock-activities")
+
+    async def test_status_prints_pending_tool_calls_markdown(self) -> None:
         cadence_client = SimpleNamespace(
             query_workflow=AsyncMock(
-                return_value=main.WorkflowStatus(
-                    state="WAITING_FOR_DECISION",
-                    mode="mock",
-                    pending=(),
-                    outcome=None,
+                return_value=main.MarkdownQueryResponse(
+                    cadenceResponseType="formattedData",
+                    format="text/markdown",
+                    data="### `book_ride`\n- **Call ID:** `mock-ride-1`",
                 )
             ),
             close=AsyncMock(),
@@ -166,10 +183,10 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         cadence_client.query_workflow.assert_awaited_once_with(
             args.workflow_id,
             "",
-            main.STATUS_QUERY,
-            result_type=main.WorkflowStatus,
+            "get_interruptions",
+            result_type=main.MarkdownQueryResponse,
         )
-        self.assertIn("WAITING_FOR_DECISION", output.call_args.args[0])
+        self.assertIn("mock-ride-1", output.call_args.args[0])
         cadence_client.close.assert_awaited_once()
 
     async def test_decision_commands_send_call_id(self) -> None:
